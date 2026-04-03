@@ -1,6 +1,9 @@
+import type { z } from 'zod'
 import { publishedDatasetSchema } from '../schema'
 
-export function validatePublishedDataset(input: unknown) {
+export function validatePublishedDataset(
+  input: unknown,
+): z.infer<typeof publishedDatasetSchema> {
   const dataset = publishedDatasetSchema.parse(input)
 
   for (const resort of dataset.resorts) {
@@ -11,7 +14,7 @@ export function validatePublishedDataset(input: unknown) {
     ] as const
 
     for (const [field, value] of requiredSources) {
-      if (value !== undefined && !resort.field_sources[field]) {
+      if (value !== undefined && !Object.hasOwn(resort.field_sources, field)) {
         throw new Error(`Missing field source for published field: ${field}`)
       }
     }

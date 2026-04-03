@@ -15,3 +15,11 @@ it('lists selected resorts for comparison', () => {
   expect(screen.getByText('Verbier')).toBeInTheDocument()
   expect(screen.getByText('St Anton am Arlberg')).toBeInTheDocument()
 })
+
+it('shows an empty state when no resorts are selected', () => {
+  render(<ComparePanel resorts={[]} />)
+
+  expect(
+    screen.getByText('Select resorts to compare their size, price, and snow metrics.'),
+  ).toBeInTheDocument()
+})

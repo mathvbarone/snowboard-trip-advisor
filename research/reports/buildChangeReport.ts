@@ -3,23 +3,31 @@ type Change = {
   fields: string[]
 }
 
-function valueChanged(previous: unknown, next: unknown) {
+export type ChangeRecord = { id: string } & Record<string, unknown>
+
+type ChangeReport = {
+  json: {
+    changes: Change[]
+  }
+  markdown: string
+}
+
+function valueChanged(previous: unknown, next: unknown): boolean {
   return JSON.stringify(previous) !== JSON.stringify(next)
 }
 
 export function buildChangeReport(
-  previous: Array<Record<string, unknown>>,
-  next: Array<Record<string, unknown>>,
-) {
-  const previousById = new Map(previous.map((record) => [String(record.id), record]))
-  const nextIds = new Set(next.map((record) => String(record.id)))
+  previous: ChangeRecord[],
+  next: ChangeRecord[],
+): ChangeReport {
+  const previousById = new Map(previous.map((record) => [record.id, record]))
+  const nextIds = new Set(next.map((record) => record.id))
 
-  const changes = next.flatMap((record) => {
-    const id = String(record.id)
-    const prior = previousById.get(id)
+  const changes: Change[] = next.flatMap((record) => {
+    const prior = previousById.get(record.id)
 
     if (!prior) {
-      return [{ id, fields: ['created'] }]
+      return [{ id: record.id, fields: ['created'] }]
     }
 
     const fieldNames = new Set([
@@ -30,11 +38,11 @@ export function buildChangeReport(
       valueChanged(prior[key], record[key]),
     )
 
-    return fields.length ? [{ id, fields }] : []
+    return fields.length ? [{ id: record.id, fields }] : []
   })
-  const removals = previous
-    .filter((record) => !nextIds.has(String(record.id)))
-    .map((record) => ({ id: String(record.id), fields: ['removed'] }))
+  const removals: Change[] = previous
+    .filter((record) => !nextIds.has(record.id))
+    .map((record) => ({ id: record.id, fields: ['removed'] }))
 
   return {
     json: { changes: [...changes, ...removals] },

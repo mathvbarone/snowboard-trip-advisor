@@ -1,6 +1,22 @@
 import { describe, expect, it } from 'vitest'
 import { sampleResortSource } from '../__fixtures__/sampleResortSource'
-import { normalizeResort } from './normalizeResort'
+import { normalizeResort, type NormalizedResort } from './normalizeResort'
+
+const fieldSourcesShape = {
+  piste_km: {
+    source: 'https://example.com/piste-km',
+    retrieved_at: '2026-04-03T00:00:00Z',
+    confidence: 0.9,
+    notes: 'Official ski area size',
+  },
+  lift_pass_day_eur: {
+    source: 'https://example.com/lift-pass',
+    retrieved_at: '2026-04-03T00:00:00Z',
+    confidence: 0.8,
+  },
+} satisfies NormalizedResort['field_sources']
+
+void fieldSourcesShape
 
 describe('normalizeResort', () => {
   it('maps source fields into the canonical schema', () => {

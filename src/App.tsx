@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import type { JSX } from 'react'
 import Hero from './components/Hero'
 import FilterBar from './components/FilterBar'
 import ComparePanel from './components/ComparePanel'
@@ -8,14 +9,14 @@ import { parseCompareIds } from './lib/queryState'
 import './styles/tokens.css'
 import './styles/global.css'
 
-export default function App() {
+export default function App(): JSX.Element {
   const [search, setSearch] = useState('')
   const [resorts, setResorts] = useState<PublishedResort[]>([])
 
   useEffect(() => {
     let isActive = true
 
-    loadPublishedDataset().then((dataset) => {
+    void loadPublishedDataset().then((dataset) => {
       if (!isActive) {
         return
       }
@@ -23,20 +24,20 @@ export default function App() {
       setResorts(dataset.resorts)
     })
 
-    return () => {
+    return (): void => {
       isActive = false
     }
   }, [])
 
   const compareIds = useMemo(
-    () => parseCompareIds(window.location.search),
+    (): string[] => parseCompareIds(window.location.search),
     [],
   )
 
-  const filteredResorts = useMemo(() => {
+  const filteredResorts = useMemo((): PublishedResort[] => {
     const normalizedSearch = search.trim().toLowerCase()
 
-    if (!normalizedSearch) {
+    if (normalizedSearch.length === 0) {
       return resorts
     }
 
@@ -49,7 +50,7 @@ export default function App() {
   }, [resorts, search])
 
   const comparedResorts = useMemo(
-    () => resorts.filter((resort) => compareIds.includes(resort.id)),
+    (): PublishedResort[] => resorts.filter((resort) => compareIds.includes(resort.id)),
     [compareIds, resorts],
   )
 

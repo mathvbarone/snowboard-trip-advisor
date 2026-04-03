@@ -92,4 +92,56 @@ describe('computeScores', () => {
       },
     })
   })
+
+  it('classifies prices above the premium thresholds as luxury', () => {
+    const result = computeScores([
+      {
+        id: 'luxury-resort',
+        piste_km: 250,
+        vertical_drop_m: 1200,
+        lift_count: 30,
+        lift_pass_day_eur: 120,
+        estimated_trip_cost_3_days_eur: 1800,
+        snow_reliability_proxy: 0.7,
+        transfer_complexity: 0.5,
+      },
+    ])
+
+    expect(result.resorts[0].price_category_ski_only).toBe('Luxury')
+    expect(result.resorts[0].price_category_trip_cost).toBe('Luxury')
+  })
+
+  it('covers medium, large, and fallback size bucketing paths', () => {
+    const result = computeScores([
+      {
+        id: 'medium',
+        piste_km: 120,
+        vertical_drop_m: 0,
+        lift_count: 0,
+        lift_pass_day_eur: 60,
+        estimated_trip_cost_3_days_eur: 700,
+      },
+      {
+        id: 'large',
+        piste_km: 220,
+        vertical_drop_m: 2000,
+        lift_count: 30,
+        lift_pass_day_eur: 75,
+        estimated_trip_cost_3_days_eur: 1000,
+      },
+      {
+        id: 'fallback-small',
+        lift_pass_day_eur: 45,
+        estimated_trip_cost_3_days_eur: 450,
+      },
+    ])
+
+    expect(result.resorts[0].size_category_official).toBe('Medium')
+    expect(result.resorts[0].size_category_practical).toBe('Medium')
+    expect(result.resorts[1].size_category_official).toBe('Large')
+    expect(result.resorts[1].size_category_practical).toBe('Large')
+    expect(result.resorts[2].size_category_official).toBe('Small')
+    expect(result.resorts[2].size_category_practical).toBe('Small')
+    expect(result.resorts[2].size_score).toBe(0)
+  })
 })

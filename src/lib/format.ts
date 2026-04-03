@@ -1,4 +1,6 @@
-function createFormatter(options: Intl.NumberFormatOptions) {
+function createFormatter(
+  options: Intl.NumberFormatOptions,
+): Intl.NumberFormat {
   return new Intl.NumberFormat('en-IE', options)
 }
 
@@ -38,7 +40,13 @@ export function formatConfidence(value: number | null | undefined): string {
     return 'Unknown confidence'
   }
 
-  if (value >= 0.8) return 'High confidence'
-  if (value >= 0.5) return 'Medium confidence'
+  if (value >= 0.8) {
+    return 'High confidence'
+  }
+
+  if (value >= 0.5) {
+    return 'Medium confidence'
+  }
+
   return 'Low confidence'
 }

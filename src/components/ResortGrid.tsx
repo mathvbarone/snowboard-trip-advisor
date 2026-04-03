@@ -1,11 +1,12 @@
 import type { PublishedResort } from '../data/loadPublishedDataset'
 import ResortCard from './ResortCard'
+import type { JSX } from 'react'
 
 type Props = {
   resorts: PublishedResort[]
 }
 
-export default function ResortGrid({ resorts }: Props) {
+export default function ResortGrid({ resorts }: Props): JSX.Element {
   if (!resorts.length) {
     return (
       <section className="resort-grid resort-grid--empty" aria-label="Resort results">

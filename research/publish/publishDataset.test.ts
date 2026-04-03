@@ -25,76 +25,82 @@ describe('publishDataset', () => {
   it('writes a versioned dataset snapshot and keeps current.json stable', async () => {
     rootDir = await mkdtemp(path.join(os.tmpdir(), 'snowboard-trip-advisor-'))
 
-    await publishDataset(
-      {
-        version: '2026-04-03T01-45-00Z',
-        generated_at: '2026-04-03T01:45:00Z',
-        scoring: {
-          normalization: 'min-max',
-          boundaries: {
-            piste_km: { min: 70, max: 600 },
-            lift_pass_day_eur: { min: 40, max: 79 },
-          },
+    const dataset = {
+      version: '2026-04-03T01-45-00Z',
+      generated_at: '2026-04-03T01:45:00Z',
+      scoring: {
+        normalization: 'min-max',
+        boundaries: {
+          piste_km: { min: 70, max: 600 },
+          lift_pass_day_eur: { min: 40, max: 79 },
         },
-        resorts: [
-          {
-            id: 'verbier',
-            name: 'Verbier',
-            country: 'Switzerland',
-            region: 'Valais',
-            status: 'active',
-            overall_confidence: 0.9,
-            source_urls: ['https://www.verbier.ch/'],
-            field_sources: {
-              piste_km: {
-                source: 'https://www.verbier.ch/',
-                retrieved_at: '2026-04-03T01:45:00Z',
-                confidence: 0.9,
-              },
-              lift_pass_day_eur: {
-                source: 'https://www.verbier.ch/',
-                retrieved_at: '2026-04-03T01:45:00Z',
-                confidence: 0.9,
-              },
-              estimated_trip_cost_3_days_eur: {
-                source: 'https://www.verbier.ch/',
-                retrieved_at: '2026-04-03T01:45:00Z',
-                confidence: 0.8,
-              },
-            },
-            piste_km: 410,
-            lift_pass_day_eur: 79,
-            estimated_trip_cost_3_days_eur: 880,
-            size_category_official: 'Mega',
-            price_category_ski_only: 'Premium',
-            overall_score: 0.75,
-          },
-        ],
       },
-      rootDir,
+      resorts: [
+        {
+          id: 'verbier',
+          name: 'Verbier',
+          country: 'Switzerland',
+          region: 'Valais',
+          status: 'active',
+          overall_confidence: 0.9,
+          source_urls: ['https://www.verbier.ch/'],
+          field_sources: {
+            piste_km: {
+              source: 'https://www.verbier.ch/',
+              retrieved_at: '2026-04-03T01:45:00Z',
+              confidence: 0.9,
+            },
+            lift_pass_day_eur: {
+              source: 'https://www.verbier.ch/',
+              retrieved_at: '2026-04-03T01:45:00Z',
+              confidence: 0.9,
+            },
+            estimated_trip_cost_3_days_eur: {
+              source: 'https://www.verbier.ch/',
+              retrieved_at: '2026-04-03T01:45:00Z',
+              confidence: 0.8,
+            },
+          },
+          piste_km: 410,
+          lift_pass_day_eur: 79,
+          estimated_trip_cost_3_days_eur: 880,
+          size_category_official: 'Mega',
+          price_category_ski_only: 'Premium',
+          overall_score: 0.75,
+        },
+      ],
+    }
+
+    await publishDataset(dataset, rootDir)
+
+    const serializedDataset = JSON.stringify(dataset, null, 2)
+    const serializedManifest = JSON.stringify(
+      {
+        currentVersion: dataset.version,
+        currentPath: '/data/published/current.json',
+      },
+      null,
+      2,
     )
 
-    const dataset = JSON.parse(
-      await readFile(
-        path.join(
-          rootDir,
-          'data/published/versions/2026-04-03T01-45-00Z/dataset.json',
-        ),
-        'utf8',
+    const datasetContents = await readFile(
+      path.join(
+        rootDir,
+        'data/published/versions/2026-04-03T01-45-00Z/dataset.json',
       ),
+      'utf8',
     )
-    const manifest = JSON.parse(
-      await readFile(path.join(rootDir, 'data/published/manifest.json'), 'utf8'),
+    const manifestContents = await readFile(
+      path.join(rootDir, 'data/published/manifest.json'),
+      'utf8',
     )
-    const currentDataset = JSON.parse(
-      await readFile(path.join(rootDir, 'data/published/current.json'), 'utf8'),
+    const currentDatasetContents = await readFile(
+      path.join(rootDir, 'data/published/current.json'),
+      'utf8',
     )
 
-    expect(dataset.version).toBe('2026-04-03T01-45-00Z')
-    expect(currentDataset.version).toBe('2026-04-03T01-45-00Z')
-    expect(manifest).toEqual({
-      currentVersion: '2026-04-03T01-45-00Z',
-      currentPath: '/data/published/current.json',
-    })
+    expect(datasetContents).toBe(serializedDataset)
+    expect(currentDatasetContents).toBe(serializedDataset)
+    expect(manifestContents).toBe(serializedManifest)
   })
 })

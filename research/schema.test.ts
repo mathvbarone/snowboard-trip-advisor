@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { publishedDatasetSchema, resortRecordSchema } from './schema'
+import { sourceRegistry } from './sources/sourceRegistry'
+import { starterTargets } from './targets'
 
 describe('publishedDatasetSchema', () => {
   it('requires min-max boundaries in scoring metadata', () => {
@@ -106,5 +108,26 @@ describe('resortRecordSchema', () => {
     })
 
     expect(result.success).toBe(false)
+  })
+})
+
+describe('research seeds', () => {
+  it('exposes the starter target resort ids and source URLs', () => {
+    expect(starterTargets.map(({ id }) => id)).toEqual([
+      'three-valleys',
+      'st-anton',
+    ])
+    expect(starterTargets[0]).toMatchObject({
+      name: 'Les 3 Vallees',
+      source_urls: ['https://www.les3vallees.com/en/'],
+    })
+  })
+
+  it('exposes the source registry levels', () => {
+    expect(sourceRegistry).toEqual({
+      official: 1,
+      tourism: 2,
+      trusted_secondary: 3,
+    })
   })
 })

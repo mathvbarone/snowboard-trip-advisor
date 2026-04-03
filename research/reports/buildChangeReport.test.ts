@@ -31,4 +31,17 @@ describe('buildChangeReport', () => {
     expect(report.json.changes).toEqual([{ id: 'b', fields: ['removed'] }])
     expect(report.markdown).toContain('b: removed')
   })
+
+  it('reports resorts present in next but not in previous as created', () => {
+    const report = buildChangeReport(
+      [{ id: 'a', lift_pass_day_eur: 40 }],
+      [
+        { id: 'a', lift_pass_day_eur: 40 },
+        { id: 'b', lift_pass_day_eur: 80 },
+      ],
+    )
+
+    expect(report.json.changes).toEqual([{ id: 'b', fields: ['created'] }])
+    expect(report.markdown).toContain('b: created')
+  })
 })

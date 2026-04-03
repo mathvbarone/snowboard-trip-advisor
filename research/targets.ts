@@ -1,4 +1,12 @@
-export const starterTargets = [
+export type StarterTarget = {
+  id: string
+  name: string
+  country: string
+  region: string
+  source_urls: string[]
+}
+
+export const starterTargets: StarterTarget[] = [
   {
     id: 'three-valleys',
     name: 'Les 3 Vallees',

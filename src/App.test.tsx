@@ -1,9 +1,13 @@
 import { render, screen } from '@testing-library/react'
-import { vi } from 'vitest'
+import userEvent from '@testing-library/user-event'
+import { afterEach, beforeEach, vi } from 'vitest'
 import App from './App'
 import * as datasetModule from './data/loadPublishedDataset'
+import type { PublishedDataset } from './data/loadPublishedDataset'
 
-vi.spyOn(datasetModule, 'loadPublishedDataset').mockResolvedValue({
+const loadPublishedDatasetSpy = vi.spyOn(datasetModule, 'loadPublishedDataset')
+
+const publishedDataset: PublishedDataset = {
   version: '2026-04-03T01-45-00Z',
   generated_at: '2026-04-03T01:45:00Z',
   scoring: { normalization: 'min-max', boundaries: {} },
@@ -29,15 +33,64 @@ vi.spyOn(datasetModule, 'loadPublishedDataset').mockResolvedValue({
       field_sources: {},
     },
   ],
+}
+
+beforeEach(() => {
+  window.history.replaceState({}, '', '/')
+  loadPublishedDatasetSpy.mockResolvedValue(publishedDataset)
 })
 
-it('preserves the discovery UI while rendering published resorts', async () => {
+afterEach(() => {
+  window.history.replaceState({}, '', '/')
+  loadPublishedDatasetSpy.mockReset()
+})
+
+it('preserves the discovery UI while rendering published resorts and filtering them', async () => {
+  window.history.replaceState({}, '', '/?compare=st-anton')
   render(<App />)
+  const user = userEvent.setup()
 
   expect(
     await screen.findByRole('searchbox', { name: /search resorts/i }),
   ).toBeInTheDocument()
   expect(await screen.findByText(/compare up to four resorts/i)).toBeInTheDocument()
-  expect(await screen.findByText('Les 3 Vallees')).toBeInTheDocument()
-  expect(await screen.findByText('St Anton am Arlberg')).toBeInTheDocument()
+
+  await user.type(screen.getByRole('searchbox', { name: /search resorts/i }), 'france')
+
+  const comparePanel = screen.getByRole('region', { name: /compare resorts/i })
+  const resultsPanel = screen.getByRole('region', { name: /resort results/i })
+
+  expect(comparePanel).toHaveTextContent('St Anton am Arlberg')
+  expect(resultsPanel).toHaveTextContent('Les 3 Vallees')
+  expect(resultsPanel).not.toHaveTextContent('St Anton am Arlberg')
+})
+
+it('ignores a late dataset resolution after unmounting', async () => {
+  const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+  const resortsGetter = vi.fn(() => {
+    throw new Error('resorts getter accessed after unmount')
+  })
+  let resolveDataset!: (value: PublishedDataset) => void
+  const pendingDataset = new Promise<PublishedDataset>((resolve) => {
+    resolveDataset = resolve
+  })
+  const lateDataset = {
+    ...publishedDataset,
+    get resorts() {
+      return resortsGetter()
+    },
+  } as PublishedDataset
+
+  loadPublishedDatasetSpy.mockReturnValueOnce(pendingDataset)
+
+  const { unmount } = render(<App />)
+  unmount()
+
+  resolveDataset(lateDataset)
+  await pendingDataset
+  await Promise.resolve()
+
+  expect(resortsGetter).not.toHaveBeenCalled()
+  expect(consoleErrorSpy).not.toHaveBeenCalled()
+  consoleErrorSpy.mockRestore()
 })

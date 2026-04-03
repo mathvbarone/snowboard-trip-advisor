@@ -2,11 +2,14 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { validatePublishedDataset } from '../validate/validatePublishedDataset'
 
-export function buildVersionId(date: Date) {
+export function buildVersionId(date: Date): string {
   return date.toISOString().replace(/:/g, '-').replace(/\.\d{3}Z$/, 'Z')
 }
 
-export async function publishDataset(dataset: unknown, rootDir: string) {
+export async function publishDataset(
+  dataset: unknown,
+  rootDir: string,
+): Promise<void> {
   const validated = validatePublishedDataset(dataset)
   const datasetPath = path.join(
     rootDir,
