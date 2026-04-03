@@ -13,6 +13,29 @@ npm run setup
 
 `npm run setup` installs the pre-commit hook from `scripts/pre-commit` into `.git/hooks/`. The hook runs the full quality gate on every commit.
 
+## Project Intent
+
+Snowboard Trip Advisor is intended to become a decision-support marketplace for a snowboard trip organizer planning for a group.
+
+The primary product goal is to help that organizer rank and shortlist resorts. The main comparison criteria are:
+
+- riding quality first
+- resort size
+- current snow conditions
+- lodging cost in the resort region
+
+The system should be semi-opinionated. It should surface rankings and recommendations, but the reasoning behind them must remain inspectable.
+
+Phase 1 is discovery-only and should route users to external providers for booking decisions. Future phases may expand toward live deal visibility.
+
+Durable resort intelligence and live market signals must remain distinct in both architecture and documentation. They have different freshness, provenance, validation, and publishing requirements.
+
+## Documentation Discipline
+
+- `README.md` is the strategic product document for this repository and must stay aligned with the intended product direction.
+- Any PR that introduces meaningful product-facing functionality must evaluate whether `README.md` needs an update.
+- Any PR that changes product scope, user workflow, system boundaries, or roadmap direction must update `README.md` in the same branch.
+- Treat README drift as a documentation bug, not optional cleanup.
 ## Quality Gate
 
 The quality gate is a hard requirement. A task is not done until `npm run qa` passes cleanly.
@@ -48,7 +71,7 @@ No implementation code is written without a failing test first.
 
 ## Code Rules
 
-These rules are enforced by ESLint.
+Several of these rules are enforced by ESLint.
 
 TypeScript:
 
@@ -93,7 +116,5 @@ React:
 
 ## Excluded From Coverage
 
-- `src/main.tsx`: React DOM entry point.
-- `src/test/**`: test setup files.
-- `research/sources/fetchText.ts`: pure network I/O with no unit-test seam.
-- `config/scoring.ts`: exported constants with no branching logic.
+- Treat `vite.config.ts` as the source of truth for coverage exclusions; do not mirror the exact exclusion list here.
+- If coverage exclusions change, update the config and keep this note aligned at a high level only.

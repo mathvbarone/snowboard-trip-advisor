@@ -1,38 +1,71 @@
 # Snowboard Trip Advisor
 
-Snowboard Trip Advisor is a standalone TypeScript app for researching and comparing European ski resorts. It has two main halves:
+Snowboard Trip Advisor is being built as a decision-support marketplace for a snowboard trip organizer planning a group trip. The product direction is to help that organizer compare resorts using an opinionated decision model, while keeping the underlying reasoning visible instead of turning recommendations into a black box.
 
-- a public-facing frontend that reads a published dataset and lets users search and compare resorts
-- a research pipeline that normalizes resort data, scores it, reports changes, and publishes versioned dataset snapshots
+The intended comparison model emphasizes riding quality, then resort size, current snow conditions, and lodging cost in the resort region. That model is part of the product direction, not a claim about shipped scoring behavior. The long-term direction is to combine durable resort intelligence with live market signals. Durable intelligence covers facts that do not change quickly, such as terrain, size, and structural resort attributes. Live market signals cover near-real-time snow and lodging conditions that help surface better trip opportunities. Phase 1 is intentionally discovery-only and keeps users on external booking paths rather than trying to become a booking engine.
 
-## What The System Does
+## Who It Is For
 
-At a high level, the system works like this:
+This is for the person planning a snowboard trip for a group, not for someone looking for a generic travel search site.
 
-1. Research data is collected or seeded into canonical resort records.
-2. Resort records are normalized into a shared schema with source provenance.
-3. Objective metrics are scored and categorized for size and price.
-4. The dataset is validated and published into `data/published/`.
-5. The frontend loads `data/published/current.json` and renders the discovery UI.
+The primary user wants to:
 
-The first release is intentionally local-first. Research commands are meant to run on a developer machine, and the frontend reads local published JSON rather than hitting a backend API.
+- compare resorts quickly
+- narrow a long list down to a short shortlist
+- understand why one resort is ranked above another
+- balance riding quality with practical trip cost
+- keep the booking step outside the product for now
 
-## Current State
+## Product Direction
 
-The codebase includes:
+The product is semi-opinionated by design. It should guide the user toward a sensible shortlist, but it should still show the underlying reasoning clearly enough that the user can disagree with the recommendation.
 
-- a working frontend app
+The intended decision model is:
+
+1. Riding quality first
+2. Resort size second
+3. Current snow conditions third
+4. Lodging cost in the resort region fourth
+
+The future roadmap should preserve the distinction between:
+
+- durable resort intelligence
+- live market signals
+
+That distinction matters because the product should not blur structural resort facts with temporary market conditions. The long-term goal is to combine both so the organizer can rank resorts and see live deal visibility without losing the explanation layer.
+
+## Current State Today
+
+The current implementation is local-first and discovery-focused.
+
+What exists today:
+
+- a frontend that reads published JSON snapshots
+- a research pipeline that normalizes resort data, scores it, reports changes, and publishes versioned snapshots
 - a shared Zod schema for published and research records
-- normalization logic
-- score and category computation
-- change reporting
-- versioned dataset publishing
-- a CLI command parser and dispatcher
+- CLI command parsing for research workflows
+
+What does not exist yet:
+
+- live API ingestion
+- a backend service
+- direct booking or checkout flows
+- a complete end-to-end fetch -> normalize -> score -> publish orchestration path in the CLI
 
 Important implementation note:
 
-- The CLI currently recognizes `refresh` and `publish` commands and returns structured command output, but it is not yet wired into a full end-to-end fetch -> normalize -> score -> publish orchestration flow.
-- The lower-level research modules exist and are test-covered, but the top-level CLI is still a lightweight command layer rather than a complete production workflow runner.
+- Published data comes from `data/published/current.json`, not from live APIs.
+- The lower-level research modules are present and test-covered, but the top-level CLI is still a lightweight command layer.
+
+## How The System Works
+
+At a high level, the system works like this:
+
+1. Research data is collected or seeded into source-shaped records.
+2. Source-shaped records are normalized into canonical resort records with source provenance.
+3. Objective metrics are scored and categorized for size and price.
+4. The dataset is validated and published into `data/published/`.
+5. The frontend loads `data/published/current.json` and renders the discovery UI.
 
 ## Project Structure
 
@@ -89,7 +122,7 @@ Source-shaped data starts as a record with:
 
 An example fixture lives in:
 
-- [sampleResortSource.ts](/home/math/Projects/snowboard-trip-advisor/research/__fixtures__/sampleResortSource.ts)
+- [sampleResortSource.ts](research/__fixtures__/sampleResortSource.ts)
 
 ### 2. Normalization
 
@@ -101,7 +134,7 @@ The normalizer:
 
 Key file:
 
-- [normalizeResort.ts](/home/math/Projects/snowboard-trip-advisor/research/normalize/normalizeResort.ts)
+- [normalizeResort.ts](research/normalize/normalizeResort.ts)
 
 ### 3. Scoring And Categories
 
@@ -125,8 +158,8 @@ It also computes publish-time min-max boundaries for:
 
 Key files:
 
-- [scoring.ts](/home/math/Projects/snowboard-trip-advisor/config/scoring.ts)
-- [computeScores.ts](/home/math/Projects/snowboard-trip-advisor/research/scoring/computeScores.ts)
+- [scoring.ts](config/scoring.ts)
+- [computeScores.ts](research/scoring/computeScores.ts)
 
 ### 4. Validation
 
@@ -138,7 +171,7 @@ Before publishing, the dataset is checked for:
 
 Key file:
 
-- [validatePublishedDataset.ts](/home/math/Projects/snowboard-trip-advisor/research/validate/validatePublishedDataset.ts)
+- [validatePublishedDataset.ts](research/validate/validatePublishedDataset.ts)
 
 ### 5. Publishing
 
@@ -154,7 +187,7 @@ Timestamp versions use the format:
 
 Key file:
 
-- [publishDataset.ts](/home/math/Projects/snowboard-trip-advisor/research/publish/publishDataset.ts)
+- [publishDataset.ts](research/publish/publishDataset.ts)
 
 ### 6. Frontend Consumption
 
@@ -171,16 +204,16 @@ Compare state is URL-based via:
 
 Key files:
 
-- [App.tsx](/home/math/Projects/snowboard-trip-advisor/src/App.tsx)
-- [loadPublishedDataset.ts](/home/math/Projects/snowboard-trip-advisor/src/data/loadPublishedDataset.ts)
-- [queryState.ts](/home/math/Projects/snowboard-trip-advisor/src/lib/queryState.ts)
+- [App.tsx](src/App.tsx)
+- [loadPublishedDataset.ts](src/data/loadPublishedDataset.ts)
+- [queryState.ts](src/lib/queryState.ts)
 
 ## How To Run The Frontend
 
 ### Install Dependencies
 
 ```bash
-cd /home/math/Projects/snowboard-trip-advisor
+cd /path/to/snowboard-trip-advisor
 npm install
 ```
 
@@ -253,71 +286,8 @@ npm run research -- publish latest
 
 The current implementation is in:
 
-- [cli.ts](/home/math/Projects/snowboard-trip-advisor/research/cli.ts)
+- [cli.ts](research/cli.ts)
 
 Important limitation:
 
 - These commands are currently dispatch scaffolding only. They do not yet orchestrate the full fetch/normalize/score/publish workflow automatically.
-
-## How Research Is Intended To Work
-
-The intended local research workflow is:
-
-1. Identify a source record or target resort list.
-2. Normalize source data into canonical resort records.
-3. Compute categories and scores.
-4. Build change reports against the current published dataset.
-5. Validate the result.
-6. Publish a new versioned snapshot and refresh `current.json`.
-
-Today, this workflow is implemented as lower-level modules rather than one top-level CLI command.
-
-That means the research layer is usable for development and testing, but still needs orchestration glue if you want one command to perform the whole refresh pipeline.
-
-## Main Files By Responsibility
-
-### Discovery UI
-
-- [Hero.tsx](/home/math/Projects/snowboard-trip-advisor/src/components/Hero.tsx)
-- [FilterBar.tsx](/home/math/Projects/snowboard-trip-advisor/src/components/FilterBar.tsx)
-- [ComparePanel.tsx](/home/math/Projects/snowboard-trip-advisor/src/components/ComparePanel.tsx)
-- [ResortGrid.tsx](/home/math/Projects/snowboard-trip-advisor/src/components/ResortGrid.tsx)
-- [ResortCard.tsx](/home/math/Projects/snowboard-trip-advisor/src/components/ResortCard.tsx)
-- [ResortDetailDrawer.tsx](/home/math/Projects/snowboard-trip-advisor/src/components/ResortDetailDrawer.tsx)
-
-### Data Contracts And Pipeline
-
-- [schema.ts](/home/math/Projects/snowboard-trip-advisor/research/schema.ts)
-- [normalizeResort.ts](/home/math/Projects/snowboard-trip-advisor/research/normalize/normalizeResort.ts)
-- [computeScores.ts](/home/math/Projects/snowboard-trip-advisor/research/scoring/computeScores.ts)
-- [buildChangeReport.ts](/home/math/Projects/snowboard-trip-advisor/research/reports/buildChangeReport.ts)
-- [validatePublishedDataset.ts](/home/math/Projects/snowboard-trip-advisor/research/validate/validatePublishedDataset.ts)
-- [publishDataset.ts](/home/math/Projects/snowboard-trip-advisor/research/publish/publishDataset.ts)
-
-## Testing
-
-Run the full test suite:
-
-```bash
-npm test
-```
-
-Run the production build:
-
-```bash
-npm run build
-```
-
-Run a focused test file:
-
-```bash
-npm test -- --run src/App.test.tsx
-```
-
-## Notes And Caveats
-
-- Research runs are local-first in this release.
-- The frontend depends on `data/published/current.json`.
-- Compare state is shareable via the `?compare=` query parameter.
-- The CLI is implemented, but its dispatch is still a thin command layer rather than a full orchestration entrypoint.
-- The current published dataset is seeded example data, not a complete live resort catalog.
