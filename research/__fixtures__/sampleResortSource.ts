@@ -10,12 +10,14 @@ export const sampleResortSource = {
       source: 'https://www.les3vallees.com/en/ski-area/',
       retrieved_at: '2026-04-03T00:00:00Z',
       confidence: 0.95,
+      notes: 'Official ski area size',
     },
     lift_pass_day_eur: {
       value: 79,
       source: 'https://www.les3vallees.com/en/lift-pass/',
       retrieved_at: '2026-04-03T00:00:00Z',
       confidence: 0.9,
+      notes: 'Adult day pass',
     },
   },
 }

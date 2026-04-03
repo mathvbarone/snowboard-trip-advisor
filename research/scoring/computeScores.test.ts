@@ -53,4 +53,43 @@ describe('computeScores', () => {
       result.resorts[1].overall_score,
     )
   })
+
+  it('does not treat missing price fields as free resorts', () => {
+    const result = computeScores([
+      {
+        id: 'missing-price',
+        piste_km: 200,
+        vertical_drop_m: 1000,
+        lift_count: 20,
+        snow_reliability_proxy: 0.6,
+        transfer_complexity: 0.4,
+      },
+      {
+        id: 'priced',
+        piste_km: 200,
+        vertical_drop_m: 1000,
+        lift_count: 20,
+        lift_pass_day_eur: 50,
+        estimated_trip_cost_3_days_eur: 600,
+        snow_reliability_proxy: 0.6,
+        transfer_complexity: 0.4,
+      },
+    ])
+
+    expect(result.resorts[0].value_score).toBe(0)
+    expect(result.resorts[0].price_category_ski_only).toBeUndefined()
+    expect(result.resorts[0].price_category_trip_cost).toBeUndefined()
+    expect(result.resorts[1].value_score).toBeGreaterThanOrEqual(0)
+  })
+
+  it('returns safe boundaries for an empty resort list', () => {
+    expect(computeScores([])).toEqual({
+      resorts: [],
+      boundaries: {
+        piste_km: { min: 0, max: 0 },
+        lift_pass_day_eur: { min: 0, max: 0 },
+        estimated_trip_cost_3_days_eur: { min: 0, max: 0 },
+      },
+    })
+  })
 })

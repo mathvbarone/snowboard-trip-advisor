@@ -7,14 +7,20 @@ export const statusSchema = z.enum([
   'closed',
 ])
 
+const isoDatetimeSchema = z.string().datetime({ offset: true })
+const nonNegativeNumberSchema = z.number().nonnegative()
+
 export const boundarySchema = z.object({
-  min: z.number(),
-  max: z.number(),
+  min: nonNegativeNumberSchema,
+  max: nonNegativeNumberSchema,
+}).refine(({ min, max }) => min <= max, {
+  message: 'min must be less than or equal to max',
+  path: ['max'],
 })
 
 export const fieldSourceSchema = z.object({
   source: z.string().url(),
-  retrieved_at: z.string(),
+  retrieved_at: isoDatetimeSchema,
   confidence: z.number().min(0).max(1),
   notes: z.string().optional(),
 })
@@ -28,13 +34,13 @@ export const resortRecordSchema = z.object({
   overall_confidence: z.number().min(0).max(1),
   source_urls: z.array(z.string().url()),
   field_sources: z.record(fieldSourceSchema),
-  piste_km: z.number().optional(),
-  lift_count: z.number().optional(),
-  vertical_drop_m: z.number().optional(),
-  base_elevation_m: z.number().optional(),
-  top_elevation_m: z.number().optional(),
-  lift_pass_day_eur: z.number().optional(),
-  estimated_trip_cost_3_days_eur: z.number().optional(),
+  piste_km: nonNegativeNumberSchema.optional(),
+  lift_count: nonNegativeNumberSchema.optional(),
+  vertical_drop_m: nonNegativeNumberSchema.optional(),
+  base_elevation_m: nonNegativeNumberSchema.optional(),
+  top_elevation_m: nonNegativeNumberSchema.optional(),
+  lift_pass_day_eur: nonNegativeNumberSchema.optional(),
+  estimated_trip_cost_3_days_eur: nonNegativeNumberSchema.optional(),
   glacier_access: z.boolean().optional(),
   snow_reliability_proxy: z.number().min(0).max(1).optional(),
   transfer_complexity: z.number().min(0).max(1).optional(),
@@ -46,16 +52,16 @@ export const resortRecordSchema = z.object({
   price_category_trip_cost: z
     .enum(['Budget', 'Midrange', 'Premium', 'Luxury'])
     .optional(),
-  size_score: z.number().optional(),
-  value_score: z.number().optional(),
-  snow_score: z.number().optional(),
-  access_score: z.number().optional(),
-  overall_score: z.number().optional(),
+  size_score: nonNegativeNumberSchema.optional(),
+  value_score: nonNegativeNumberSchema.optional(),
+  snow_score: nonNegativeNumberSchema.optional(),
+  access_score: nonNegativeNumberSchema.optional(),
+  overall_score: nonNegativeNumberSchema.optional(),
 })
 
 export const publishedDatasetSchema = z.object({
   version: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z$/),
-  generated_at: z.string(),
+  generated_at: isoDatetimeSchema,
   scoring: z.object({
     normalization: z.literal('min-max'),
     boundaries: z.record(boundarySchema),

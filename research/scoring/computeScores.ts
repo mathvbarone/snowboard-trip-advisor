@@ -6,18 +6,27 @@ import {
 } from '../../config/scoring'
 
 function minMax(values: number[]) {
+  if (values.length === 0) {
+    return { min: 0, max: 0 }
+  }
+
   return { min: Math.min(...values), max: Math.max(...values) }
 }
 
 function normalize(
-  value: number,
+  value: number | undefined,
   boundary: { min: number; max: number },
   invert = false,
 ) {
+  if (value === undefined) return 0
   if (boundary.max === boundary.min) return 1
 
   const raw = (value - boundary.min) / (boundary.max - boundary.min)
   return invert ? 1 - raw : raw
+}
+
+function definedNumbers(values: Array<number | undefined>) {
+  return values.filter((value): value is number => value !== undefined)
 }
 
 function sizeBucket(
@@ -40,6 +49,14 @@ function priceBucket(
   return 'Luxury'
 }
 
+function priceBucketOptional(
+  value: number | undefined,
+  thresholds: { budget: number; midrange: number; premium: number },
+) {
+  if (value === undefined) return undefined
+  return priceBucket(value, thresholds)
+}
+
 export function computeScores<
   T extends {
     piste_km?: number
@@ -51,12 +68,12 @@ export function computeScores<
     transfer_complexity?: number
   },
 >(resorts: T[]) {
-  const pisteBoundary = minMax(resorts.map((resort) => resort.piste_km ?? 0))
+  const pisteBoundary = minMax(definedNumbers(resorts.map((resort) => resort.piste_km)))
   const skiPriceBoundary = minMax(
-    resorts.map((resort) => resort.lift_pass_day_eur ?? 0),
+    definedNumbers(resorts.map((resort) => resort.lift_pass_day_eur)),
   )
   const tripBoundary = minMax(
-    resorts.map((resort) => resort.estimated_trip_cost_3_days_eur ?? 0),
+    definedNumbers(resorts.map((resort) => resort.estimated_trip_cost_3_days_eur)),
   )
 
   const scored = resorts.map((resort) => {
@@ -65,11 +82,11 @@ export function computeScores<
       (resort.vertical_drop_m ?? 0) / 100 +
       (resort.lift_count ?? 0)
 
-    const sizeScore = normalize(resort.piste_km ?? 0, pisteBoundary)
+    const sizeScore = normalize(resort.piste_km, pisteBoundary)
     const valueScore =
-      normalize(resort.lift_pass_day_eur ?? 0, skiPriceBoundary, true) * 0.5 +
+      normalize(resort.lift_pass_day_eur, skiPriceBoundary, true) * 0.5 +
       normalize(
-        resort.estimated_trip_cost_3_days_eur ?? 0,
+        resort.estimated_trip_cost_3_days_eur,
         tripBoundary,
         true,
       ) *
@@ -87,12 +104,12 @@ export function computeScores<
         practicalSizeValue,
         sizeThresholds.practical,
       ),
-      price_category_ski_only: priceBucket(
-        resort.lift_pass_day_eur ?? 0,
+      price_category_ski_only: priceBucketOptional(
+        resort.lift_pass_day_eur,
         skiOnlyPriceThresholds,
       ),
-      price_category_trip_cost: priceBucket(
-        resort.estimated_trip_cost_3_days_eur ?? 0,
+      price_category_trip_cost: priceBucketOptional(
+        resort.estimated_trip_cost_3_days_eur,
         tripPriceThresholds,
       ),
       size_score: sizeScore,
