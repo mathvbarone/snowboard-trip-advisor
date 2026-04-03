@@ -1,9 +1,11 @@
+import type { JSX } from 'react'
+
 type Props = {
   search: string
   onSearchChange: (value: string) => void
 }
 
-export default function FilterBar({ search, onSearchChange }: Props) {
+export default function FilterBar({ search, onSearchChange }: Props): JSX.Element {
   return (
     <section className="filter-bar" aria-label="Resort filters">
       <label className="filter-bar__field">
@@ -12,7 +14,9 @@ export default function FilterBar({ search, onSearchChange }: Props) {
           aria-label="Search resorts"
           type="search"
           value={search}
-          onChange={(event) => onSearchChange(event.target.value)}
+          onChange={(event) => {
+            onSearchChange(event.target.value)
+          }}
           placeholder="Verbier, St Anton, Les 3 Vallees"
         />
       </label>

@@ -1,3 +1,5 @@
+import type { JSX } from 'react'
+
 type CompareResort = {
   id: string
   name: string
@@ -7,7 +9,7 @@ type Props = {
   resorts: CompareResort[]
 }
 
-export default function ComparePanel({ resorts }: Props) {
+export default function ComparePanel({ resorts }: Props): JSX.Element {
   return (
     <section className="compare-panel" aria-label="Compare resorts">
       <header className="compare-panel__header">

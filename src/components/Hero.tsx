@@ -1,4 +1,6 @@
-export default function Hero() {
+import type { JSX } from 'react'
+
+export default function Hero(): JSX.Element {
   return (
     <section className="hero" aria-label="Snowboard Trip Advisor introduction">
       <p className="eyebrow">Europe resort research</p>

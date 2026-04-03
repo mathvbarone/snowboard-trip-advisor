@@ -1,11 +1,12 @@
 import type { PublishedResort } from '../data/loadPublishedDataset'
 import { formatConfidence, formatEuro, formatInteger } from '../lib/format'
+import type { JSX } from 'react'
 
 type Props = {
   resort: PublishedResort
 }
 
-export default function ResortCard({ resort }: Props) {
+export default function ResortCard({ resort }: Props): JSX.Element {
   return (
     <article className="resort-card" data-resort-id={resort.id}>
       <header className="resort-card__header">

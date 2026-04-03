@@ -15,23 +15,44 @@ export type SourceRecord = {
   fields: Record<string, SourceField>
 }
 
-function requireField(source: SourceRecord, key: string) {
-  const field = source.fields[key]
+export type NormalizedResort = {
+  id: string
+  name: string
+  country: string
+  region: string
+  status: 'active'
+  overall_confidence: number
+  source_urls: string[]
+  field_sources: {
+    piste_km: Omit<SourceField, 'value'>
+    lift_pass_day_eur: Omit<SourceField, 'value'>
+  }
+  piste_km: number
+  lift_pass_day_eur: number
+}
 
-  if (!field) {
+function requireField(source: SourceRecord, key: string): SourceField {
+  if (!Object.hasOwn(source.fields, key)) {
     throw new Error(`Missing required field: ${key}`)
   }
 
-  return field
+  return source.fields[key]
 }
 
-function parseNumericField(source: SourceRecord, key: string) {
+function parseNumericField(
+  source: SourceRecord,
+  key: string,
+): { field: SourceField; value: number } {
   const field = requireField(source, key)
-  if (typeof field.value === 'string' && field.value.trim() === '') {
-    throw new Error(`Invalid numeric value for field: ${key}`)
+
+  if (typeof field.value === 'string') {
+    if (field.value.trim() === '') {
+      throw new Error(`Invalid numeric value for field: ${key}`)
+    }
   }
 
-  const parsed = typeof field.value === 'number' ? field.value : Number(field.value)
+  const parsed =
+    typeof field.value === 'number' ? field.value : Number(field.value)
 
   if (!Number.isFinite(parsed)) {
     throw new Error(`Invalid numeric value for field: ${key}`)
@@ -40,7 +61,7 @@ function parseNumericField(source: SourceRecord, key: string) {
   return { field, value: parsed }
 }
 
-export function normalizeResort(source: SourceRecord) {
+export function normalizeResort(source: SourceRecord): NormalizedResort {
   const pisteKm = parseNumericField(source, 'piste_km')
   const liftPassDay = parseNumericField(source, 'lift_pass_day_eur')
 

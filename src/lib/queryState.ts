@@ -1,6 +1,6 @@
 const MAX_COMPARE_IDS = 4
 
-function normalizeIds(ids: string[]) {
+function normalizeIds(ids: string[]): string[] {
   return Array.from(
     new Set(ids.map((id) => id.trim()).filter(Boolean)),
   ).slice(0, MAX_COMPARE_IDS)

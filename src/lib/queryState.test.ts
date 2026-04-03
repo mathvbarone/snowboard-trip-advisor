@@ -17,4 +17,11 @@ describe('queryState', () => {
       parseCompareIds('?compare=verbier,verbier,st-anton,tignes,zermatt'),
     ).toEqual(['verbier', 'st-anton', 'tignes', 'zermatt'])
   })
+
+  it('serializes an empty compare list as an empty query string', () => {
+    expect(serializeCompareIds([])).toBe('')
+    expect(parseCompareIds('')).toEqual([])
+    expect(parseCompareIds('?other=value')).toEqual([])
+    expect(parseCompareIds('?compare=a,b,a,c,d,e')).toEqual(['a', 'b', 'c', 'd'])
+  })
 })

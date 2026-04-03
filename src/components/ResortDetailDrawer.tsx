@@ -1,11 +1,12 @@
 import type { PublishedResort } from '../data/loadPublishedDataset'
 import { formatConfidence, formatEuro, formatInteger } from '../lib/format'
+import type { JSX } from 'react'
 
 type Props = {
   resort: PublishedResort | null
 }
 
-export default function ResortDetailDrawer({ resort }: Props) {
+export default function ResortDetailDrawer({ resort }: Props): JSX.Element | null {
   if (!resort) {
     return null
   }

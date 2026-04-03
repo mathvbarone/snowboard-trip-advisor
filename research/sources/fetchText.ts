@@ -4,7 +4,7 @@ export async function fetchText(url: string): Promise<string> {
   })
 
   if (!response.ok) {
-    throw new Error(`Fetch failed for ${url}: ${response.status}`)
+    throw new Error(`Fetch failed for ${url}: ${String(response.status)}`)
   }
 
   return await response.text()
