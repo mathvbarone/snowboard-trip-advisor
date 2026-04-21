@@ -24,6 +24,12 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     uses: ./.github/workflows/image.yml
     secrets: inherit
+    # Reusable-workflow callers must grant AT LEAST the permissions the
+    # callee declares. image.yml needs id-token + attestations on top of
+    # contents/packages to do cosign keyless signing and push SLSA + SBOM
+    # attestations as OCI referrers.
     permissions:
       contents: read
       packages: write
+      id-token: write
+      attestations: write
