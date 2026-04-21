@@ -18,3 +18,12 @@ concurrency:
 jobs:
   quality-gate:
     uses: ./.github/workflows/quality-gate.yml
+
+  image:
+    needs: quality-gate
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/image.yml
+    secrets: inherit
+    permissions:
+      contents: read
+      packages: write
