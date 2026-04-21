@@ -4,8 +4,6 @@ coverage
 .git
 .github
 docs
-research
-data/published
 *.log
 .DS_Store
 .env*
