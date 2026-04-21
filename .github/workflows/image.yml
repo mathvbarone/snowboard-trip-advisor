@@ -1,0 +1,243 @@
+name: Build & Push Image
+
+# Produces the production release artifact:
+#   1. Multi-arch (linux/amd64 + linux/arm64) nginx image built from the repo.
+#   2. Pushed to GHCR as ghcr.io/<owner>/snowboard-trip-advisor with tags
+#      :main and :sha-<short>. The immutable manifest-list digest is the
+#      artifact the homelab repo pins to in its Deployment overlay.
+#   3. Scanned with Trivy — HIGH/CRITICAL findings in OS or app layers block
+#      the release per docs/security/release-policy.md.
+#   4. SBOM generated (SPDX JSON) via Syft, uploaded as a CI artifact AND
+#      attached to the image as a signed OCI attestation.
+#   5. Signed keyless via cosign (Sigstore Fulcio OIDC — no long-lived keys).
+#      Signs the manifest list AND each per-arch child via --recursive so the
+#      homelab verify workflow can verify whichever platform it deploys.
+#   6. Build provenance attestation (SLSA v1 via GitHub's attest action)
+#      pushed to the registry alongside the image. Binds the image digest to
+#      this repo + commit SHA + this workflow file.
+#   7. Release-contract JSON emitted per policy/release-contract.schema.json
+#      in the homelab repo — uploaded as a workflow artifact so the homelab
+#      promotion flow can consume it.
+#
+# IDENTITY & TRUST:
+#   - id-token: write         → OIDC token for cosign keyless + attest actions.
+#   - packages: write         → push image + attestations to GHCR.
+#   - attestations: write     → write attestation records into GitHub.
+#   - No long-lived secrets; GITHUB_TOKEN is scoped to this workflow run.
+#
+# The workflow runs only on main branch pushes (belt-and-suspenders alongside
+# the caller's `if:`). PR runs and non-main refs never publish.
+
+on:
+  workflow_call:
+    outputs:
+      image_digest:
+        description: "Immutable sha256 digest of the multi-arch manifest list"
+        value: ${{ jobs.image.outputs.image_digest }}
+      image_repository:
+        description: "Fully-qualified GHCR image repository"
+        value: ${{ jobs.image.outputs.image_repository }}
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  image:
+    name: build-sign-attest
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    outputs:
+      image_digest: ${{ steps.build.outputs.digest }}
+      image_repository: ${{ steps.repo.outputs.repository }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      # QEMU is required for arm64 cross-build on an amd64 runner.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The repository_owner context value is Mixed-Case in GH, but OCI
+      # registries require lowercase. Compute once and reuse.
+      - name: Compute lowercase image repository
+        id: repo
+        run: |
+          owner="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          echo "repository=ghcr.io/${owner}/snowboard-trip-advisor" >> "$GITHUB_OUTPUT"
+
+      - name: Derive image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.repo.outputs.repository }}
+          tags: |
+            type=ref,event=branch
+            type=sha,format=short,prefix=sha-
+
+      # provenance/sbom: false — we generate these explicitly below via
+      # actions/attest-build-provenance and anchore/sbom-action so the result
+      # is signed in Sigstore Rekor and verifiable by cosign, matching what
+      # the homelab verify-image workflow expects.
+      - name: Build and push (multi-arch)
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+          sbom: false
+
+      # Trivy: HIGH + CRITICAL block the release; --ignore-unfixed hides
+      # noise we cannot act on. vuln-type covers BOTH OS packages (alpine
+      # layer) and application libraries (node_modules baked into the build
+      # stage plus anything pulled into /usr/share/nginx/html).
+      - name: Scan image with Trivy (linux/amd64)
+        uses: aquasecurity/trivy-action@0.28.0
+        env:
+          TRIVY_PLATFORM: linux/amd64
+        with:
+          image-ref: ${{ steps.repo.outputs.repository }}@${{ steps.build.outputs.digest }}
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: os,library
+          format: table
+
+      - name: Scan image with Trivy (linux/arm64)
+        uses: aquasecurity/trivy-action@0.28.0
+        env:
+          TRIVY_PLATFORM: linux/arm64
+        with:
+          image-ref: ${{ steps.repo.outputs.repository }}@${{ steps.build.outputs.digest }}
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: os,library
+          format: table
+
+      # Syft-generated SPDX SBOM for the whole manifest list. Covers both
+      # arches' filesystem contents (same builder/runtime layers, one SBOM is
+      # sufficient for v1 — revisit if arches diverge).
+      - name: Generate SBOM (SPDX JSON) via Syft
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ steps.repo.outputs.repository }}@${{ steps.build.outputs.digest }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+          # Skip uploading as a release asset; we upload as a workflow
+          # artifact below and attach to the image via attest-sbom.
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      # Keyless signing: cosign gets a short-lived cert from Fulcio using the
+      # workflow's OIDC token, signs, and records the signature in Rekor.
+      # --recursive signs the manifest list AND each per-arch child digest so
+      # the deploying cluster can verify either.
+      - name: Sign image (cosign keyless, recursive)
+        env:
+          COSIGN_YES: "true"
+        run: |
+          cosign sign --recursive \
+            ${{ steps.repo.outputs.repository }}@${{ steps.build.outputs.digest }}
+
+      # GitHub-native build provenance (SLSA v1). push-to-registry: true
+      # writes the signed predicate to GHCR as an OCI referrer of the image
+      # digest. Verifies against github.com/<owner>/<repo> workflow identity.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ steps.repo.outputs.repository }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - name: Attest SBOM
+        uses: actions/attest-sbom@v2
+        with:
+          subject-name: ${{ steps.repo.outputs.repository }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          sbom-path: sbom.spdx.json
+          push-to-registry: true
+
+      # Release contract — consumed by the homelab infra repo promotion flow
+      # (policy/release-contract.schema.json). Binds this digest to this repo
+      # + commit SHA + workflow identity + target env contract fields.
+      - name: Generate release contract
+        id: contract
+        env:
+          IMAGE_REPOSITORY: ${{ steps.repo.outputs.repository }}
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          SOURCE_COMMIT_SHA: ${{ github.sha }}
+          WORKFLOW_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/image.yml@refs/heads/main
+        run: |
+          jq -n \
+            --arg application "snowboard-trip-advisor" \
+            --arg image_repository "$IMAGE_REPOSITORY" \
+            --arg image_digest "$IMAGE_DIGEST" \
+            --arg source_commit_sha "$SOURCE_COMMIT_SHA" \
+            --arg workflow_identity "$WORKFLOW_IDENTITY" \
+            --arg base_path "/" \
+            --argjson container_port 8080 \
+            '{application:$application, image_repository:$image_repository, image_digest:$image_digest, source_commit_sha:$source_commit_sha, workflow_identity:$workflow_identity, base_path:$base_path, container_port:$container_port}' \
+            > release-contract.json
+          cat release-contract.json
+
+      - name: Upload release-contract artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-contract
+          path: release-contract.json
+          retention-days: 90
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-spdx
+          path: sbom.spdx.json
+          retention-days: 90
+
+      - name: Publish image summary
+        env:
+          IMAGE_REPOSITORY: ${{ steps.repo.outputs.repository }}
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          {
+            echo "## Production image published"
+            echo ""
+            echo "- **Digest:** \`${IMAGE_DIGEST}\`"
+            echo "- **Repository:** \`${IMAGE_REPOSITORY}\`"
+            echo "- **Source commit:** \`${{ github.sha }}\`"
+            echo "- **Platforms:** linux/amd64, linux/arm64"
+            echo "- **Signed:** cosign keyless (Sigstore) — manifest list + per-arch"
+            echo "- **Attestations:** build-provenance + SBOM (SPDX) pushed as OCI referrers"
+            echo ""
+            echo "### Pin in homelab"
+            echo '```'
+            echo "image: ${IMAGE_REPOSITORY}@${IMAGE_DIGEST}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
