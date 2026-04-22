@@ -235,7 +235,7 @@ Per-resort, per-field Markdown-formatted notes stored alongside the workspace. R
 - **Middleware plugin scope:** registered only on `apps/admin`'s Vite dev server. `apps/public`'s Vite server has no such middleware; the public app is read-only and consumes only `data/published/current.v1.json`.
 - **Production admin:** the middleware plugin is **not bundled** into any container image (`apps/admin` is never built for production in Phase 1). Phase 2 replaces the middleware with a real Hono service (see §8).
 
-The handler modules live at `apps/admin/server/*.ts` and are imported by the middleware plugin. Every handler uses the Zod request/response schemas from `packages/schema/api/*.ts` (Section 8.5.1).
+The handler modules live at `apps/admin/server/*.ts` and are imported by the middleware plugin. Every handler uses the Zod request/response schemas from `packages/schema/api/*.ts` (Section 8.4.1).
 
 ---
 
@@ -838,6 +838,7 @@ Merge gate on every PR: `qa` + `test:integration` + `test:a11y`. Visual-regressi
 - **PRESERVE** — kept in place.
 - **MIGRATE** — content transformed (one-shot script); original deleted.
 - **AMEND** — kept but modified in place.
+- **CREATE** — does not exist on disk today; introduced by the pivot.
 
 ### 10.2 File-by-file disposition
 
@@ -860,7 +861,8 @@ Merge gate on every PR: `qa` + `test:integration` + `test:a11y`. Visual-regressi
 | `research/cli.test.ts` | **REWRITE** | coverage for new subcommands |
 | `research/__fixtures__/*` | **MIGRATE + RE-RECORD** | durable content migrates; scoring fixtures deleted; NEW per-adapter fixtures recorded via `test:adapter --record` (Epic 5 PR 5.1) |
 | `data/published/current.json` | **MIGRATE** | one-shot → `current.v1.json`; legacy file deleted after 1-week soak (PR 2.4b) |
-| `data/published/history/*` | **PRESERVE** | immutable archive; new archives follow ISO-ms + monotonic-suffix |
+| `data/published/manifest.json` | **DELETE** | absorbed into the `manifest` sub-object of the new `current.v1.json` envelope per §4.5.1; removed with the legacy `current.json` in PR 2.4b |
+| `data/published/history/` | **CREATE** | does not exist on disk today; new directory holds the `{monotonic-counter}-{iso-ms}.json` archives written by the rewritten `publishDataset.ts` (PR 2.3). Future archives live here; the directory is immutable once populated |
 | `src/App.tsx` + `src/App.test.tsx` + `src/main.tsx` | **REWRITE** | → `apps/public/src/{App,App.test,main}.tsx` |
 | `src/components/Hero.*` | **REWRITE** | → `apps/public/src/routes/Landing.tsx` |
 | `src/components/ResortCard.*` | **REWRITE** | → `apps/public/src/features/card-view/ResortCard.tsx` |
