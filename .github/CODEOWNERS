@@ -1,0 +1,34 @@
+# CODEOWNERS — maintainer review required on load-bearing paths.
+# https://docs.github.com/en/repositories/managing-your-repositories-settings-and-security/customizing-your-repository/about-code-owners
+#
+# This file itself is CODEOWNERS-protected. A PR that tries to weaken enforcement
+# by editing this file requires maintainer approval.
+
+# Agent instructions and product direction
+/CLAUDE.md                               @mathvbarone
+/README.md                               @mathvbarone
+/docs/superpowers/specs/**               @mathvbarone
+/docs/adr/**                             @mathvbarone
+
+# Enforcement surface — changes here require review to prevent neutering gates
+/.github/CODEOWNERS                      @mathvbarone
+/.github/pull_request_template.md        @mathvbarone
+/.github/BRANCH_PROTECTION.md            @mathvbarone
+/.github/workflows/**                    @mathvbarone
+/.claude/settings.json                   @mathvbarone
+/scripts/hooks/**                        @mathvbarone
+/scripts/pre-commit                      @mathvbarone
+/scripts/apply-branch-protection.sh      @mathvbarone
+
+# Quality-gate wiring
+/package.json                            @mathvbarone
+/tsconfig*.json                          @mathvbarone
+/vite.config.ts                          @mathvbarone
+/vitest.config.ts                        @mathvbarone
+/eslint.config.js                        @mathvbarone
+
+# Post-pivot paths (activate when the directories exist per spec §9)
+# /packages/schema/**                    @mathvbarone
+# /packages/integrations/**              @mathvbarone
+# /packages/design-system/**             @mathvbarone
+# /apps/**                               @mathvbarone

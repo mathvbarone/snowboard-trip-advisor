@@ -11,7 +11,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "coverage": "vitest run --coverage",
-    "qa": "npm run lint && npm run typecheck && npm run coverage",
+    "test:hooks": "./scripts/hooks/test-hooks.sh",
+    "qa": "npm run lint && npm run typecheck && npm run coverage && npm run test:hooks",
     "setup": "cp scripts/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit",
     "research": "tsx research/cli.ts"
   },
