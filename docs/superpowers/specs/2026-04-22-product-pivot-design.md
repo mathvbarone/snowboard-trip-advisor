@@ -1,35 +1,25 @@
 # Product Pivot: Data-Transparency Comparison Tool
 
 **Spec date:** 2026-04-22
-**Status:** Draft — awaiting user input on 7 open decisions (see §12) before implementation plan can be written
-**Supersedes:** `docs/superpowers/specs/2026-04-03-snowboard-trip-advisor-design.md` (scoring-based ranker)
+**Status:** Resolved — user sign-off on all seven open decisions captured in §12; ready for implementation planning
+**Supersedes:** `docs/superpowers/specs/ARCHIVED-2026-04-03-snowboard-trip-advisor-design.md` (scoring-based ranker)
 **Decision record:** ADR-0001 (`docs/adr/0001-pivot-to-data-transparency.md`)
 
 ---
 
-## ⚠ Missing Decisions — READ BEFORE IMPLEMENTING
+## Resolved Decisions Summary
 
-This spec was drafted under a "follow my own recommendations" directive. Every architectural decision currently has a defensible choice written in, but **seven of those choices were made by the drafting agent, not by the user**. They are listed in full detail in [§12 Open Major Decisions](#12-open-major-decisions-for-user-review). Summary:
+All seven open decisions from the drafting pass have been resolved with the user. Full reasoning in §12.
 
-| # | Decision | Current choice | Reversibility cost if user overrides |
-|---|---|---|---|
-| 1 | Phase 2 stack | Fastify + Lucia + Postgres + Redis + BullMQ + S3 | HIGH — rewrites most of §8; `/api/*` contract (§8.5.1) survives |
-| 2 | Phase 1 admin auth | Loopback-only, no auth | MEDIUM — adds ~1 epic if second user needed before Phase 2 |
-| 3 | Per-resort publish threshold | Deferred until >25 resorts | LOW — ~2 PRs in Epic 2 or 5 |
-| 4 | `exactOptionalPropertyTypes` | Deferred to Epic 7 | LOW–MEDIUM — ~1 day schema cleanup if flipped Day-1 (TS reviewer dissents) |
-| 5 | Phase 2 auth library | Lucia (not Auth.js v5) | MEDIUM — rewrites §8.3 |
-| 6 | Phase 1 rate-limit bucket | Filesystem + flock (shared CLI + admin) | LOW — in-memory variant is simpler if CLI drops fetches |
-| 7 | License + CLA | Apache-2.0 + CC BY 4.0 + DCO (no CLA) | HIGH at a later date if dual-license needed |
-
-**Handoff contract for the next agent picking this up:**
-
-1. Do **not** start `writing-plans` until the user has signalled which of the seven items they accept, override, or defer.
-2. For items the user accepts as-written, capture the implicit approval in-session and proceed.
-3. For items the user overrides, edit §12 **and** propagate the change into the affected spec sections (e.g., overriding #1 rewrites most of §8; overriding #5 rewrites §8.3; overriding #7 touches §11.1.1 and every license header).
-4. If the user signals a new missing decision this agent did not anticipate, add it to §12 **and** this summary table.
-5. Once §12 is empty of user-blocking items, re-run the all-specialist final review (§13 reviewer lineage) on the revised file before invoking `writing-plans`.
-
-Do **not** treat this checklist as closed. Items #1 and #7 in particular are high-cost to reverse later; a user "sure, whatever" answer is not a real accept unless the user has seen the rewrite cost.
+| # | Decision | Resolution |
+|---|---|---|
+| 1 | Phase 2 stack | Hono + Drizzle + Postgres; Redis / BullMQ / S3 deferred until pressure requires them |
+| 2 | Phase 1 admin auth | Loopback-only, no auth |
+| 3 | Per-resort publish threshold | All-or-nothing in Phase 1; revisit when resort count crosses 25 |
+| 4 | `exactOptionalPropertyTypes` | Enabled on Day 1 (Epic 1 PR 1.1) |
+| 5 | Phase 2 auth library | Better Auth (Lucia deprecated upstream in 2025) |
+| 6 | Phase 1 rate-limit bucket | In-memory, per-process; admin-only fetches in Phase 1 (CLI does not fetch adapters) |
+| 7 | License + contribution model | Apache-2.0 (code) + CC BY 4.0 (data) + DCO (no CLA) |
 
 ---
 
@@ -47,7 +37,8 @@ Snowboard Trip Advisor pivots from a scoring-based ranker to a **data-transparen
 
 **Scope of Phase 2 (target state, not implemented in this spec):**
 
-- Multi-operator deployments via Fastify + Lucia + Postgres + Redis + BullMQ + S3.
+- Multi-operator deployments. Minimal initial target: Hono admin API + Drizzle + Postgres + Better Auth, single process.
+- Redis (rate limiting, presence), BullMQ (background jobs), and S3 (audit archive) are **deferred until observable pressure justifies them**.
 - Stable `/api/*` contract preserved from Phase 1, so the admin UI survives the migration.
 
 **Quality posture:**
@@ -246,10 +237,10 @@ Per-resort, per-field Markdown-formatted notes stored alongside the workspace. R
 
 `apps/admin` is a Vite SPA served by a Vite dev server that **also hosts an in-process request handler** via a Vite middleware plugin (`apps/admin/vite-plugin-admin-api.ts`). The middleware implements the `/api/*` surface (Fastify-style handlers) in the same Node process as the dev server. The SPA calls `fetch('/api/...')` exactly as it will in Phase 2; the server implementation differs but the wire contract does not.
 
-- **One process.** No separate admin-api binary in Phase 1. The `flock()` rate-limit bucket (Section 7.4) is forward-compat for Phase 2 and for CLI/admin concurrency during development.
+- **One process.** No separate admin-api binary in Phase 1. The rate-limit bucket (§7.4) lives in-memory in this process; there is no cross-process contention because the CLI does not fetch adapters.
 - **Wire contract identical to Phase 2.** Every request/response goes through Zod parse on both sides. Admin's browser code never imports filesystem APIs, Node-only modules, or the adapter registry directly. It only uses `fetch`.
 - **Middleware plugin scope:** registered only on `apps/admin`'s Vite dev server. `apps/public`'s Vite server has no such middleware; the public app is read-only and consumes only `data/published/current.v1.json`.
-- **Production admin:** the middleware plugin is **not bundled** into any container image (`apps/admin` is never built for production in Phase 1). Phase 2 replaces the middleware with a real Fastify service.
+- **Production admin:** the middleware plugin is **not bundled** into any container image (`apps/admin` is never built for production in Phase 1). Phase 2 replaces the middleware with a real Hono service (see §8).
 
 The handler modules live at `apps/admin/server/*.ts` and are imported by the middleware plugin. Every handler uses the Zod request/response schemas from `packages/schema/api/*.ts` (Section 8.5.1).
 
@@ -599,7 +590,12 @@ Mapped-type registry makes it a compile-time error to add a `SourceKey` without 
 
 ### 7.4 Rate limiting
 
-Filesystem-backed bucket at `data/integrations/rate-limits/<source>.json`. `flock()` on the file; atomic increment + timestamp; shared across the CLI process and the admin-api process (Phase 1 needs this because both can fetch). Phase 2 upgrades to Redis `CL.THROTTLE`.
+**In-memory, per-process, admin-only.** Phase 1 CLI does **not** fetch adapters (see §7.9); all live fetches go through the admin process, so there is only one bucket per source and no shared-state problem to solve.
+
+- Implementation: token-bucket per `SourceKey` in `packages/integrations/rateLimit.ts`. Tokens replenished on a monotonic clock.
+- Bucket lives in module-scope state inside the admin-api handler module. A Vite dev-server restart resets it — acceptable in Phase 1.
+- The rate-limit interface is the same one Phase 2 will satisfy; the Phase 2 implementation swaps the in-memory bucket for a shared store (Redis `CL.THROTTLE` is the likely choice if multiple admin instances run concurrently). No call-site changes.
+- `config/rateLimits.ts` defines per-source `tokens_per_window` and `window_ms`.
 
 ### 7.5 Audit archive
 
@@ -632,55 +628,67 @@ Initial adapters for `opensnow`, `resort-feed`, `booking`, `airbnb`, `snowforeca
 
 ### 7.9 CLI integration
 
-`research/cli.ts`:
-- `refresh:snow` — fetch snow data for all resorts (opensnow + snowforecast).
-- `refresh:lifts` — fetch lifts_open for all resorts (resort-feed).
-- `refresh:all` — full refresh (all adapters for all resorts).
-- `test:adapter <source> --resort <slug> [--record]` — probes one adapter; `--record` writes a fixture (requires `RECORD_ALLOWED=true`).
+`research/cli.ts` is **not an adapter-fetch surface in Phase 1.** Live fetches happen only inside the admin process (Sync / Test buttons in the resort editor, §3.6). Keeping the CLI fetch-free removes the only reason to share a rate-limit bucket across processes and keeps `RECORD_ALLOWED` scoped narrowly.
+
+CLI commands in Phase 1:
+- `test:adapter <source> --resort <slug> [--record]` — probes one adapter in isolation; `--record` writes a fixture (requires `RECORD_ALLOWED=true`). This is a **developer tool**, not a data-refresh path; it writes fixtures, not the workspace.
 - `migrate:v0-to-v1` — one-shot migration (see Section 10).
-- `publish` — full publish pipeline.
+- `publish` — validate and publish the current admin workspace (no network I/O).
+
+Bulk refresh commands (`refresh:snow`, `refresh:lifts`, `refresh:all`) are **deferred to Phase 2**, where they naturally belong to BullMQ-scheduled jobs rather than a CLI invocation.
 
 ---
 
 ## 8. Phase 2 Target State
 
-Phase 2 is a target, not part of this spec's implementation scope. Recorded here so Phase 1 choices don't paint us into a corner.
+**Phase 2 is a target, not part of this spec's implementation scope.** This section records intent and the stable contract that survives the Phase 1 → Phase 2 transition. Concrete architecture decisions (exact libraries, deployment topology, observability stack) are deferred to a dedicated Phase 2 spec written when Phase 2 actually starts.
 
-### 8.1 Services
+### 8.1 Intent
 
-- `services/admin-api/` — Fastify + Lucia (NOT Auth.js). Lucia chosen because: Fastify-native, explicit session model, Postgres-owned session state, no Next.js coupling.
-- `services/admin-workers/` — BullMQ workers for adapter fetches, publish jobs, notification sends.
-- **`WORKER_MODE=inline|external`** — for small deployments, workers run in the admin-api process; for large deployments, they run separately. Same code, different boot path.
+Phase 2 extends the Phase 1 single-maintainer filesystem build into a deployable product that supports:
+- multi-operator deployments (one codebase, many operators running their own instance);
+- authenticated admin users (more than one editor per deployment);
+- durable persistence (Postgres-backed, not filesystem-backed);
+- automated refresh cadences (scheduled adapter fetches rather than manual Sync clicks).
 
-### 8.2 Data stores
+The durable-vs-live split (§4), the adapter contract (§7), and the `/api/*` contract (§8.4) all carry over unchanged. What changes is the backing store and the deployment shape — not the wire contract the admin UI speaks.
 
-- **Postgres** — primary persistence. Append-only versioning (not shadow tables). `publish_archives` table separate from `publish_events`. `pg_partman` daily partitions on the `audit_log` table. App role only has `INSERT` on the current-day partition via a `SECURITY DEFINER` function.
-- **Audit log read path:** a separate `audit_reader` Postgres role has `SELECT` on **all** `audit_log` partitions (current + historical). The `/api/audit` endpoints (8.5.1 #8–#9) execute under this role via connection-pool role switching; the write-only app role never reads audit records. This prevents a compromised app role from exfiltrating the full audit history, while keeping the read surface available to authorized reviewers.
-- **Redis** — session rotation, presence pub/sub (advisory short TTL, not locking), `CL.THROTTLE` rate limiting, BullMQ queues.
-- **S3** — raw upstream audit archives (migrated from filesystem). S3 Block Public Access + SSE-KMS CMK + lifecycle expiration 30-90d + deny `aws:SecureTransport=false`.
+### 8.2 Target stack sketch (subject to revision at Phase 2 kickoff)
 
-### 8.3 Auth & RBAC
+The current intent, pending a dedicated Phase 2 spec:
 
-- **Sessions in Postgres** (Lucia). Cookie flags: `HttpOnly; Secure; SameSite=Lax; __Host-` prefix.
-- **CSRF:** double-submit token.
-- **Refresh token rotation** on every use, with **grace window and family reuse detection:**
-  - Each refresh token carries a `family_id` (uuid shared across the rotation chain) and a `generation` counter.
-  - On successful rotation, the previous token stays valid for a **30-second grace window** to absorb race conditions (concurrent tabs, retried requests).
-  - If a token is presented **after** its grace window expired AND a newer generation in the same `family_id` has already been issued, the server treats it as reuse: the entire family is revoked, all sessions under that `user_id` are terminated, and a `security.refresh_reuse` audit event is emitted.
-  - This is the textbook OAuth 2.1 refresh token rotation model; documented here so Phase 2 implementation cannot accidentally omit reuse detection.
-- **RBAC** via `routeGuard({ role })` Fastify plugin wrapper. ESLint rule requires `preHandler: requireRole(...)` with explicit `'public'` sentinel on unauthenticated routes. Meta-test asserts `fastify.printRoutes()` enumerates only wrapped routes. Roles: `public`, `editor`, `publisher`, `audit_reader`, `admin`. Every `/api/*` endpoint in 8.5.1 names its role explicitly.
+- **Admin API:** **Hono** on Node, single process. Hono was chosen over Fastify because it's lighter, has first-class Zod integration, and keeps the MVP deploy target simple (one process, one container). Fastify remains a reasonable alternative if more built-in plugin ergonomics are needed later.
+- **Data store:** **Postgres** via **Drizzle ORM**. Append-only versioning for published datasets; audit-log table; no sharding at MVP scale.
+- **Auth:** **Better Auth** (TypeScript-native, actively maintained). Lucia was the earlier working assumption but was deprecated by its author in 2025, so it is not an option. Auth.js v5 and hosted solutions (Clerk, WorkOS) are fallbacks if Better Auth doesn't fit.
+- **Sessions:** Postgres-backed, `HttpOnly; Secure; SameSite=Lax; __Host-` cookies. CSRF via double-submit token. Refresh-token rotation with family-reuse detection is required (OAuth 2.1 model) but the implementation detail lives in the Phase 2 spec.
+- **Not in the Phase 2 MVP:**
+  - **Redis** — only added when >1 admin instance runs concurrently and an in-process rate-limit bucket is no longer sufficient.
+  - **BullMQ** — only added when adapter-fetch cadence outgrows inline request handling (long-running jobs, retries across restarts).
+  - **S3** — only added when the filesystem audit archive outgrows Postgres's practical size envelope.
 
-### 8.4 Preview tokens
+These components are deferred on purpose. Adding them before there's observable pressure is a maintenance tax without a corresponding benefit. Each has a natural swap-in point behind an existing interface (rate-limit bucket, job queue, archive writer).
 
-Ed25519 signed (not HMAC). Default TTL 1h, max 24h. `jti` (claim) + `token_version` in DB allow instant revocation on role change.
+### 8.3 Deferred Phase 2 decisions
 
-### 8.5 API contract stability
+Decisions explicitly **not** made in this spec; each belongs to the Phase 2 spec:
 
-The Phase 1 `/api/*` surface consumed by `apps/admin` is the stable contract. Phase 2 Fastify re-implements it **verbatim**. The admin UI code does not change at the Phase 1 → Phase 2 boundary; only its backing store does. This mirrors the Sanity Studio / Sanity API separation.
+- Exact deployment target (self-hosted container, managed Postgres provider, k8s vs single-box).
+- Secrets management backend (KMS / Vault / SOPS / env-var).
+- Observability stack (`pino` + OpenTelemetry is the current assumption).
+- RBAC role set beyond the placeholder columns in the Phase 1 schema.
+- Per-resort publish workflow (triggered at the >25-resort threshold per §8.6).
+- Field-level review/comments workflow for editorial teams.
+- Preview-token format (Ed25519 is the current assumption).
 
-#### 8.5.1 `/api/*` contract inventory
+Recording them here so Phase 2 planning has a seed list, not a blank page.
 
-The following endpoints are the Phase 1 → Phase 2 stable surface. Every entry specifies: method, path, request schema (Zod), response schema (Zod), role requirement (Phase 2), rate-limit class (Phase 2). Schemas live in `packages/schema/api/*.ts`.
+### 8.4 `/api/*` contract stability
+
+The Phase 1 `/api/*` surface consumed by `apps/admin` is the **stable contract** across the Phase 1 → Phase 2 transition. Phase 2 re-implements it verbatim on top of Hono + Drizzle + Postgres. The admin UI code does not change at the boundary; only its backing store does.
+
+#### 8.4.1 `/api/*` contract inventory
+
+Every endpoint has a Zod request/response schema pair in `packages/schema/api/*.ts`. Role and rate-limit class are recorded for Phase 2; in Phase 1 role checks are no-ops and the rate-limit class is advisory.
 
 | # | Method + path | Request schema | Response schema | Role (P2) | RL class (P2) |
 |---|---|---|---|---|---|
@@ -694,7 +702,7 @@ The following endpoints are the Phase 1 → Phase 2 stable surface. Every entry 
 | 8 | `GET /api/audit` | `ListAuditQuery` | `ListAuditResponse` (per-adapter audit entries) | `audit_reader` | read |
 | 9 | `GET /api/audit/:id` | `AuditIdParam` | `AuditEntryResponse` (full body, redaction-aware) | `audit_reader` | read |
 | 10 | `GET /api/health` | `HealthQuery` (none) | `HealthResponse` (adapter freshness, archive size) | `editor` | read |
-| 11 | `POST /api/preview-tokens` | `PreviewTokenBody` (slug, TTL ≤24h) | `PreviewTokenResponse` (Ed25519-signed token) | `editor` | write |
+| 11 | `POST /api/preview-tokens` | `PreviewTokenBody` (slug, TTL ≤24h) | `PreviewTokenResponse` (signed token) | `editor` | write |
 | 12 | `GET /api/analyst-notes/:slug` | `ResortSlugParam` | `AnalystNoteResponse` (Markdown body, sanitized HTML preview) | `editor` | read |
 | 13 | `PUT /api/analyst-notes/:slug` | `AnalystNoteBody` | `AnalystNoteResponse` | `editor` | write |
 | 14 | `POST /api/auth/login` (P2) | `LoginBody` | `LoginResponse` (sets session cookie) | `public` | auth |
@@ -705,39 +713,21 @@ The following endpoints are the Phase 1 → Phase 2 stable surface. Every entry 
 1. Every endpoint has a Zod schema pair in `packages/schema/api/*.ts`.
 2. `apps/admin` fetches go through a single typed client generated from those schemas (no ad-hoc `fetch` calls outside the client).
 3. A contract snapshot test serializes the schema set to JSON and diffs against `packages/schema/api/__snapshots__/contract.snap`. Changes require maintainer review.
-4. Phase 2 Fastify registers each route with the same Zod schemas via `fastify.withTypeProvider<ZodTypeProvider>()` — route registration fails to compile if the admin UI's expected shape diverges.
+4. Phase 2 route registration uses the same Zod schemas — route registration fails to compile if the admin UI's expected shape diverges.
 5. `GET`/`HEAD` are idempotent and safe; `POST`/`PUT` carry `Idempotency-Key` headers on destructive operations (publish, sync) in Phase 2.
 
 **Phase 1 specifics:**
-- All endpoints served by `apps/admin/server/*.ts` via the Vite middleware plugin (Section 3.11).
+- All endpoints served by `apps/admin/server/*.ts` via the Vite middleware plugin (§3.11).
 - Role checks are no-ops in Phase 1 (loopback-only, no auth); the role column is populated so Phase 2 can flip them on without schema churn.
-- Rate-limit class is advisory in Phase 1 (flock-based bucket from Section 7.4); Phase 2 enforces via `CL.THROTTLE`.
+- Rate-limit class is advisory in Phase 1 (in-memory bucket per §7.4); Phase 2 enforces via a shared store when multi-instance.
 
-### 8.6 Field-level review
+### 8.5 Preview tokens
 
-- Field-level comments thread (`(resort_id, field_path) → comments[]`).
-- Unresolved threads block `approved → published` transition.
+Signed preview tokens for draft-resort sharing. Phase 1 does not implement them (no sharing in loopback-only mode); the endpoint exists in the contract so Phase 2 activation is additive. Signing algorithm (Ed25519 is the current assumption) is a Phase 2 decision.
 
-### 8.7 Per-resort publish
+### 8.6 Per-resort publish
 
-Activated when the resort count crosses 25. Per-resort publish regenerates `current.json` atomically by composing all `published`-state rows for the operator's dataset.
-
-### 8.8 Secrets
-
-Via KMS / Vault / SOPS, loaded at boot, Zod-validated at boot. Fail-closed if any required secret is missing.
-
-**Rotation semantics (explicit):**
-- Secrets are read **only at process boot** — no hot-reload, no filesystem watchers. This keeps the threat model simple (no TOCTOU on secret file reads) and makes rotation deterministic.
-- **Rotation procedure:** operator rolls the secret in the backing store (KMS/Vault/SOPS) → triggers a rolling restart of `services/admin-api` + `services/admin-workers` → new processes boot with the rotated secret → old connections drain.
-- **BullMQ job idempotency:** every enqueued job carries a `jobKey` (resort_slug + adapter_key + target_observed_at bucket). Workers use BullMQ's built-in `jobId`-based deduplication so that a job retried after a mid-rotation 401 is not executed twice against the upstream.
-- **401 handling:** workers that get a 401 from any upstream auth surface exit with code `EX_CONFIG` (78) instead of retrying; the supervisor's backoff-and-restart cycle picks up the rotated secret on boot. CLI surfaces this with a clear "secrets changed; restart the worker" hint.
-- **Secret `version` field:** every secret record includes a `version` integer. Boot logs record the loaded version; an audit event (`secret.loaded`) includes the version but never the value.
-
-### 8.9 Observability
-
-- `pino` structured logs with `requestId` + `traceparent` propagation.
-- OpenTelemetry traces through adapter fetches.
-- Error boundary instrumentation in `apps/public` + `apps/admin`.
+Activated when the resort count crosses 25 (§12 decision 3). Per-resort publish regenerates `current.v1.json` atomically by composing all `published`-state rows for the operator's dataset. Until the threshold is crossed, all-or-nothing publish from Phase 1 is retained.
 
 ---
 
@@ -747,7 +737,7 @@ Seven epics, ~36 PRs. Each epic completes independently; the quality gate stays 
 
 ### Epic 1 — Workspace + schema + adapter contract + design-system scaffold + CSP + harness + ESLint + size-limit
 
-**PR 1.1** — npm workspaces layout; root `tsconfig.base.json` + `tsconfig.references.json` + per-package `tsconfig.json`; `vitest.workspace.ts`. Strict flags: `strict: true`, `noUncheckedIndexedAccess`, `noImplicitOverride`, `noFallthroughCasesInSwitch`. `exactOptionalPropertyTypes` **deferred to Epic 7**.
+**PR 1.1** — npm workspaces layout; root `tsconfig.base.json` + `tsconfig.references.json` + per-package `tsconfig.json`; `vitest.workspace.ts`. Strict flags: `strict: true`, `noUncheckedIndexedAccess`, `noImplicitOverride`, `noFallthroughCasesInSwitch`, **`exactOptionalPropertyTypes: true`** (flipped on Day 1 per §12 decision 4 — concentrates Zod-`.optional()` cleanup cost alongside the v0→v1 schema migration rather than deferring it to an end-of-project diff).
 
 **PR 1.2** — `packages/schema/` with Zod definitions, branded types, `Money`, `LocalizedString`, `PublishState`, `FieldSource` (including `attribution_block`), `METRIC_FIELDS`, `SourceKey` union. TDD-first; round-trip tests + schema-version-drift guard.
 
@@ -812,20 +802,19 @@ Rationale: a single mega-PR turns the tree red mid-review, and a single trickle 
 ### Epic 6 — Real adapters
 
 **PR 6.1** — Constrained HTTP dispatcher (undici + DNS pin + SSRF blocklist + size/time caps + required UA).
-**PR 6.2** — Filesystem-backed rate-limit bucket (flock + JSON counter).
+**PR 6.2** — In-memory rate-limit bucket per §7.4 (token bucket per `SourceKey`, admin-process-scoped).
 **PR 6.3** — Audit archive writer (validate-before-persist; 30d / 100-per-resort-per-source retention).
 **PR 6.4** — OpenSnow adapter + fixture + redaction rules.
 **PR 6.5** — Resort-feed adapter (durable facts) + fixture + redaction.
 **PR 6.6** — Snow-Forecast adapter + fixture + redaction.
 **PR 6.7** — Booking.com + Airbnb adapters (deep-link generators + fixture).
-**PR 6.8** — CLI `refresh:snow` / `refresh:lifts` / `refresh:all` / `test:adapter`.
+**PR 6.8** — CLI `test:adapter` developer command (fixture-recording tool; bulk-refresh commands are deferred to Phase 2 per §7.9).
 
 ### Epic 7 — Stabilization & observability
 
-**PR 7.1** — `exactOptionalPropertyTypes` flip + fixes.
-**PR 7.2** — `pino` structured logging + error boundary instrumentation in both apps.
-**PR 7.3** — Performance/a11y audit rollup (Lighthouse CI + size-limit baseline tuning).
-**PR 7.4** — ADR backfill (0001–0007) + `docs/release-policy.md` + DX polish (commit hooks, codemod utilities).
+**PR 7.1** — `pino` structured logging + error boundary instrumentation in both apps.
+**PR 7.2** — Performance/a11y audit rollup (Lighthouse CI + size-limit baseline tuning).
+**PR 7.3** — ADR backfill (0001–0007) + `docs/release-policy.md` + DX polish (commit hooks, codemod utilities).
 
 ### CI/CD
 
@@ -963,7 +952,7 @@ Replaces the 294-line scoring-product README. Top-level sections:
 6. Getting started (`npm install && npm run setup`; `dev`; `dev:admin`; `qa`).
 7. Using the public app (URL state shape; shortlist cap 6; matrix hidden below md).
 8. Using the admin app (loopback-only; never-in-production; test-before-publish; all-or-nothing Phase 1).
-9. The research CLI (`refresh:snow`, `refresh:lifts`, `refresh:all`, `test:adapter`, `migrate:v0-to-v1`, `publish`).
+9. The research CLI (`test:adapter`, `migrate:v0-to-v1`, `publish`; bulk refresh is deferred to Phase 2).
 10. Data model at a glance (Resort + ResortLiveSignal; METRIC_FIELDS; schema_version 1; Money EUR; LocalizedString en).
 11. Project layout (after April 2026 pivot).
 12. Quality gate (100% coverage; pre-commit; `--no-verify` forbidden).
@@ -1043,7 +1032,7 @@ Replaces the 294-line scoring-product README. Top-level sections:
 | 0006 | Apache-2.0 + DCO + zero-tracking |
 | 0007 | ADR process itself |
 
-**ADR cadence note:** 0001-0007 are the Day-1 backfill at Epic 7 PR 7.4. Additional ADRs are expected to land during Epic 6 (real-adapter integration raises new decisions — upstream TOS negotiation, rate-limit tuning, redaction corpus maintenance). The ADR process (0007) describes how to propose new ones mid-stream; any architectural decision reached during Epic 6 that a reviewer flagged as "needs a writeup" becomes an ADR PR before the epic closes.
+**ADR cadence note:** ADR-0001 lands with this spec (same PR). ADRs 0002-0007 are backfilled at Epic 7 PR 7.3. Additional ADRs are expected to land during Epic 6 (real-adapter integration raises new decisions — upstream TOS negotiation, rate-limit tuning, redaction corpus maintenance). The ADR process (0007) describes how to propose new ones mid-stream; any architectural decision reached during Epic 6 that a reviewer flagged as "needs a writeup" becomes an ADR PR before the epic closes.
 
 **i18n scope (Phase 1 explicit):** `LocalizedString` stores `{ en: string, [lang: string]: string | undefined }`; Phase 1 ships English-only surface copy. Any non-English content in `LocalizedString` (resort regional names, attribution blocks) is **operator-curated translation** — never machine-translated server-side, and never rendered without a `lang="xx"` attribute on the element. `docs/i18n-policy.md` describes how operators add additional locales by shipping translation bundles; no UI string ever auto-falls-back to `en` silently (missing translations surface a visible indicator).
 
@@ -1134,25 +1123,49 @@ Replaces the 294-line scoring-product README. Top-level sections:
 
 ---
 
-## 12. Open Major Decisions (for user review)
+## 12. Resolved Decisions
 
-All reviewer feedback folded; no remaining blocking disagreements among specialists. The items below are decisions made under the "follow my own recommendations" directive — each is something the user may wish to revisit. Items closed by other sections have been removed from this list.
+All seven decisions flagged in the drafting pass have been resolved with the user. The reasoning is recorded here so future readers can reconstruct why each call was made without having to dig through session history.
 
-1. **Phase 2 tech stack is Fastify + Lucia + Postgres + Redis + BullMQ + S3, not Next + Auth.js + Supabase.** Reasoning: Fastify-native session primitives; explicit session model; Phase 2 presence + BullMQ + S3 are stable infrastructure choices; admin UI stays a Vite SPA across the migration because the `/api/*` contract is stable (now fully specified in 8.5.1). If the user wants a different stack (e.g., a single Next.js app replacing both UIs), the `/api/*` contract inventory still holds as the portability line but most of Section 8 is re-decided.
+### 12.1 Phase 2 tech stack — Hono + Drizzle + Postgres; Redis / BullMQ / S3 deferred
 
-2. **Admin is loopback-only in Phase 1 with no auth.** If the user plans to share the admin with a second person before Phase 2 ships, Phase 1 needs a minimum viable auth (Basic or HMAC-over-a-shared-token). Current spec does not include this.
+**Resolution:** override the drafting agent's Fastify + Lucia + Postgres + Redis + BullMQ + S3 recommendation. Phase 2's minimum viable target is **Hono + Drizzle + Postgres + Better Auth in a single admin-api process**. Redis (rate limiting, presence), BullMQ (background jobs), and S3 (audit archive) are added **only when observable pressure justifies them** — not as day-one infrastructure.
 
-3. **Per-resort publish deferred until resort count crosses 25.** If the user plans to add more than 5 resorts before Phase 2 and wants independent publish cadences per resort, per-resort publish moves into Phase 1 (+~2 PRs in Epic 2 or 5).
+**Reasoning:**
+- Six services before the product has users is a maintenance tax without a corresponding benefit. Each deferred component has a natural swap-in behind an existing interface (rate-limit bucket, job queue, archive writer), so deferring them is not a one-way door.
+- Hono over Fastify because it's lighter, has first-class Zod integration, and keeps the deploy target simple (one process, one container) at MVP scale.
+- The `/api/*` contract inventory (§8.4.1) is the load-bearing portability line; it survives any future library swap. The admin UI does not change at the Phase 1 → Phase 2 boundary regardless of which server implements the contract.
+- The frontend remains TypeScript (Vite SPAs unchanged). A Python backend would force the schema to be re-expressed in Pydantic and maintained in two places — not justified at this scale.
 
-4. **`exactOptionalPropertyTypes` is deferred to Epic 7.** TypeScript reviewer argued for a Day-1 flip (concentrates cleanup cost where new code is being written; avoids a large end-of-project diff). Current spec keeps the deferral because Zod's `.optional()` output interacts awkwardly during the v0→v1 schema migration and the fixture re-recording campaign lands in Epic 2. Reviewer dissent is recorded so the user can override: flipping in PR 1.1 adds ~1 day of schema-migration work up front in exchange for strictly cleaner new code throughout Epics 2–6.
+### 12.2 Phase 1 admin auth — loopback-only, no auth
 
-5. **Fastify + Lucia vs Auth.js v5 (Auth.js now supports non-Next hosts).** Auth.js v5 beta runs outside Next. Current spec chooses Lucia for explicit session persistence; if the user wants provider-ergonomics (OAuth, passkeys via Auth.js adapters), the spec switches to Auth.js v5 at the cost of session-storage control.
+**Resolution:** accept as-specced. Single-maintainer Phase 1; network boundary is the control; minimum viable auth is a Phase 2 concern.
 
-6. **Rate-limit bucket in Phase 1 is filesystem-backed (flock).** Alternative was in-memory, per-process. Current choice shares quota across CLI + admin-api processes. If the user is willing to restrict to admin-only fetches (no CLI) in Phase 1, the filesystem complexity goes away.
+### 12.3 Per-resort publish threshold — all-or-nothing in Phase 1
 
-7. **Apache-2.0 + CC BY 4.0 + DCO (no CLA).** Alternative was MIT-code + CC0-data + CLA. Current choice is Apache-2.0 because of the patent-grant clause and NOTICE support for third-party trademarks; DCO over CLA for contributor friction. If the user plans to dual-license a proprietary edition later, a CLA becomes necessary.
+**Resolution:** accept as-specced. Phase 1 starts with ~5 resorts; per-resort publish remains deferred until resort count crosses 25 (target moved into §8.6).
 
-*(Previously-listed items #4 "matrix below md," #8 "services/ placeholders," and #9 "filesystem Phase 1" were closed by Sections 2.2/2.3, 10.3, and Section 1 respectively and have been removed from this list.)*
+### 12.4 `exactOptionalPropertyTypes` — enabled on Day 1
+
+**Resolution:** override the drafting agent's Epic 7 deferral. Flag is enabled in Epic 1 PR 1.1.
+
+**Reasoning:** the TypeScript reviewer's argument wins on the merits — concentrating Zod-`.optional()` cleanup cost alongside the v0→v1 schema migration is cheaper than a large end-of-project diff across six epics of accumulated code. The ~1 day of up-front schema work is absorbed into Epic 1/2 where schema surgery is already the primary activity.
+
+### 12.5 Phase 2 auth library — Better Auth
+
+**Resolution:** override the drafting agent's Lucia choice. Phase 2 MVP uses **Better Auth**.
+
+**Reasoning:** Lucia was deprecated by its author in 2025 and is no longer actively maintained; recommending it was a knowledge-cutoff artifact in the drafting pass. Better Auth is the TypeScript-native successor most of the ecosystem moved to. Auth.js v5 and hosted options (Clerk, WorkOS) remain viable fallbacks if Better Auth doesn't fit Phase 2's concrete requirements when that work starts. Phase 1 has no auth, so nothing in Phase 1 depends on this choice.
+
+### 12.6 Phase 1 rate-limit bucket — in-memory, admin-only fetches
+
+**Resolution:** override the drafting agent's filesystem + `flock()` design. Phase 1 uses **in-memory per-process rate limiting**, and the CLI no longer fetches adapters — all live fetches go through the admin process (§7.4, §7.9).
+
+**Reasoning:** the filesystem bucket existed only to share quota between CLI and admin. Removing CLI fetches removes the only cross-process contention, which removes the reason for the filesystem complexity. Phase 2 will swap to a shared store (Redis `CL.THROTTLE`) when >1 admin instance runs concurrently — that's a library swap behind the same interface, not a re-architecture.
+
+### 12.7 License + contribution model — Apache-2.0 + CC BY 4.0 + DCO
+
+**Resolution:** accept as-specced. No commercial/proprietary-edition plans, so CLA is unnecessary overhead. Apache-2.0's patent grant and NOTICE file remain useful for third-party trademark attribution even for a pure OSS project. DCO sign-off has lower contributor friction than CLA.
 
 ---
 
@@ -1177,36 +1190,29 @@ All fold-ins from each review are reflected in the section text above.
 
 ---
 
-## 14. Next Steps (post-approval) — handoff for the continuation agent
+## 14. Next Steps — ready for implementation planning
 
-Per the brainstorming-skill contract, this spec is the handoff to the `writing-plans` skill. The expected next artifact is a detailed implementation plan at `docs/superpowers/plans/2026-04-22-product-pivot.md` that enumerates Epic 1 PR 1.1 down to step-by-step tasks with acceptance criteria.
+All seven open decisions from the drafting pass are resolved (§12). ADR-0001 (the "why" for the pivot) lands in the same PR as this spec. `README.md` and `CLAUDE.md` are updated in the same PR to keep the repo's product framing consistent with the pivot.
 
-### 14.1 Where this spec stopped
+The expected next artifact is a detailed implementation plan at `docs/superpowers/plans/2026-04-22-product-pivot.md` enumerating Epic 1 PR 1.1 down to step-by-step tasks with acceptance criteria.
 
-The drafting agent completed:
-1. Full spec (§§0–13) across all reviewer domains.
-2. Four rounds of all-specialist final review with all CRITICAL/IMPORTANT findings folded in.
-3. Seven open decisions explicitly flagged at the top of the file (⚠ Missing Decisions callout above) and detailed in §12.
-4. Spec committed to `pivot/data-transparency` branch (see PR linked in commit log).
+### 14.1 What this PR ships
 
-The drafting agent did **not** complete:
-1. User sign-off on the seven open decisions in §12 — the user must respond before implementation planning starts.
-2. Final all-specialist review on the committed file (this runs again after §12 decisions are resolved — overrides change spec content).
-3. Invocation of `writing-plans`.
+1. `docs/superpowers/specs/2026-04-22-product-pivot-design.md` — this spec, with all §12 resolutions folded in.
+2. `docs/adr/0001-pivot-to-data-transparency.md` — the decision record for the pivot itself.
+3. `README.md` — rewritten per §11.1 so the repo's public framing matches the pivot.
+4. `CLAUDE.md` — amended per §11.2 so agent instructions reflect the new product direction and code rules.
+5. `docs/superpowers/specs/2026-04-03-snowboard-trip-advisor-design.md` — renamed with an `ARCHIVED-` prefix so future readers don't confuse the superseded spec with this one.
 
-### 14.2 What the continuation agent must do
+### 14.2 What happens next
 
-**Step 1 — block on user decisions.** The continuation agent must **not** dispatch `writing-plans` until §12 is resolved. Present the seven items from the Missing Decisions callout to the user as a structured question set (one question at a time per the brainstorming skill; accept/override/defer). For items the user overrides, propagate changes into all affected sections — do not leave §12 and §§2–11 out of sync.
+1. Human review of this PR.
+2. Merge to `pivot/data-transparency`; `main` stays on the pre-pivot state until Epic 7 closes and the branch is merged back (per §10.4).
+3. Dispatch `writing-plans` against this spec to produce the epic-by-epic implementation plan.
+4. Execute Epic 1 PR 1.1 first (npm workspaces layout; `exactOptionalPropertyTypes: true` on Day 1 per §12.4).
 
-**Step 2 — re-run final review.** After §12 edits, dispatch the all-specialist review one more time on the revised file. If any reviewer raises a new CRITICAL finding that trace-links to a user override, fold it in before proceeding.
+### 14.3 Ground rules carried forward
 
-**Step 3 — commit the resolved spec.** Amend or follow-up commit with DCO sign-off on the same `pivot/data-transparency` branch. Do not open a second PR; amend the existing one.
-
-**Step 4 — dispatch `writing-plans`.** Only after §12 is clean and the final review passes. The plan targets the 7-epic, ~36-PR decomposition in §9.
-
-### 14.3 Non-obvious context the continuation agent may not have
-
-- The user's autonomous-execution directive (from the drafting session): "1. Proceed section by section until the full spec is finished. 2. Run relevant specialist reviews at each section and incorporate feedback. 4. Iterate until reviewers are satisfied. 5. Save the final version. 6. Run a full final review with all specialists used so far. 7. Continue iterating until all specialists are satisfied." — The drafting agent is at step 7 complete. The continuation agent resumes at user-facing decision resolution.
-- The user's preference (recorded as a feedback memory): follow own recommendations on decisions; only surface decisions that are truly blocking or high-cost-to-reverse. The seven items in §12 meet that bar.
-- The `pivot/data-transparency` branch protection is described in §10.4: force-push OFF, up-to-date-with-base OFF, required checks ON. Do not rebase; `git merge main` weekly.
-- This repo runs under strict `npm run qa` (lint → typecheck → coverage); this spec is prose only and does not trip the gate, but any follow-up commits that touch code must.
+- Branch protection on `pivot/data-transparency`: force-push OFF, up-to-date-with-base OFF, required checks ON. Do not rebase; `git merge main` weekly (§10.4).
+- `npm run qa` (lint → typecheck → coverage) is the hard gate on every PR. This spec is prose only and does not trip the gate; any code PR must.
+- ADRs 0002–0007 backfill at Epic 7 PR 7.3. Additional ADRs are expected mid-stream during Epic 6 (real-adapter integration surfaces new decisions).
