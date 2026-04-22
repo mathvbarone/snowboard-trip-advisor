@@ -1,5 +1,8 @@
 # Snowboard Trip Advisor Design
 
+> **Status: SUPERSEDED (2026-04-22).**
+> This spec describes the scoring-based ranker direction. It is retained for historical context only. The current product direction is the data-transparency comparison tool described in [`2026-04-22-product-pivot-design.md`](./2026-04-22-product-pivot-design.md), with rationale in [`ADR-0001`](../../adr/0001-pivot-to-data-transparency.md).
+
 ## Summary
 
 Snowboard Trip Advisor is a standalone public-facing web app for discovering and comparing the best ski resorts in Europe using objective, inspectable metrics. The product combines a research pipeline with a published curated dataset. The public UI reads only from the published dataset, while separate research runs fetch source material, normalize resort records, detect changes, and republish the dataset when validation passes.
