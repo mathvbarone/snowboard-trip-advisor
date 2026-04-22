@@ -46,7 +46,7 @@ Snowboard Trip Advisor pivots from a scoring-based ranker to a **data-transparen
 - `npm run qa` remains the hard gate (lint → typecheck → coverage).
 - 100% line/branch/function/statement coverage.
 - TDD required; `--no-verify` forbidden.
-- Every PR passes integration + visual-regression + a11y (axe-core-per-route) + size-limit.
+- Every PR passes integration + a11y (axe-core-per-route). Visual regression, Storybook, size-limit, and Lighthouse CI land with Epic 6 after the UI surface has stabilized.
 
 **Licensing posture:**
 
@@ -150,7 +150,7 @@ Resize across the `md` boundary while the drawer is open keeps focus on the draw
 - `apps/public` JS: 180 KB gzip initial + 45 KB gzip per route chunk.
 - LCP: ≤2.0s on fast-4G emulation.
 - CLS: <0.05.
-- Enforced by `size-limit` in CI (Epic 1 PR 6).
+- Informal budget during Epic 1-5; enforced by `size-limit` in CI from Epic 6.
 
 ### 2.6 CSP posture
 
@@ -210,20 +210,13 @@ Field-level `FieldStateFor<T>` shape drives the UI; the mapped type keeps the ed
 - Per-resort publish is deferred to Phase 2 (triggered when resort count crosses 25).
 - Publish requires all Auto-mode fields with `status=failed` to either be fixed or switched to Manual.
 
-### 3.8 PublishState enum (reserved in Phase 1, activated in Phase 2)
+### 3.8 PublishState enum
 
 ```ts
-type PublishState =
-  | 'draft'
-  | 'in_review'
-  | 'approved'
-  | 'scheduled'
-  | 'published'
-  | 'archived';
-// 'rejected' is a transition, not a state
+type PublishState = 'draft' | 'published';
 ```
 
-Phase 1 persists only `draft` → `published` transitions; the other states are reserved in the schema so Phase 2 activation is additive.
+Phase 1 ships only the two states the admin UI and publish pipeline actually use. A richer editorial workflow (`in_review`, `approved`, `scheduled`, `archived`, `rejected`) is a Phase 2 concern and will widen the union additively when the workflow is designed — not preemptively now. Widening is a schema-version decision (`schema_version` bumps when the enum changes; migration CLI handles the transition).
 
 ### 3.9 Analyst notes
 
@@ -265,7 +258,7 @@ Two document types (per CMS reviewer decision D1):
   lift_count: number,
   skiable_terrain_ha: number,
   season: { start_month: number, end_month: number },
-  publish_state: PublishState,     // Phase 1: only 'draft' | 'published'
+  publish_state: PublishState,     // 'draft' | 'published' in Phase 1
   field_sources: Record<string, FieldSource>
 }
 ```
@@ -295,7 +288,6 @@ All branded types are derived from Zod schemas using `.brand<'Name'>()`. No hand
 ```ts
 const ResortSlug = z.string().regex(/^[a-z0-9-]{1,64}$/).brand<'ResortSlug'>();
 const UpstreamHash = z.string().regex(/^[a-f0-9]{64}$/).brand<'UpstreamHash'>();
-const ColorToken = z.string().brand<'ColorToken'>();
 const ISOCountryCode = z.string().length(2).brand<'ISOCountryCode'>();
 const ISODateTimeString = z.string().datetime({ offset: true }).brand<'ISODateTimeString'>();
 
@@ -324,23 +316,28 @@ type FieldSource     = {
 };
 ```
 
-### 4.4 `METRIC_FIELDS` const — typed dot-paths
+### 4.4 `METRIC_FIELDS` const
 
-Enumerated at compile time as a `satisfies` list of valid dot-paths into `Resort | ResortLiveSignal`:
+A hand-maintained flat union of dot-path string literals covering every metric field across both document types:
 
 ```ts
-type DotPaths<T> = /* recursive type-generator producing all valid dot-paths */;
-type MetricPath = DotPaths<Resort> | DotPaths<ResortLiveSignal>;
+export type MetricPath =
+  | 'altitude_m.min' | 'altitude_m.max' | 'slopes_km' | 'lift_count'
+  | 'skiable_terrain_ha' | 'season.start_month' | 'season.end_month'
+  | 'snow_depth_cm' | 'lifts_open.count' | 'lifts_open.total'
+  | 'lift_pass_day' | 'lodging_sample.median_eur';
 
-export const METRIC_FIELDS = [
+export const METRIC_FIELDS: readonly MetricPath[] = [
   'altitude_m.min', 'altitude_m.max', 'slopes_km', 'lift_count',
   'skiable_terrain_ha', 'season.start_month', 'season.end_month',
   'snow_depth_cm', 'lifts_open.count', 'lifts_open.total',
   'lift_pass_day', 'lodging_sample.median_eur'
-] as const satisfies readonly MetricPath[];
+] as const;
 ```
 
-Typos fail the type-check, not runtime. `validatePublishedDataset` asserts coverage: every record's `field_sources` keys are a superset of every `METRIC_FIELDS` entry that has a non-null value.
+At ~12 fields this is maintainable by hand; a typo in the array that's not in the union fails type-check. A recursive `DotPaths<T>` type-generator was considered but rejected: it's a significant `tsc` compile-time cost for a property — "don't add a metric field without listing it here" — that's cheaper to enforce with code review at current scale. If `METRIC_FIELDS` grows past ~30 entries or the two schemas gain deep nesting, revisit.
+
+`validatePublishedDataset` asserts coverage: every record's `field_sources` keys are a superset of every `METRIC_FIELDS` entry that has a non-null value.
 
 ### 4.5 Publish-time invariants
 
@@ -349,7 +346,7 @@ Typos fail the type-check, not runtime. `validatePublishedDataset` asserts cover
 - Every `Money.currency === 'EUR'` in Phase 1.
 - Every `ResortLiveSignal.observed_at` is within the last 14 days for `status=ok`, within 30 days for `status=stale`, else `status=failed` (driven by per-field TTLs in `config/freshness.ts`).
 - `schema_version === 1` on every record.
-- **Phase 1 publish_state guard:** `validatePublishedDataset` asserts `publish_state ∈ {'draft', 'published'}`. Any other state (`in_review`, `approved`, `scheduled`, `archived`) is a Phase-2-reserved value and must never appear in a Phase 1 published dataset. A runtime test covers this; a Phase 2 feature flag widens the allowed set.
+- **publish_state guard:** `validatePublishedDataset` asserts `publish_state ∈ {'draft', 'published'}`. The enum has exactly those two values in Phase 1, so this is belt-and-braces — but it catches accidental widening by a future PR before the workflow is designed.
 
 ### 4.5.1 Published JSON layout
 
@@ -369,7 +366,7 @@ Typos fail the type-check, not runtime. `validatePublishedDataset` asserts cover
 }
 ```
 
-Readers join `resorts[i]` with `live_signals[j]` by `slug === resort_slug`. Zod validates the whole envelope; join logic lives in `packages/selectors/loadResortDataset.ts`.
+Readers join `resorts[i]` with `live_signals[j]` by `slug === resort_slug`. Zod validates the whole envelope; join logic lives in `packages/schema/loadResortDataset.ts` (see §5).
 
 ### 4.6 Validation ordering
 
@@ -377,11 +374,13 @@ All ingest paths (adapter response, admin POST, migration import) follow: **pars
 
 ---
 
-## 5. Selectors (`packages/selectors`)
+## 5. Data projection (lives in `packages/schema`)
+
+Originally planned as a separate `packages/selectors` package. Collapsed into `packages/schema` for MVP scale: the two files (`loadResortDataset.ts`, `ResortView` projection) are small enough that a separate package adds ceremony without a corresponding benefit. If the projection grows past ~300 lines or acquires app-specific variants, split it back out.
 
 ### 5.1 `ResortView`
 
-The projection layer between raw records and the UI. Selectors return discriminated-union field states:
+The projection layer between raw records and the UI. Projectors return discriminated-union field states:
 
 ```ts
 type FieldValue<T> =
@@ -427,7 +426,7 @@ type FieldStateFor<T> = {
 };
 ```
 
-`packages/selectors` exposes `toFieldValue<T>(state: FieldStateFor<T>): FieldValue<T>` with the mapping:
+`packages/schema` exposes `toFieldValue<T>(state: FieldStateFor<T>): FieldValue<T>` with the mapping:
 
 | admin `status` | public `state` |
 |---|---|
@@ -445,19 +444,17 @@ Reads `data/published/current.v1.json`, Zod-parses, joins durable + live by slug
 ### 5.3 Package DAG (enforced by ESLint)
 
 ```
-packages/schema         (leaf — zero workspace deps)
+packages/schema         (leaf — zero workspace deps; includes loadResortDataset + ResortView)
    ↑
-packages/selectors      (depends only on schema)
-   ↑
-packages/design-system  (depends only on schema — NEVER selectors)
+packages/design-system  (depends only on schema)
    ↑
 packages/integrations   (depends only on schema)
    ↑
-apps/public             (depends on schema, selectors, design-system)
-apps/admin              (depends on schema, selectors, design-system, integrations)
+apps/public             (depends on schema, design-system)
+apps/admin              (depends on schema, design-system, integrations)
 ```
 
-`format.ts` in `packages/design-system` accepts only primitive types from `schema` (`Money`, `LocalizedString`, `ISODateTimeString`); it never sees `ResortView`. Standard ESLint `no-restricted-imports` (configured in `eslint.config.js`) blocks cross-layer violations in CI.
+`format.ts` in `packages/design-system` accepts only primitive types from `schema` (`Money`, `LocalizedString`, `ISODateTimeString`). `FieldValueRenderer<T>` accepts `FieldValue<T>` from schema. Standard ESLint `no-restricted-imports` (configured in `eslint.config.js`) blocks cross-layer violations in CI.
 
 ---
 
@@ -465,7 +462,7 @@ apps/admin              (depends on schema, selectors, design-system, integratio
 
 ### 6.1 Tokens
 
-**Source of truth:** `packages/design-system/tokens.ts` (TypeScript const objects). Branded types for every token (`ColorToken`, `SpaceToken`, `BreakpointToken`, `ZIndexToken`, `RadiusToken`, `ShadowToken`, `DurationToken`, `FontWeightToken`, `FontSizeToken`).
+**Source of truth:** `packages/design-system/tokens.ts` (TypeScript const objects). Three branded types where type-level discipline earns its keep: `ColorToken`, `SpaceToken`, `BreakpointToken`. Other token scales (`zIndex`, `radius`, `shadow`, `duration`, `fontWeight`, `fontSize`) are plain strings/numbers until there's an actual bug pattern the extra brand would catch.
 
 **Generated artifact:** `packages/design-system/tokens.css` (CSS custom properties, `:root` + dark scope). Header comment on generated file: `/* GENERATED — do not edit; edit tokens.ts and run npm run tokens:generate */`.
 
@@ -492,7 +489,7 @@ If a specific violation pattern becomes a real problem (not a hypothetical one),
 
 Hand-built: `Button`, `IconButton`, `Input`, `TextArea`, `Select`, `ToggleButtonGroup`, `Chip`, `Pill`, `StatusPill`, `SourceBadge`, `Card`, `Table`, `EmptyState`, `LoadingState`, `Shell`, `Sidebar`, `HeaderBar`, `FieldValueRenderer<T>`.
 
-**`FieldValueRenderer<T>`** encapsulates the 3-branch narrowing required by `FieldValue<T>` (from `packages/selectors`):
+**`FieldValueRenderer<T>`** encapsulates the 3-branch narrowing required by `FieldValue<T>` (from `packages/schema`):
 ```ts
 <FieldValueRenderer
   field={view.slopes_km}
@@ -508,12 +505,15 @@ Renders the value with `SourceBadge` + `observed_at` tooltip in `fresh`/`stale` 
 
 Radix UI primitives (a11y-heavy): `Dialog` (also used by `ShortlistDrawer` with side-sheet styling — a drawer is a drawer-styled Dialog, not a new primitive), `DropdownMenu`, `Popover`, `Tooltip`, `Tabs`, `Toast`. Wrapped at `packages/design-system/primitives/*` so consumers never touch Radix directly.
 
-### 6.5 Storybook + visual regression
+### 6.5 Storybook + visual regression (deferred to Epic 6)
 
-- `.storybook/` at repo root. `@storybook/test-runner` runs in CI.
+Storybook, Playwright visual regression, and the `visual:approve` label workflow are **deferred to Epic 6 (stabilization)**. Rationale: visual regression before the UI has a stable baseline produces noise (every intentional UI change fails the visual check), and for a 5-resort MVP the return on that ceremony is low. Integration tests plus axe-core-per-route cover the Phase 1 quality bar.
+
+When Epic 6 activates this:
+- `.storybook/` at repo root. `@storybook/test-runner` in CI.
 - `@storybook/addon-a11y` on every story.
-- Playwright visual regression: stories rendered at **360×780** (default mobile-first), 900×780, 1280×900. Baseline images tracked in git.
-- **Baseline governance:** PR with non-zero visual diff requires `visual:approve` label applied by a CODEOWNER. PR bot comments with diff gallery. CI fails without the label.
+- Playwright visual regression at 360×780, 900×780, 1280×900.
+- `visual:approve` label from a CODEOWNER gates any PR with a non-zero diff.
 
 ### 6.6 Integration harness
 
@@ -574,21 +574,21 @@ Mapped-type registry makes it a compile-time error to add a `SourceKey` without 
 
 ### 7.3 Constrained HTTP dispatcher
 
-`packages/integrations/http/constrainedDispatcher.ts` wraps `undici`:
+`packages/integrations/http/constrainedDispatcher.ts` wraps `undici`. The dispatcher is delivered in two stages so the hardening cost lands with the code that actually makes HTTP calls:
 
-- **DNS pinning + SNI:** resolve once per request via `dns.lookup` with `all: true` (all candidates). Each candidate IP is normalized (see canonicalization below) and matched against the SSRF blocklist; any blocked candidate fails the request closed (no "try the next one"). The first non-blocked IP is pinned for the connect leg. The TLS `servername` retains the original hostname (SNI preserved).
-- **Per-request Agent instance** with `keepAliveTimeout: 1`, `pipelining: 0`, `connections: 1`. No connection pooling across requests. Prevents DNS rebinding via keep-alive.
-- **Address canonicalization** (before blocklist check):
-  - IPv4-mapped IPv6 `::ffff:v4.v4.v4.v4` → `v4.v4.v4.v4`.
-  - IPv6 `::` and `::1` recognized as loopback-equivalent.
-  - `0.0.0.0/8` rejected (Linux routes to loopback).
-  - `255.255.255.255` and directed broadcasts rejected.
-  - `64:ff9b::/96` NAT64 synthesized addresses rejected unless target v4 is public.
-- **SSRF blocklist (post-canonicalization):** deny RFC1918 (10/8, 172.16/12, 192.168/16), loopback (127/8, ::1), link-local (169.254/16, fe80::/10), CGNAT (100.64/10), ULA (fc00::/7), cloud-metadata IPs (169.254.169.254, metadata.google.internal, AWS IMDS v2 token endpoint), multicast (224/4, ff00::/8), reserved ranges.
+**Stage 1 — Baseline (Epic 5 PR 5.1, before any real adapter):**
+- **SSRF blocklist:** deny RFC1918 (10/8, 172.16/12, 192.168/16), loopback (127/8, ::1), link-local (169.254/16, fe80::/10), CGNAT (100.64/10), ULA (fc00::/7), cloud-metadata IPs (169.254.169.254, metadata.google.internal, AWS IMDS v2 token endpoint), multicast (224/4, ff00::/8), reserved ranges.
 - **Size cap:** `maxResponseBytes` enforced via streaming byte counter; truncation yields `response_too_large`.
 - **Time cap:** per-adapter timeout (default 10s, max 30s); applies to connect + TLS handshake + full body.
 - **Required `User-Agent`:** `SnowboardTripAdvisorBot/<version> (+<contact-url>)` — contact URL is operator-configured.
+
+**Stage 2 — Hardening (Epic 5 PR 5.2, rolled in with the first real HTTP-issuing adapter):**
+- **DNS pinning + SNI:** resolve once per request via `dns.lookup` with `all: true`. Each candidate IP is normalized (canonicalization below) and matched against the SSRF blocklist; any blocked candidate fails the request closed (no "try the next one"). The first non-blocked IP is pinned for the connect leg. The TLS `servername` retains the original hostname (SNI preserved).
+- **Per-request Agent instance** with `keepAliveTimeout: 1`, `pipelining: 0`, `connections: 1`. No connection pooling across requests. Prevents DNS rebinding via keep-alive.
+- **Address canonicalization** (before blocklist check): IPv4-mapped IPv6 `::ffff:v4.v4.v4.v4` → `v4.v4.v4.v4`; IPv6 `::` and `::1` recognized as loopback-equivalent; `0.0.0.0/8` rejected (Linux routes to loopback); `255.255.255.255` and directed broadcasts rejected; `64:ff9b::/96` NAT64 synthesized addresses rejected unless target v4 is public.
 - **Redirects:** a 3xx response re-runs DNS resolution + canonicalization + blocklist check on the redirect target (no IP pin reuse). Redirect target that resolves to a blocked IP fails the request closed.
+
+Rationale for the two-stage split: Phase 1 stubs return frozen `as const` values and make no HTTP calls, so the Stage 2 hardening (DNS rebinding prevention, IPv6 address canonicalization, NAT64 edge cases) has no attack surface to protect against until Stage 2 code actually exists. Landing the hardening with the first real HTTP caller keeps the diff reviewable and the tests concretely exercisable.
 
 ### 7.4 Rate limiting
 
@@ -613,10 +613,10 @@ Every fetch (response OR error) archived at `data/integrations/audit/<source>/<r
 ### 7.6 Fixture recording
 
 - `RECORD_ALLOWED=true` environment variable required at process boot AND at adapter level. Missing → `test:adapter --record` fails closed.
-- **`RECORD_ALLOWED` scope:** consulted **only** by `research/cli.ts`'s boot path and `packages/integrations/contract.ts`'s adapter gate. `apps/admin` (Vite dev server + its middleware plugin), `apps/public`, `packages/schema`, `packages/selectors`, `packages/design-system`, and every other module MUST ignore the variable even if the operator's shell has it set. A repo-wide test grep-asserts that `process.env.RECORD_ALLOWED` appears only in those two source files.
+- **`RECORD_ALLOWED` scope:** consulted **only** by `research/cli.ts`'s boot path and `packages/integrations/contract.ts`'s adapter gate. Apps and other packages must ignore the variable. The scope is maintained by code review and a clear module boundary; no meta-grep-test is run against it (the rule is simple enough that a test is over-engineered ceremony).
 - Mocks in tests unconditionally allowed (no env gate on `*.test.ts`).
 - Recorded fixtures at `packages/integrations/adapters/<source>/__fixtures__/<case>.json`.
-- **Recording fallback.** If live recording fails (upstream rate-limit, outage, 5xx burst), the adapter's fixture directory may include hand-crafted synthetic fixtures tagged `{"synthetic": true, "notes": "..."}` in the fixture envelope. Synthetic fixtures are valid for CI but tracked in a follow-up issue to replace with real recordings when upstream returns. CI reports synthetic-fixture coverage per adapter; Epic 6 acceptance requires >70% real (non-synthetic) fixtures.
+- **Recording fallback.** If live recording fails (upstream rate-limit, outage, 5xx burst), the adapter's fixture directory may include hand-crafted synthetic fixtures tagged `{"synthetic": true, "notes": "..."}` in the fixture envelope. Synthetic fixtures are valid for CI but tracked in a follow-up issue to replace with real recordings when upstream returns. CI reports synthetic-fixture coverage per adapter; Epic 5 acceptance requires >70% real (non-synthetic) fixtures.
 - **PII redaction:** per-adapter `redaction.ts` scrubs headers (email, phone, authorization, cookie, set-cookie, x-api-key patterns) + body (email/phone/token/IPv4/UUIDv4 regex + API-key-echo patterns + nested-JSON fields named `email`, `contact`, `owner`, `reporter`, `user_id`). A shared redaction-corpus test harness at `packages/integrations/audit/redaction.corpus.test.ts` runs synthetic-but-realistic responses per adapter category (JSON-REST, HTML, RSS/XML) through the redactor, asserting no email/phone/UUID/IPv4 survives. Coverage tracks the redaction rule set, not just the scrubber code.
 - **Fixture size budget:** <50 KB per fixture; CI fails if exceeded.
 
@@ -626,7 +626,7 @@ Every fetch (response OR error) archived at `data/integrations/audit/<source>/<r
 
 ### 7.8 Stubs in Phase 1
 
-Initial adapters for `opensnow`, `resort-feed`, `booking`, `airbnb`, `snowforecast` are stubs that return frozen `as const` values + `sources[*].status = 'manual'`. Real implementations land in Epic 6, behind the same contract.
+Initial adapters for `opensnow`, `resort-feed`, `booking`, `airbnb`, `snowforecast` are stubs that return frozen `as const` values + `sources[*].status = 'manual'`. Real implementations land in Epic 5, behind the same contract.
 
 ### 7.9 CLI integration
 
@@ -735,9 +735,9 @@ Activated when the resort count crosses 25 (§12 decision 3). Per-resort publish
 
 ## 9. Phase 1 Epic Breakdown
 
-Seven epics, ~36 PRs. Each epic completes independently; the quality gate stays green throughout.
+Six epics, ~30 PRs. Each epic completes independently; the quality gate stays green throughout.
 
-### Epic 1 — Workspace + schema + adapter contract + design-system scaffold + CSP + harness + ESLint + size-limit
+### Epic 1 — Workspace + schema + adapter contract + design-system + CSP + harness + ESLint
 
 **PR 1.1** — npm workspaces layout; root `tsconfig.base.json` + `tsconfig.references.json` + per-package `tsconfig.json`; `vitest.workspace.ts`. Strict flags: `strict: true`, `noUncheckedIndexedAccess`, `noImplicitOverride`, `noFallthroughCasesInSwitch`, **`exactOptionalPropertyTypes: true`** (flipped on Day 1 per §12 decision 4 — concentrates Zod-`.optional()` cleanup cost alongside the v0→v1 schema migration rather than deferring it to an end-of-project diff).
 
@@ -747,11 +747,9 @@ Seven epics, ~36 PRs. Each epic completes independently; the quality gate stays 
 
 **PR 1.4** — `packages/design-system/tokens.ts` (source of truth) + `scripts/generate-tokens.ts` + generated `tokens.css` + header comment + CI drift check + pre-commit integration.
 
-**PR 1.5** — `config/csp.ts` (shared dev + prod CSP source) + `tests/integration/harness.ts` (shared Vitest + MSW + Testing Library + axe-core setup, default viewport 360×780) + `packages/selectors/loadResortDataset.ts` skeleton.
+**PR 1.5** — `config/csp.ts` (shared dev + prod CSP source) + `tests/integration/harness.ts` (shared Vitest + MSW + Testing Library + axe-core setup, default viewport 360×780) + axe-core-per-route wiring. `loadResortDataset` lives in `packages/schema` (§5.2), not a separate selectors package. (Size-limit, Lighthouse CI, and Storybook move to Epic 6 per §6.5.)
 
-**PR 1.6** — `.size-limit.json` (JS budget) + CI `npm run size` step + Lighthouse CI smoke + axe-core-per-route wiring in the harness.
-
-**PR 1.7** — `eslint.config.js` flat config rewrite with `no-restricted-imports` patterns enforcing the package DAG (§5.3) and the design-system deep-import discipline (§6.3). Standard ESLint only; no custom plugin. Any additional targeted rules (`no-restricted-syntax` for raw HTML elements, etc.) are added in the same PR if the tree has existing violations, or later when a violation actually appears.
+**PR 1.6** — `eslint.config.js` flat config rewrite with `no-restricted-imports` patterns enforcing the package DAG (§5.3). Standard ESLint only; no custom plugin. Any additional targeted rules (`no-restricted-syntax` for raw HTML elements, etc.) are added in the same PR if the tree has existing violations, or later when a violation actually appears.
 
 ### Epic 2 — Data migration
 
@@ -761,60 +759,50 @@ Seven epics, ~36 PRs. Each epic completes independently; the quality gate stays 
 
 **PR 2.3** — `research/publish/publishDataset.ts` REWRITE: atomic rename-based writes (staged tmp → fsync → rename → fsync parent dir). Archive filename `{monotonic-counter}-{iso-ms}.json` with counter at `data/published/.archive-counter` under `flock()`. Unit test for clock regression.
 
-**PR 2.4** — Fixture re-recording campaign (PR 2.5 in original numbering, resequenced for clarity): per-adapter canonical fixtures recorded via `test:adapter --record` with `RECORD_ALLOWED=true`. PII redaction policy + size budget tests. Blocks Epic 6.
+**PR 2.4a** — Flip consumers: `packages/schema/loadResortDataset.ts` reads `current.v1.json` exclusively. `apps/public` + `apps/admin` wire to the new reader. Legacy reader and `current.json` retained but unused; added to the workspace's `vite.config.ts` `coverage.exclude` list with a dated rationale comment (`// retained until PR 2.4b demolition, 2026-0X-XX`). One-week soak starts here.
 
-**PR 2.5a** — Reader flip prep: `packages/selectors/loadResortDataset.ts` reads `current.v1.json` behind a feature flag; dedicated unit tests cover every branch (fresh/stale/never_fetched, field-level source attribution, schema-version mismatch fallback). Old reader stays.
+**PR 2.4b** — Demolition (after soak): delete legacy `current.json`, `research/schema.ts`, `config/scoring.ts`, legacy reader. Coverage-exclusion entries removed in the same PR.
 
-**PR 2.5b** — Flip consumers: `apps/public` + `apps/admin` read `current.v1.json` exclusively. Legacy reader retained, not wired. The legacy reader path is added to the workspace's `vite.config.ts` `coverage.exclude` list in the same PR with a dated rationale comment (`// retained until PR 2.5c demolition, 2026-0X-XX`). The comment's date is the soak deadline so reviewers have a concrete horizon.
+*(Fixture re-recording previously tracked here as PR 2.4 moves to Epic 5; it's adapter-integration infrastructure, not data migration.)*
 
-**PR 2.5c** — Demolition (after 1-week soak): delete legacy `current.json`, `research/schema.ts`, `config/scoring.ts`, legacy reader. Coverage-exclusion list in per-workspace `vite.config.ts` updated in the same PR.
+### Epic 3 — Public app
 
-### Epic 3 — Public app (cards + detail + URL state)
+Formerly split into two epics (cards+detail, then matrix+shortlist); collapsed because they share package, tests, and reviewer scope.
 
-**PR 3.1** — `apps/public` Vite config + entry + CSP dev plugin wiring.
-**PR 3.2** — Landing route (copy reflects data-transparency positioning).
-**PR 3.3a** — CardView layout + fields + sort UI.
-**PR 3.3b** — Shortlist drawer + matrix toggle + URL-param sync.
-**PR 3.4** — Detail route: durable + live panels, deep-link section with honesty micro-copy + `rel="noopener noreferrer"` + `referrerpolicy="no-referrer"` + `encodeURIComponent` on interpolation.
-**PR 3.5** — Merge/replace dialog for shortlist collision; clipboard-share with fallback modal.
+**PR 3.1** — `apps/public` Vite config + entry + CSP dev plugin wiring + Landing route.
+**PR 3.2** — CardView (layout, fields, sort UI) + Source badges + observed_at tooltips + missing-value indicators.
+**PR 3.3** — Shortlist drawer + URL-param sync + shortlist cap (6) + merge/replace dialog + clipboard-share with fallback.
+**PR 3.4** — MatrixView (hidden-below-md message, highlight-field affordance).
+**PR 3.5** — Detail route: durable + live panels, deep-link section with honesty micro-copy + `rel="noopener noreferrer"` + `referrerpolicy="no-referrer"` + `encodeURIComponent` on interpolation.
+**PR 3.6** — Integration test pass on every route with axe-core. (Visual regression moves to Epic 6 per §6.5.)
 
-### Epic 4 — Public app (matrix + shortlist)
+### Epic 4 — Admin app (loopback MVP)
 
-**PR 4.1** — MatrixView component (responsive hidden-below-md message).
-**PR 4.2** — Shortlist cap (6) + per-resort add/remove affordances.
-**PR 4.3** — Highlight-field affordance (URL param + visual emphasis).
-**PR 4.4** — Source badges + observed_at tooltips + missing-value indicators.
-**PR 4.5** — Integration test pass on every route with axe-core + visual regression at 360/900/1280.
+**PR 4.1** — `apps/admin` Vite config (loopback bind) + entry + never-built-in-prod Dockerfile guard.
+**PR 4.2** — Shell (Sidebar + HeaderBar) + Dashboard health cards.
+**PR 4.3** — Resorts list + filters.
+**PR 4.4** — Resort editor (durable + live panels, FieldRow, ModeToggle).
+**PR 4.5** — Publish flow (all-or-nothing, UI calls same pipeline as CLI).
+**PR 4.6** — Read-only-below-md policy + analyst notes (Markdown-sanitized).
 
-### Epic 5 — Admin app (loopback MVP)
+### Epic 5 — Real adapters
 
-**PR 5.1** — `apps/admin` Vite config (loopback bind) + entry + never-built-in-prod Dockerfile guard.
-**PR 5.2** — Shell (Sidebar + HeaderBar) + Dashboard health cards.
-**PR 5.3** — Resorts list + filters.
-**PR 5.4** — Resort editor (durable + live panels, FieldRow, ModeToggle).
-**PR 5.5** — Publish flow (all-or-nothing, UI calls same pipeline as CLI).
-**PR 5.6** — Read-only-below-md policy + analyst notes (Markdown-sanitized).
+**PR 5.1** — Adapter infrastructure in one PR: HTTP dispatcher (`undici` + SSRF blocklist + size/time caps + required UA), in-memory rate-limit bucket per §7.4, audit archive writer (validate-before-persist; 30d / 100-per-resort-per-source retention), and the fixture-recording scaffolding + PII redaction corpus. DNS pinning, address canonicalization, and redirect re-checks land with the first HTTP-issuing adapter (PR 5.2), not before.
+**PR 5.2** — Snow-data adapters: OpenSnow + Snow-Forecast with fixtures + redaction rules + dispatcher hardening (DNS pin + canonicalization + redirect re-check) rolled in with the first real HTTP calls.
+**PR 5.3** — Resort-feed adapter (durable facts) with fixture + redaction.
+**PR 5.4** — Deep-link-only adapters: Booking.com + Airbnb deep-link generators + fixture (no HTTP; the adapters produce external URLs, not data).
+**PR 5.5** — CLI `test:adapter` developer command (fixture-recording tool; bulk-refresh commands are deferred to Phase 2 per §7.9).
 
-### Epic 6 — Real adapters
+### Epic 6 — Stabilization, observability, visual discipline
 
-**PR 6.1** — Constrained HTTP dispatcher (undici + DNS pin + SSRF blocklist + size/time caps + required UA).
-**PR 6.2** — In-memory rate-limit bucket per §7.4 (token bucket per `SourceKey`, admin-process-scoped).
-**PR 6.3** — Audit archive writer (validate-before-persist; 30d / 100-per-resort-per-source retention).
-**PR 6.4** — OpenSnow adapter + fixture + redaction rules.
-**PR 6.5** — Resort-feed adapter (durable facts) + fixture + redaction.
-**PR 6.6** — Snow-Forecast adapter + fixture + redaction.
-**PR 6.7** — Booking.com + Airbnb adapters (deep-link generators + fixture).
-**PR 6.8** — CLI `test:adapter` developer command (fixture-recording tool; bulk-refresh commands are deferred to Phase 2 per §7.9).
-
-### Epic 7 — Stabilization & observability
-
-**PR 7.1** — `pino` structured logging + error boundary instrumentation in both apps.
-**PR 7.2** — Performance/a11y audit rollup (Lighthouse CI + size-limit baseline tuning).
-**PR 7.3** — ADR backfill (0003–0007; 0001 and 0002 already shipped with the pivot PR) + DX polish (commit hooks, codemod utilities). `docs/release-policy.md` is deferred to Phase 2 per §11.3.
+**PR 6.1** — `pino` structured logging + error boundary instrumentation in both apps.
+**PR 6.2** — `.size-limit.json` + CI `npm run size` step + Lighthouse CI smoke + performance/a11y audit rollup.
+**PR 6.3** — Storybook (`.storybook/` + `@storybook/test-runner` + `@storybook/addon-a11y`) + Playwright visual regression at 360/900/1280 + `visual:approve` label workflow (§6.5).
+**PR 6.4** — ADR backfill (0003–0007; 0001 and 0002 already shipped with the pivot PR) + DX polish (commit hooks, codemod utilities). `docs/release-policy.md` is deferred to Phase 2 per §11.3.
 
 ### CI/CD
 
-Merge gate on every PR: `qa` + `test:integration` + `test:visual` + `test:a11y` + `size`. Image workflow (`.github/workflows/image.yml`) triggers on `release: published` tags on `main`; keeps supply chain (cosign + SLSA v1 + SBOM + Trivy + digest-pinned bases).
+Merge gate on every PR: `qa` + `test:integration` + `test:a11y`. Visual-regression + size-limit land in Epic 6. Image workflow (`.github/workflows/image.yml`) triggers on `release: published` tags on `main`; keeps supply chain (cosign + SLSA v1 + SBOM + Trivy + digest-pinned bases).
 
 ---
 
@@ -847,8 +835,8 @@ Merge gate on every PR: `qa` + `test:integration` + `test:visual` + `test:a11y` 
 | `research/targets.ts` | **REWRITE** | shape flips from "scoring target" to "research target" |
 | `research/cli.ts` | **REWRITE** | new subcommands; only approved `console` site |
 | `research/cli.test.ts` | **REWRITE** | coverage for new subcommands |
-| `research/__fixtures__/*` | **MIGRATE + RE-RECORD** | durable content migrates; scoring fixtures deleted; NEW per-adapter fixtures recorded via `test:adapter --record` (Epic 2 PR 2.4) |
-| `data/published/current.json` | **MIGRATE** | one-shot → `current.v1.json`; legacy file deleted after 1-week soak (PR 2.5c) |
+| `research/__fixtures__/*` | **MIGRATE + RE-RECORD** | durable content migrates; scoring fixtures deleted; NEW per-adapter fixtures recorded via `test:adapter --record` (Epic 5 PR 5.1) |
+| `data/published/current.json` | **MIGRATE** | one-shot → `current.v1.json`; legacy file deleted after 1-week soak (PR 2.4b) |
 | `data/published/history/*` | **PRESERVE** | immutable archive; new archives follow ISO-ms + monotonic-suffix |
 | `src/App.tsx` + `src/App.test.tsx` + `src/main.tsx` | **REWRITE** | → `apps/public/src/{App,App.test,main}.tsx` |
 | `src/components/Hero.*` | **REWRITE** | → `apps/public/src/routes/Landing.tsx` |
@@ -857,7 +845,7 @@ Merge gate on every PR: `qa` + `test:integration` + `test:visual` + `test:a11y` 
 | `src/components/FilterBar.*` | **REWRITE** | → `apps/public/src/features/card-view/FilterBar.tsx` |
 | `src/components/ComparePanel.*` | **REWRITE** | → `apps/public/src/features/matrix/MatrixView.tsx` + `ShortlistDrawer.tsx` |
 | `src/components/ResortDetailDrawer.*` | **REWRITE** | → `apps/public/src/features/detail/ResortDetail.tsx` |
-| `src/data/loadPublishedDataset.*` | **REWRITE** | → `packages/selectors/loadResortDataset.ts` |
+| `src/data/loadPublishedDataset.*` | **REWRITE** | → `packages/schema/loadResortDataset.ts` (selectors collapsed into schema per §5) |
 | `src/lib/format.*` | **REWRITE** | → `packages/design-system/format.ts` |
 | `src/lib/queryState.*` | **REWRITE** | → `apps/public/src/lib/urlState.ts` |
 | `src/styles/global.css` | **REWRITE** | → `packages/design-system/global.css` |
@@ -889,7 +877,6 @@ apps/public/                    Vite: landing + card view + matrix + detail
 apps/admin/                     Vite: loopback-only editor (Phase 1)
 packages/schema/                Zod + branded types + API contract
 packages/design-system/         Tokens (TS + generated CSS) + components
-packages/selectors/             ResortView + URL-state selectors
 packages/integrations/          Adapter contract + HTTP + rate limit + audit + registry
 tests/integration/              Shared harness + per-app route tests
 tests/visual/                   Playwright visual regression (360/900/1280)
@@ -906,12 +893,12 @@ scripts/generate-tokens.ts      TS → CSS token generator
 
 - **Feature branch:** `pivot/data-transparency` cut from `main`.
 - **Branch protection:** force-push **OFF**, up-to-date-with-base **OFF**, required checks **ON**. Avoids 36-PR stale-base rebase loops.
-- **PR cadence:** ~36 PRs target `pivot/data-transparency`, not `main`. Main stays deployable.
-- **Merge to main:** after Epic 7 completes, `pivot/data-transparency` merges to `main` preserving commit graph (no squash). Individual PRs within the branch can be merge-commit or squash per-PR — maintainer call.
+- **PR cadence:** ~30 PRs target `pivot/data-transparency`, not `main`. Main stays deployable.
+- **Merge to main:** after Epic 6 completes, `pivot/data-transparency` merges to `main` preserving commit graph (no squash). Individual PRs within the branch can be merge-commit or squash per-PR — maintainer call.
 - **Sync cadence:** weekly `git merge main` into `pivot/data-transparency` (never rebase; rebase would force-push the protected branch).
 - **Hotfix policy:** security hotfixes branch from latest release tag, land directly on `main`, next weekly merge brings them into the pivot branch.
 - **Deletion ordering inside each PR:** demolition commits come after the new path is green; avoids mid-PR CI red.
-- **Rollback boundary:** PR 2.5c (legacy demolition) is the last-chance rollback. Before then, flipping the reader switch is a 1-PR revert.
+- **Rollback boundary:** PR 2.4b (legacy demolition) is the last-chance rollback. Before then, reverting PR 2.4a is a one-PR rollback.
 
 ### 10.5 Preserved invariants
 
@@ -982,8 +969,7 @@ Replaces the 294-line scoring-product README. Top-level sections:
    - No deep imports into design-system internals — import only from the package root.
    - No literal z-index or breakpoint px values — use tokens.
 5. **Add** new section **Workspace Rules**:
-   - Package dependency graph: `schema (leaf) ← selectors ← design-system ← integrations; apps/* consume all packages.`
-   - `packages/design-system` never imports from `packages/selectors`.
+   - Package dependency graph: `schema (leaf, includes loadResortDataset + ResortView) ← design-system; schema ← integrations; apps/* consume all packages.`
    - Cross-layer imports blocked by standard ESLint `no-restricted-imports` configured in `eslint.config.js`.
    - `tokens.css` is generated from `tokens.ts`; hand edits fail the pre-commit hook.
 6. **Add** new section **Admin App Rules**:
@@ -1020,13 +1006,13 @@ Replaces the 294-line scoring-product README. Top-level sections:
 |---|---|---|
 | 0001 | Pivot to data-transparency (scoring removed) | this PR |
 | 0002 | Split durable resort from live signals | this PR |
-| 0003 | Phase 2 target stack: Hono + Drizzle + Postgres + Better Auth | Epic 7 PR 7.3 backfill |
-| 0004 | URL-state-first + merge/replace on collision | Epic 7 PR 7.3 backfill |
-| 0005 | Design-system tokens as TypeScript (generated CSS) | Epic 7 PR 7.3 backfill |
-| 0006 | Apache-2.0 + DCO + zero-tracking | Epic 7 PR 7.3 backfill |
-| 0007 | ADR process itself | Epic 7 PR 7.3 backfill |
+| 0003 | Phase 2 target stack: Hono + Drizzle + Postgres + Better Auth | Epic 6 PR 6.4 backfill |
+| 0004 | URL-state-first + merge/replace on collision | Epic 6 PR 6.4 backfill |
+| 0005 | Design-system tokens as TypeScript (generated CSS) | Epic 6 PR 6.4 backfill |
+| 0006 | Apache-2.0 + DCO + zero-tracking | Epic 6 PR 6.4 backfill |
+| 0007 | ADR process itself | Epic 6 PR 6.4 backfill |
 
-**ADR cadence note:** ADR-0001 and ADR-0002 land with this spec (same PR) — 0001 records the pivot rationale and 0002 records the durable-vs-live split, both of which are load-bearing from day one. ADRs 0003-0007 are backfilled at Epic 7 PR 7.3. Additional ADRs are expected to land during Epic 6 (real-adapter integration raises new decisions — upstream TOS negotiation, rate-limit tuning, redaction corpus maintenance). The ADR process (0007) describes how to propose new ones mid-stream; any architectural decision reached during Epic 6 that a reviewer flagged as "needs a writeup" becomes an ADR PR before the epic closes.
+**ADR cadence note:** ADR-0001 and ADR-0002 land with this spec (same PR) — 0001 records the pivot rationale and 0002 records the durable-vs-live split, both of which are load-bearing from day one. ADRs 0003-0007 are backfilled at Epic 6 PR 6.4. Additional ADRs are expected to land during Epic 5 (real-adapter integration raises new decisions — upstream TOS negotiation, rate-limit tuning, redaction corpus maintenance). The ADR process (0007) describes how to propose new ones mid-stream; any architectural decision reached during Epic 5 that a reviewer flagged as "needs a writeup" becomes an ADR PR before the epic closes.
 
 **i18n scope (Phase 1 explicit):** `LocalizedString` stores `{ en: string, [lang: string]: string | undefined }`; Phase 1 ships English-only surface copy. Any non-English content in `LocalizedString` (resort regional names, attribution blocks) is operator-curated translation — never machine-translated server-side, and never rendered without a `lang="xx"` attribute. Missing translations surface a visible indicator rather than silently falling back to `en`. A dedicated `docs/i18n-policy.md` is deferred until a second locale actually ships (§11.3 deferred-docs table).
 
@@ -1045,7 +1031,7 @@ Replaces the 294-line scoring-product README. Top-level sections:
 | `SECURITY.md` | Minimal GitHub Security Advisories disclosure policy (see 11.3.1) | Epic 1 PR 1.1 |
 | `docs/data-schema-versioning.md` | `schema_version` semantics; when to bump; migration CLI contract | Epic 2 PR 2.1 |
 | `docs/local-dev.md` | Loopback admin; font setup; Playwright install; MSW | Epic 5 PR 5.1 |
-| `docs/admin.md` | Single admin doc: shell, loopback binding, read-only-below-md, publish workflow, adapter usage, `RECORD_ALLOWED`, attribution requirements | Epic 5 or 6 |
+| *(admin usage)* | Covered in README §"Using the admin app" and README §"The research CLI" — no separate doc file. Promotes to `docs/admin.md` only if the README section grows past ~150 lines. | — |
 
 Rationale: one admin doc, one dev-setup doc, one schema-versioning doc — not three admin docs plus separate ethics/trademark/i18n/release policies. Those split off only when one of them is big enough to need its own file.
 
@@ -1084,7 +1070,7 @@ Baseline best-effort process:
 
 | Path | Change |
 |---|---|
-| `docs/delivery-model.md` | Reference 7-epic plan, PR cadence, branch protection rules |
+| `docs/delivery-model.md` | Reference 6-epic plan, PR cadence, branch protection rules |
 | `docs/deployment-contract.md` | Two-app layout; production builds `apps/public` only; admin is dev-only loopback; CSP baked at build time |
 | `docs/testing-strategy.md` | Add visual regression (Playwright 360/900/1280 with `visual:approve` label), axe-core-per-route, size-limit, integration harness, mobile-first default viewport |
 | `docs/workstation-setup.md` | Add `npm run storybook`, `npm run dev:admin`, font setup, MSW+Playwright install, mise tool list update |
@@ -1138,7 +1124,7 @@ All seven decisions flagged in the drafting pass have been resolved with the use
 
 ### 12.4 `exactOptionalPropertyTypes` — enabled on Day 1
 
-**Resolution:** override the drafting agent's Epic 7 deferral. Flag is enabled in Epic 1 PR 1.1.
+**Resolution:** override the drafting agent's end-of-project deferral. Flag is enabled in Epic 1 PR 1.1.
 
 **Reasoning:** the TypeScript reviewer's argument wins on the merits — concentrating Zod-`.optional()` cleanup cost alongside the v0→v1 schema migration is cheaper than a large end-of-project diff across six epics of accumulated code. The ~1 day of up-front schema work is absorbed into Epic 1/2 where schema surgery is already the primary activity.
 
@@ -1199,7 +1185,7 @@ The expected next artifact is a detailed implementation plan at `docs/superpower
 ### 14.2 What happens next
 
 1. Human review of this PR.
-2. Merge to `pivot/data-transparency`; `main` stays on the pre-pivot state until Epic 7 closes and the branch is merged back (per §10.4).
+2. Merge to `pivot/data-transparency`; `main` stays on the pre-pivot state until Epic 6 closes and the branch is merged back (per §10.4).
 3. Dispatch `writing-plans` against this spec to produce the epic-by-epic implementation plan.
 4. Execute Epic 1 PR 1.1 first (npm workspaces layout; `exactOptionalPropertyTypes: true` on Day 1 per §12.4).
 
@@ -1207,4 +1193,14 @@ The expected next artifact is a detailed implementation plan at `docs/superpower
 
 - Branch protection on `pivot/data-transparency`: force-push OFF, up-to-date-with-base OFF, required checks ON. Do not rebase; `git merge main` weekly (§10.4).
 - `npm run qa` (lint → typecheck → coverage) is the hard gate on every PR. This spec is prose only and does not trip the gate; any code PR must.
-- ADRs 0002–0007 backfill at Epic 7 PR 7.3. Additional ADRs are expected mid-stream during Epic 6 (real-adapter integration surfaces new decisions).
+- ADRs 0003–0007 backfill at Epic 6 PR 6.4. Additional ADRs are expected mid-stream during Epic 5 (real-adapter integration surfaces new decisions).
+
+### 14.4 Revisit during plan-writing
+
+The following are implementation-level questions that don't belong in this spec but should be re-evaluated when `writing-plans` produces the detailed plan. Flagging them here so the plan-writing agent sees them:
+
+- **Per-workspace `vite.config.ts` coverage exclusions.** The 100% coverage gate applied to every package means config files, generator scripts, and re-export barrels may need exclusion entries. Revisit the `coverage.exclude` shape at plan-writing time with a concrete list of what's worth excluding vs. what should be tested.
+- **Contract snapshot test mechanism (§8.4.1 invariant 3).** Currently specified as "serialize schema set to JSON and diff against `contract.snap`." The plan should choose a specific serializer (JSON.stringify ordering, toJSONSchema, etc.) and whether it's a Vitest `toMatchSnapshot` or a separate CI step.
+- **Font self-hosting scope (§2.7).** Three families (DM Serif Display, DM Sans, JetBrains Mono) is more than an MVP needs. Consider starting with one family that covers body + UI + numeric (JetBrains Mono alone, or DM Sans alone) and adding the others if a typography pass actually needs them.
+
+These are intentionally NOT resolved here — they're implementation choices that benefit from being made alongside the code that uses them, not prescribed in advance.

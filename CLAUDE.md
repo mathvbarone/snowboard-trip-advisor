@@ -130,9 +130,8 @@ Each sub-rule below names the PR that activates it. Until that PR lands, the rul
 
 ### Workspace Rules (active from PR 1.1)
 
-- Package dependency graph: `schema` (leaf) ← `selectors` ← `design-system` ← `integrations`; `apps/*` consume all packages.
-- `packages/design-system` never imports from `packages/selectors`.
-- Cross-layer imports are blocked by ESLint `no-restricted-imports` configured in `eslint.config.js`.
+- Package dependency graph: `schema` (leaf, includes `loadResortDataset` + `ResortView` projection) ← `design-system`; `schema` ← `integrations`; `apps/*` consume all packages.
+- Cross-layer imports are blocked by standard ESLint `no-restricted-imports` configured in `eslint.config.js`.
 - `tokens.css` is generated from `tokens.ts` (PR 1.4); hand edits fail the pre-commit hook.
 
 ### UI Code Rules (active from PR 1.4 for tokens; from PR 3.1 for `apps/public` paths)
