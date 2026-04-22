@@ -143,10 +143,13 @@ Each sub-rule below names the PR that activates it. Until that PR lands, the rul
 - No deep imports into design-system internals — import only from the package root.
 - No literal z-index or breakpoint px values — use tokens.
 
-### Admin App Rules (active from PR 4.1)
+### Admin App Rules
 
+Active from PR 4.1:
 - `apps/admin` is loopback-only; binds `127.0.0.1:5174` with `strictPort: true`.
 - Never build `apps/admin` into a production container image.
+
+Active from PR 4.6:
 - Admin UI is read-only below the `md` breakpoint; edit controls are removed from the tab order, not merely disabled.
 
 ### Integration Adapter Rules (active from PR 1.3 for the contract; from PR 5.1 for the dispatcher baseline, PR 5.2 for dispatcher hardening)

@@ -4,6 +4,7 @@
 - **Date:** 2026-04-22
 - **Deciders:** @mathvbarone
 - **Related spec:** [`docs/superpowers/specs/2026-04-22-product-pivot-design.md`](../superpowers/specs/2026-04-22-product-pivot-design.md)
+- **Related ADR:** [`ADR-0002`](./0002-durable-vs-live-split.md) (promotes the durable/live distinction to an architectural invariant)
 - **Supersedes:** [`docs/superpowers/specs/ARCHIVED-2026-04-03-snowboard-trip-advisor-design.md`](../superpowers/specs/ARCHIVED-2026-04-03-snowboard-trip-advisor-design.md)
 
 ## Context
@@ -42,7 +43,7 @@ Concretely:
 
 - **Scoring code and config are deleted.** `config/scoring.ts`, `research/scoring/*`, and related tests are removed (§10.2 of the spec). This is a one-way door — reverting the pivot would require rebuilding scoring on top of the new schema.
 - **The product is less "opinionated" by default.** A user who wanted a recommendation engine is not this product's user.
-- **Dataset migration required.** The v0 published dataset must migrate to v1 (`migrate:v0-to-v1` CLI, spec §10.2 PR 2.1). Legacy reader stays behind a feature flag for one week before demolition (spec §10.4).
+- **Dataset migration required.** The v0 published dataset must migrate to v1 (`migrate:v0-to-v1` CLI, spec §9 Epic 2 PR 2.1). After the consumer flip (PR 2.4a) the legacy reader is retained but unwired — added to the workspace's `coverage.exclude` list with a dated rationale comment that sets a one-week soak deadline. Demolition happens in PR 2.4b once the soak period closes (spec §10.4 rollback boundary).
 - **README and CLAUDE.md both require updates** to match the new framing. Drift between code and documentation was already the primary documentation risk for this repo; this ADR is landing in the same PR as those updates.
 
 ### Neutral / follow-on
