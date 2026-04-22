@@ -12,17 +12,21 @@
 #     can adjust its approach.
 #
 # What gets blocked:
-#   - `--no-verify` anywhere in the command (bypasses the pre-commit hook
+#   - `--no-verify` as a command-line flag (bypasses the pre-commit hook
 #     that enforces `npm run qa`; forbidden by CLAUDE.md).
-#   - `git push --force`, `git push --force-with-lease`, or `git push -f`
-#     when the target ref matches `main` or `master`. Force-pushing to
-#     feature branches is allowed (branch realignment after squash-merge
-#     is a legitimate pattern).
+#   - Force-push to `main` or `master`, detected by ANY of:
+#       * `--force`, `--force-with-lease`, or `-f` as a flag
+#       * `+ref` forced-refspec prefix (e.g. `git push origin +main`)
+#     This is enforced even when wrapped in `bash -c`, `sh -c`, `eval`,
+#     `xargs`, etc. — the hook matches on the full command text, including
+#     uppercase variants.
 #
 # What does NOT get blocked:
+#   - `--no-verify` embedded inside a larger argument like `--grep=--no-verify`.
 #   - `git commit --amend` on unpushed commits (legitimate TDD flow).
-#   - `git reset --hard` generically (legitimate for branch resets).
-#   - Force-push to any branch that is not `main` or `master`.
+#   - `git reset --hard` generically.
+#   - Force-push to any branch that is not `main` or `master`
+#     (including `feature/main`, `user/main`, `hotfix/master`).
 
 set -eu
 
@@ -56,37 +60,62 @@ block() {
   exit 2
 }
 
-# --- Rule 1: block --no-verify anywhere ---
-# Covers `git commit --no-verify`, `git push --no-verify`, and any wrapper.
-case "$cmd" in
-  *--no-verify*)
-    block "--no-verify bypasses the pre-commit quality gate (CLAUDE.md: forbidden)"
-    ;;
-esac
+# Case-normalize the command for pattern matching; keep the original for
+# display. Defeats `GIT PUSH --FORCE origin main` evasion.
+lower="$(printf '%s' "$cmd" | tr '[:upper:]' '[:lower:]')"
 
-# --- Rule 2: block force-push to main/master ---
-# Detect `git push` with a force variant (--force / --force-with-lease / -f)
-# that targets main or master (with or without `origin`).
-is_git_push=0
-if printf '%s' "$cmd" | grep -qE '(^|[[:space:]]|;|&&|\|\|)git[[:space:]]+push([[:space:]]|$)'; then
-  is_git_push=1
+# --- Rule 1: block --no-verify used as an argument flag ---
+# Must appear as a standalone flag — preceded by start-of-string or
+# whitespace, followed by whitespace / `=` / end. This avoids blocking
+# legitimate uses like `git log --grep=--no-verify` where the string is
+# embedded inside a larger grep argument.
+if printf '%s' "$lower" | grep -qE '(^|[[:space:]])--no-verify([[:space:]]|=|$)'; then
+  block "--no-verify bypasses the pre-commit quality gate (CLAUDE.md: forbidden)"
+fi
+
+# --- Rule 2: block force-push to main/master (even via wrappers) ---
+# Block when ALL three are present in the command text:
+#   (a) `git push` anywhere (even inside bash -c / sh -c / eval / xargs)
+#   (b) a force mechanism (--force, --force-with-lease, -f, or `+ref` prefix)
+#   (c) a protected branch token (`main` / `master`) in a ref position
+#
+# The separator classes use `[^[:alnum:]_/]` so quotes, plus signs,
+# semicolons, etc. all terminate a match (allowing detection inside
+# `bash -c "..."`). `/` is specifically excluded so `feature/main` does
+# NOT match.
+
+has_git_push=0
+if printf '%s' "$lower" | grep -qE '(^|[^[:alnum:]_])git[[:space:]]+push([[:space:]]|$)'; then
+  has_git_push=1
 fi
 
 has_force=0
-if printf '%s' "$cmd" | grep -qE '(--force|--force-with-lease)([[:space:]]|=|$)'; then
+# --force / --force-with-lease / -f as a standalone flag
+if printf '%s' "$lower" | grep -qE '(^|[[:space:]])(--force|--force-with-lease|-f)([[:space:]]|=|$)'; then
   has_force=1
-elif printf '%s' "$cmd" | grep -qE '[[:space:]]-f([[:space:]]|$)'; then
+# +main / +master forced-refspec prefix
+elif printf '%s' "$lower" | grep -qE '(^|[^[:alnum:]_])\+(main|master)([^[:alnum:]_/]|$)'; then
+  has_force=1
+# +origin/main, +refs/heads/main forced-refspec prefix
+elif printf '%s' "$lower" | grep -qE '(^|[^[:alnum:]_])\+(origin/|refs/heads/)(main|master)([^[:alnum:]_/]|$)'; then
   has_force=1
 fi
 
+# Protected branch token. Two patterns:
+#   (i)  standalone `main` / `master` — allowed separators on either side
+#        are anything that is NOT alphanumeric/underscore/slash. This
+#        matches bare `main`, `+main`, ` main`, `:main`, `main:`, `main"`,
+#        etc., and crucially does NOT match `feature/main`, `main/foo`,
+#        `maintain`, `mainframe`.
+#   (ii) `origin/main` or `refs/heads/main` — explicit path prefix.
 targets_protected=0
-if printf '%s' "$cmd" | grep -qE '(^|[[:space:]]|/)main([[:space:]]|:|$)'; then
+if printf '%s' "$lower" | grep -qE '(^|[^[:alnum:]_/])(main|master)([^[:alnum:]_/]|$)'; then
   targets_protected=1
-elif printf '%s' "$cmd" | grep -qE '(^|[[:space:]]|/)master([[:space:]]|:|$)'; then
+elif printf '%s' "$lower" | grep -qE '(^|[^[:alnum:]_])(origin|refs/heads)/(main|master)([^[:alnum:]_/]|$)'; then
   targets_protected=1
 fi
 
-if [ "$is_git_push" = "1" ] && [ "$has_force" = "1" ] && [ "$targets_protected" = "1" ]; then
+if [ "$has_git_push" = "1" ] && [ "$has_force" = "1" ] && [ "$targets_protected" = "1" ]; then
   block "force-push to main/master is forbidden (CLAUDE.md git safety protocol)"
 fi
 

@@ -37,7 +37,9 @@ if [ ! -x .git/hooks/pre-commit ]; then
 fi
 
 # Surface branch + dirty-state so the agent has current git context.
-if command -v git >/dev/null 2>&1 && [ -d .git ]; then
+# Use `git rev-parse --git-dir` rather than `[ -d .git ]` so this works
+# inside linked worktrees (where `.git` is a file pointer, not a directory).
+if command -v git >/dev/null 2>&1 && git rev-parse --git-dir >/dev/null 2>&1; then
   branch="$(git branch --show-current 2>/dev/null || printf '?')"
   printf '\nBranch: %s\n' "$branch"
   if [ -n "$(git status --porcelain 2>/dev/null)" ]; then

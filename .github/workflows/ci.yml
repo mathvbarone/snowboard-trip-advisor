@@ -34,7 +34,10 @@ jobs:
           base_sha='${{ github.event.pull_request.base.sha }}'
           head_sha='${{ github.event.pull_request.head.sha }}'
           fail=0
-          for sha in $(git rev-list "$base_sha".."$head_sha"); do
+          # --no-merges excludes auto-generated merge commits (weekly `git
+          # merge main` into pivot/data-transparency per spec §10.4 is not
+          # expected to carry a human DCO sign-off).
+          for sha in $(git rev-list --no-merges "$base_sha".."$head_sha"); do
             trailer="$(git show -s --format='%(trailers:key=Signed-off-by,valueonly)' "$sha")"
             if [ -z "$trailer" ]; then
               subject="$(git show -s --format='%s' "$sha")"
@@ -44,7 +47,7 @@ jobs:
           done
           if [ "$fail" != "0" ]; then
             echo ""
-            echo "Every commit in a PR must carry a 'Signed-off-by:' trailer (DCO)."
+            echo "Every non-merge commit in a PR must carry a 'Signed-off-by:' trailer (DCO)."
             echo "Use 'git commit -s' when committing."
             echo "To fix existing commits: rebase and amend each missing commit with 'git commit -s --amend'."
             exit 1
