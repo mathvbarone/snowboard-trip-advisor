@@ -32,7 +32,7 @@ The single trip organizer planning a group snowboard trip who wants to:
 ### Phase 2 (target)
 
 - Multi-operator deployments with authenticated admin users.
-- Postgres-backed persistence via a Hono admin API (Better Auth for sessions).
+- Postgres-backed persistence via a Hono admin API. Better Auth is the current candidate for sessions, with Auth.js v5 and hosted options (Clerk, WorkOS) as fallbacks if Better Auth doesn't fit when Phase 2 starts.
 - Redis / BullMQ / S3 are **deferred until observable pressure justifies them**.
 - The `/api/*` contract is the stable portability line — Phase 2 re-implements it verbatim on Postgres, and the admin UI does not change at the boundary.
 
@@ -94,7 +94,7 @@ Details and agent rules are in [`CLAUDE.md`](CLAUDE.md).
 ## Data & trust posture
 
 - Zero first-party tracking: no analytics, no third-party beacons, no cross-site identifiers.
-- `localStorage` is used for shortlist state (same-origin, user-controlled, never transmitted).
+- Primary shortlist state is URL-based. `localStorage` is used only for trip inputs (dates, party size, traveller names), the `prefers-color-scheme` override, and a prior-session shortlist fallback for the merge/replace modal — same-origin, user-controlled, never transmitted.
 - Fonts are self-hosted; CSP is baked at build time.
 - Outbound links carry `rel="noopener noreferrer"` and `referrerpolicy="no-referrer"`.
 - Affiliate IDs are default-off; operators who enable them must disclose.

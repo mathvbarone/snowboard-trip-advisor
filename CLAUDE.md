@@ -124,47 +124,46 @@ React:
 - Treat the workspace's `vite.config.ts` as the source of truth for coverage exclusions; do not mirror the exact exclusion list here.
 - If coverage exclusions change, update the config and keep this note aligned at a high level only.
 
-## Post-Pivot Rules (applicable on `pivot/data-transparency` after Epic 1 lands)
+## Post-Pivot Rules (activate per-PR on `pivot/data-transparency`)
 
-These rules describe the target repo structure. They take effect as each epic lands on `pivot/data-transparency`. On `main` (pre-pivot), only the rules above apply.
+Each sub-rule below names the PR that activates it. Until that PR lands, the rule does not apply. On `main` (pre-pivot), none of these rules apply. PR numbers reference spec §9.
 
-### Workspace Rules
+### Workspace Rules (active from PR 1.1)
 
 - Package dependency graph: `schema` (leaf) ← `selectors` ← `design-system` ← `integrations`; `apps/*` consume all packages.
 - `packages/design-system` never imports from `packages/selectors`.
-- Cross-layer imports are blocked by `eslint-plugin-sta-design/no-restricted-imports`.
-- `tokens.css` is generated from `tokens.ts`; hand edits fail the pre-commit hook.
+- Cross-layer imports are blocked by ESLint `no-restricted-imports` configured in `eslint.config.js`.
+- `tokens.css` is generated from `tokens.ts` (PR 1.4); hand edits fail the pre-commit hook.
 
-### UI Code Rules
+### UI Code Rules (active from PR 1.4 for tokens; from PR 3.1 for `apps/public` paths)
 
 - UI code imports styling only from `packages/design-system`.
-- No raw CSS color values in `.tsx` files (`eslint-plugin-sta-design/no-raw-color`).
-- No inline style values that should be tokens (`no-inline-style-values`).
-- No raw HTML element imports where a design-system component exists (`no-raw-element`).
-- No deep imports into design-system internals (`no-design-system-deep-import`).
-- No literal z-index values (`no-literal-z-index`).
-- No literal breakpoint px values (`no-literal-breakpoint-px`).
+- No raw CSS color values in `.tsx` files — use tokens.
+- No inline style values that should be tokens.
+- No raw HTML element imports where a design-system component exists.
+- No deep imports into design-system internals — import only from the package root.
+- No literal z-index or breakpoint px values — use tokens.
 
-### Admin App Rules
+### Admin App Rules (active from PR 5.1)
 
 - `apps/admin` is loopback-only; binds `127.0.0.1:5174` with `strictPort: true`.
 - Never build `apps/admin` into a production container image.
 - Admin UI is read-only below the `md` breakpoint; edit controls are removed from the tab order, not merely disabled.
 
-### Integration Adapter Rules
+### Integration Adapter Rules (active from PR 1.3 for the contract; from PR 6.1 for the dispatcher)
 
-- All external HTTP goes through `packages/integrations/http/constrainedDispatcher.ts`.
-- Adapters never throw; they return `AdapterResult` (tagged union).
+- All external HTTP goes through `packages/integrations/http/constrainedDispatcher.ts` (PR 6.1).
+- Adapters never throw; they return `AdapterResult` (tagged union) — contract active from PR 1.3.
 - `upstream_hash` is computed from raw bytes **before** parse.
 - `RECORD_ALLOWED=true` gates fixture recording at process boot AND at the adapter level; mocks in `*.test.ts` are unconditionally allowed.
 - Fixture PII redaction is a hard test requirement; redaction rules live alongside each adapter.
 
-### Visual-Diff Workflow
+### Visual-Diff Workflow (active from PR 4.5 when visual regression wires up)
 
 - PRs touching `apps/public/**` or `packages/design-system/tokens.ts` require a `visual:approve` label applied by a CODEOWNER before merge.
 - Agents attach screenshots and request the label; do not self-approve.
 
-### Migration / Hotfix Branch Rules
+### Migration / Hotfix Branch Rules (active immediately)
 
 - Schema-version bumps land on a `schema/vN-to-vN+1` branch with migration CLI + golden-fixture conversion; maintainer review required.
 - Security hotfixes branch from the latest release tag, land on `main`, and propagate into `pivot/data-transparency` via the weekly `git merge main` (never rebase — branch protection requires non-fast-forward merges).

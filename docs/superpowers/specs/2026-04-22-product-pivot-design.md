@@ -235,7 +235,7 @@ Per-resort, per-field Markdown-formatted notes stored alongside the workspace. R
 
 ### 3.11 Admin process topology (Phase 1)
 
-`apps/admin` is a Vite SPA served by a Vite dev server that **also hosts an in-process request handler** via a Vite middleware plugin (`apps/admin/vite-plugin-admin-api.ts`). The middleware implements the `/api/*` surface (Fastify-style handlers) in the same Node process as the dev server. The SPA calls `fetch('/api/...')` exactly as it will in Phase 2; the server implementation differs but the wire contract does not.
+`apps/admin` is a Vite SPA served by a Vite dev server that **also hosts an in-process request handler** via a Vite middleware plugin (`apps/admin/vite-plugin-admin-api.ts`). The middleware implements the `/api/*` surface in the same Node process as the dev server. The SPA calls `fetch('/api/...')` exactly as it will in Phase 2; the server implementation differs but the wire contract does not.
 
 - **One process.** No separate admin-api binary in Phase 1. The rate-limit bucket (§7.4) lives in-memory in this process; there is no cross-process contention because the CLI does not fetch adapters.
 - **Wire contract identical to Phase 2.** Every request/response goes through Zod parse on both sides. Admin's browser code never imports filesystem APIs, Node-only modules, or the adapter registry directly. It only uses `fetch`.
@@ -304,7 +304,7 @@ export type UpstreamHash = z.infer<typeof UpstreamHash>;
 // etc.
 ```
 
-**Constructor contract:** callers obtain a branded value only via `Schema.parse(raw)` or `Schema.safeParse(raw)`. `urlState.ts` parses URL params through these schemas; no ad-hoc `as ResortSlug` casts anywhere. ESLint rule `eslint-plugin-sta-design/no-brand-cast` bans `as ResortSlug` / `as UpstreamHash` patterns outside `packages/schema/` test files.
+**Constructor contract:** callers obtain a branded value only via `Schema.parse(raw)` or `Schema.safeParse(raw)`. `urlState.ts` parses URL params through these schemas; no ad-hoc `as ResortSlug` casts anywhere. This is enforced via code review; if `as BrandedType` patterns appear, add a `no-restricted-syntax` entry in `eslint.config.js` (standard ESLint, no custom plugin needed).
 
 Round-trip through `JSON.stringify` + `Schema.parse` is safe: the underlying runtime value is a plain string; `parse` re-brands.
 
@@ -457,7 +457,7 @@ apps/public             (depends on schema, selectors, design-system)
 apps/admin              (depends on schema, selectors, design-system, integrations)
 ```
 
-`format.ts` in `packages/design-system` accepts only primitive types from `schema` (`Money`, `LocalizedString`, `ISODateTimeString`); it never sees `ResortView`. ESLint `no-restricted-imports` (via `eslint-plugin-sta-design`) blocks cross-layer violations in CI.
+`format.ts` in `packages/design-system` accepts only primitive types from `schema` (`Money`, `LocalizedString`, `ISODateTimeString`); it never sees `ResortView`. Standard ESLint `no-restricted-imports` (configured in `eslint.config.js`) blocks cross-layer violations in CI.
 
 ---
 
@@ -475,16 +475,18 @@ apps/admin              (depends on schema, selectors, design-system, integratio
 
 4pt base: `xs=4, sm=8, md=12, lg=16, xl=24, 2xl=32, 3xl=48, 4xl=64`.
 
-### 6.3 ESLint rules (`eslint-plugin-sta-design`)
+### 6.3 ESLint configuration
 
-Local workspace plugin enforces:
-- `no-raw-color` — no raw hex/rgb/hsl/oklch in `.tsx`/`.ts`; only tokens.
-- `no-inline-style-values` — inline styles allowed but values must come from tokens.
-- `no-raw-element` — `<button>`, `<input>`, `<a>`, `<dialog>` etc. must use design-system wrappers where one exists.
-- `no-design-system-deep-import` — only `import X from 'packages/design-system'` or `from 'packages/design-system/format'`; no `packages/design-system/internals/*`.
-- `no-literal-z-index` — must use `zIndex.*` token.
-- `no-literal-breakpoint-px` — must use `breakpoints.*` token.
-- `no-restricted-imports` — enforces the package DAG (Section 5.3).
+Design-system and package-DAG discipline is enforced with **standard ESLint rules** configured in `eslint.config.js`. No custom plugin. This is a deliberate scope cut: at MVP scale, a custom workspace plugin with seven rules is maintenance overhead that isn't justified by the violations it prevents.
+
+What gets enforced, and how:
+
+- **Package DAG (§5.3)** — `no-restricted-imports` with per-package `patterns` rules. Cross-layer imports fail CI.
+- **Deep-import discipline** — `no-restricted-imports` patterns for `packages/design-system/internals/*` etc. Consumers import only from the package root or an explicitly public sub-path.
+- **Raw HTML elements where wrappers exist** — `no-restricted-syntax` rule matching `JSXOpeningElement[name.name="button"]` etc., scoped to app/feature directories (design-system internals are exempt).
+- **Raw color values, literal z-index, literal breakpoint px** — enforced by CSS token discipline: values live in `tokens.ts`, consumers read them as CSS custom properties. If raw values start showing up anyway, add a targeted `no-restricted-syntax` rule at that time, not preemptively.
+
+If a specific violation pattern becomes a real problem (not a hypothetical one), a targeted rule is added to `eslint.config.js`. A custom plugin workspace is only justified if three or more rules accumulate that can't be expressed with built-ins.
 
 ### 6.4 Components
 
@@ -688,7 +690,11 @@ The Phase 1 `/api/*` surface consumed by `apps/admin` is the **stable contract**
 
 #### 8.4.1 `/api/*` contract inventory
 
-Every endpoint has a Zod request/response schema pair in `packages/schema/api/*.ts`. Role and rate-limit class are recorded for Phase 2; in Phase 1 role checks are no-ops and the rate-limit class is advisory.
+The inventory below is the **Phase 1 implementation scope** — endpoints the admin UI actually calls. Phase 2-only endpoints (auth, audit read surface, preview tokens) are listed separately so Phase 2 planning has a seed list, but they are not implemented or schema'd in Phase 1.
+
+Every Phase 1 endpoint has a Zod request/response schema pair in `packages/schema/api/*.ts`. Role and rate-limit class are recorded for Phase 2; in Phase 1 role checks are no-ops and the rate-limit class is advisory.
+
+**Phase 1 implemented surface:**
 
 | # | Method + path | Request schema | Response schema | Role (P2) | RL class (P2) |
 |---|---|---|---|---|---|
@@ -699,18 +705,14 @@ Every endpoint has a Zod request/response schema pair in `packages/schema/api/*.
 | 5 | `POST /api/resorts/:slug/sync/:sourceKey` | `SyncBody` (field-list scope) | `SyncResponse` (updated fields + new observed_at) | `editor` | external |
 | 6 | `POST /api/resorts/:slug/publish` | `PublishBody` (all-or-nothing Phase 1) | `PublishResponse` (version id, archive path) | `publisher` | write |
 | 7 | `GET /api/publishes` | `ListPublishesQuery` | `ListPublishesResponse` (version history) | `editor` | read |
-| 8 | `GET /api/audit` | `ListAuditQuery` | `ListAuditResponse` (per-adapter audit entries) | `audit_reader` | read |
-| 9 | `GET /api/audit/:id` | `AuditIdParam` | `AuditEntryResponse` (full body, redaction-aware) | `audit_reader` | read |
-| 10 | `GET /api/health` | `HealthQuery` (none) | `HealthResponse` (adapter freshness, archive size) | `editor` | read |
-| 11 | `POST /api/preview-tokens` | `PreviewTokenBody` (slug, TTL ≤24h) | `PreviewTokenResponse` (signed token) | `editor` | write |
-| 12 | `GET /api/analyst-notes/:slug` | `ResortSlugParam` | `AnalystNoteResponse` (Markdown body, sanitized HTML preview) | `editor` | read |
-| 13 | `PUT /api/analyst-notes/:slug` | `AnalystNoteBody` | `AnalystNoteResponse` | `editor` | write |
-| 14 | `POST /api/auth/login` (P2) | `LoginBody` | `LoginResponse` (sets session cookie) | `public` | auth |
-| 15 | `POST /api/auth/logout` (P2) | — | `204 No Content` | any | auth |
-| 16 | `POST /api/auth/refresh` (P2) | — (refresh cookie) | `204` (new session + refresh cookie) | any | auth |
+| 8 | `GET /api/health` | `HealthQuery` (none) | `HealthResponse` (adapter freshness, archive size) | `editor` | read |
+| 9 | `GET /api/analyst-notes/:slug` | `ResortSlugParam` | `AnalystNoteResponse` (Markdown body, sanitized HTML preview) | `editor` | read |
+| 10 | `PUT /api/analyst-notes/:slug` | `AnalystNoteBody` | `AnalystNoteResponse` | `editor` | write |
+
+**Phase 2 additions (not schema'd in Phase 1):** `GET /api/audit` + `GET /api/audit/:id` (audit read surface, belongs with RBAC), `POST /api/preview-tokens` (sharing draft resorts — no sharing in loopback), and the auth triplet `POST /api/auth/login` / `logout` / `refresh`.
 
 **Contract invariants enforced by CI:**
-1. Every endpoint has a Zod schema pair in `packages/schema/api/*.ts`.
+1. Every Phase 1 endpoint has a Zod schema pair in `packages/schema/api/*.ts`.
 2. `apps/admin` fetches go through a single typed client generated from those schemas (no ad-hoc `fetch` calls outside the client).
 3. A contract snapshot test serializes the schema set to JSON and diffs against `packages/schema/api/__snapshots__/contract.snap`. Changes require maintainer review.
 4. Phase 2 route registration uses the same Zod schemas — route registration fails to compile if the admin UI's expected shape diverges.
@@ -723,7 +725,7 @@ Every endpoint has a Zod request/response schema pair in `packages/schema/api/*.
 
 ### 8.5 Preview tokens
 
-Signed preview tokens for draft-resort sharing. Phase 1 does not implement them (no sharing in loopback-only mode); the endpoint exists in the contract so Phase 2 activation is additive. Signing algorithm (Ed25519 is the current assumption) is a Phase 2 decision.
+Signed preview tokens for draft-resort sharing are a Phase 2 concept only — Phase 1 has no sharing surface (loopback admin). The endpoint is not schema'd in Phase 1; it appears in the Phase 2 addition list in §8.4.1. Signing algorithm (Ed25519 is the current assumption) is a Phase 2 decision.
 
 ### 8.6 Per-resort publish
 
@@ -749,13 +751,7 @@ Seven epics, ~36 PRs. Each epic completes independently; the quality gate stays 
 
 **PR 1.6** — `.size-limit.json` (JS budget) + CI `npm run size` step + Lighthouse CI smoke + axe-core-per-route wiring in the harness.
 
-**PR 1.7** — `eslint-plugin-sta-design/` workspace package rollout, split into three sequenced PRs so the fleet-wide rule set lands in reviewable pieces without ever regressing the main branch:
-
-- **PR 1.7a — plugin scaffold (rules off):** create the `eslint-plugin-sta-design/` workspace package with all rule implementations, unit tests, and documentation. Register all rules in `eslint.config.js` with `severity: 'off'`. Merging this PR adds the plugin to the dependency graph but does not fail any lint run. Size budget: plugin code + tests only.
-- **PR 1.7b — autofix sweep:** flip all auto-fixable rules to `severity: 'error'` and commit the mechanical autofix output across the tree in one changeset. Reviewer scope is "confirm the autofix was mechanical"; no hand-edits in this PR.
-- **PR 1.7c — manual fixes:** flip the remaining non-auto-fixable rules to `severity: 'error'` and apply hand-written fixes with per-rule commits. Each commit is scoped to a single rule for reviewability. The `qa` gate is green at the end of this PR.
-
-Rationale: a single mega-PR turns the tree red mid-review, and a single trickle turns every intermediate state into a partial enforcement. The three-PR split keeps `main` green between every merge and makes the autofix step reviewer-friendly.
+**PR 1.7** — `eslint.config.js` flat config rewrite with `no-restricted-imports` patterns enforcing the package DAG (§5.3) and the design-system deep-import discipline (§6.3). Standard ESLint only; no custom plugin. Any additional targeted rules (`no-restricted-syntax` for raw HTML elements, etc.) are added in the same PR if the tree has existing violations, or later when a violation actually appears.
 
 ### Epic 2 — Data migration
 
@@ -814,7 +810,7 @@ Rationale: a single mega-PR turns the tree red mid-review, and a single trickle 
 
 **PR 7.1** — `pino` structured logging + error boundary instrumentation in both apps.
 **PR 7.2** — Performance/a11y audit rollup (Lighthouse CI + size-limit baseline tuning).
-**PR 7.3** — ADR backfill (0001–0007) + `docs/release-policy.md` + DX polish (commit hooks, codemod utilities).
+**PR 7.3** — ADR backfill (0003–0007; 0001 and 0002 already shipped with the pivot PR) + DX polish (commit hooks, codemod utilities). `docs/release-policy.md` is deferred to Phase 2 per §11.3.
 
 ### CI/CD
 
@@ -872,7 +868,7 @@ Merge gate on every PR: `qa` + `test:integration` + `test:visual` + `test:a11y` 
 | `tsconfig.json` | **REWRITE** | → `tsconfig.base.json` + per-package + `tsconfig.references.json` |
 | `package.json` | **AMEND** | workspaces + new scripts |
 | `package-lock.json` | **AMEND** | regenerated |
-| `eslint.config.js` | **REWRITE** | flat config + `eslint-plugin-sta-design` |
+| `eslint.config.js` | **REWRITE** | flat config with standard ESLint `no-restricted-imports` + `no-restricted-syntax` patterns; no custom plugin |
 | `Dockerfile` | **AMEND** | multi-stage public-only |
 | `nginx.conf` | **AMEND** | add CSP + Referrer-Policy + Permissions-Policy + HSTS + X-Content-Type-Options |
 | `Makefile` | **DELETE** | targets migrate to `npm run *` scripts (single source of truth) |
@@ -901,7 +897,6 @@ tests/a11y/                     axe-core-per-route + Lighthouse smoke
 config/freshness.ts             Per-field TTL
 config/schedules.ts             Cron schedules (Phase 2)
 config/csp.ts                   Shared CSP source
-eslint-plugin-sta-design/       Local workspace plugin
 scripts/generate-tokens.ts      TS → CSS token generator
 ```
 
@@ -956,13 +951,13 @@ Replaces the 294-line scoring-product README. Top-level sections:
 10. Data model at a glance (Resort + ResortLiveSignal; METRIC_FIELDS; schema_version 1; Money EUR; LocalizedString en).
 11. Project layout (after April 2026 pivot).
 12. Quality gate (100% coverage; pre-commit; `--no-verify` forbidden).
-13. Data & trust posture ("zero tracking" = no analytics, no third-party beacons, no cross-site identifiers, no server-side fingerprinting; **`localStorage` IS used** for the shortlist-merge fallback and `prefers-color-scheme` override, but it is same-origin, user-controlled, and never transmitted — documented here so "zero tracking" is not confused with "zero storage"; self-hosted fonts; CSP at build time; `rel="noopener noreferrer" referrerpolicy="no-referrer"`; affiliate default-off).
+13. Data & trust posture ("zero tracking" = no analytics, no third-party beacons, no cross-site identifiers, no server-side fingerprinting; **`localStorage` IS used** under key `sta-v1` for trip inputs (dates, party size, traveller names), the `prefers-color-scheme` override, and a prior-session shortlist fallback used only by the merge/replace modal (§2.1) — the primary shortlist representation is URL-based; all stored values are same-origin, user-controlled, and never transmitted — documented here so "zero tracking" is not confused with "zero storage"; self-hosted fonts; CSP at build time; `rel="noopener noreferrer" referrerpolicy="no-referrer"`; affiliate default-off).
 14. Supply chain posture (cosign + SLSA v1 + SBOM + Trivy + digest-pinned bases).
 15. Licensing & contributing (see license boundary table 11.1.1 below).
-16. Operator obligations (pointer to `docs/operator-obligations.md`).
-17. Trademark policy (nominative fair use; pointer to `docs/trademark-policy.md`).
-18. Status & roadmap (Phase 1 current, Phase 2 target, Phase 3+ requires Discussion + ADR before PRs).
-19. Links (spec, ADRs, schema versioning, release policy).
+16. Status & roadmap (Phase 1 current, Phase 2 target, Phase 3+ requires Discussion + ADR before PRs).
+17. Links (spec, ADRs, schema versioning).
+
+*(Operator obligations and trademark policy sections are deferred — see §11.3 deferred-docs table.)*
 
 #### 11.1.1 License boundary table (new; placed in README + NOTICE)
 
@@ -970,7 +965,7 @@ Replaces the 294-line scoring-product README. Top-level sections:
 |---|---|---|
 | Code | Apache-2.0 | all `.ts`, `.tsx`, `.js`, `.css`, `.html`, `nginx.conf`, `Dockerfile`, `scripts/**`, `packages/schema/**`, fixture harness wrappers `__fixtures__/**/*.ts` |
 | Config & tooling | Apache-2.0 | all `.yml` / `.yaml` (incl. `.github/workflows/**`, `.github/dependabot.yml`, `.github/labels.yml`, `.github/ISSUE_TEMPLATE/**`), `.github/CODEOWNERS`, `.github/PULL_REQUEST_TEMPLATE*`, `.editorconfig`, `.gitignore`, `.gitattributes`, `.nvmrc`, `.mise.toml`, `package.json`, `package-lock.json`, `tsconfig*.json`, `vite.config.ts`, `vitest.workspace.ts`, `eslint.config.js`, `.prettierrc*` |
-| Prose & docs | Apache-2.0 (with explicit "also available under CC BY 4.0 at author's discretion" notice in NOTICE) | `docs/**/*.md`, `README.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` (Contributor Covenant upstream is CC BY 4.0 — preserved), `SECURITY.md`, `GOVERNANCE.md`, `SUPPORT.md`, `CLAUDE.md`, ADRs under `docs/adr/**` |
+| Prose & docs | Apache-2.0 (with explicit "also available under CC BY 4.0 at author's discretion" notice in NOTICE) | `docs/**/*.md`, `README.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` (Contributor Covenant upstream is CC BY 4.0 — preserved), `SECURITY.md`, `CLAUDE.md`, ADRs under `docs/adr/**` |
 | Data snapshots | CC BY 4.0 | `data/published/**/*.json`, captured upstream payloads `__fixtures__/**/*.json`, per-resort snapshots, `docs/**/*.csv` |
 | Out of scope | — | upstream third-party marks (NOTICE attributions only); Contributor Covenant itself (CC BY 4.0 upstream); vendored dependencies under `node_modules/` (each package's own license) |
 
@@ -981,16 +976,15 @@ Replaces the 294-line scoring-product README. Top-level sections:
 3. **Replace** `Provenance always: every published metric field must have a matching field_sources entry` with: `Provenance always: every METRIC_FIELDS entry must have a matching field_sources entry with source + observed_at + fetched_at + upstream_hash + attribution_block. validatePublishedDataset enforces coverage.`
 4. **Add** new section **UI Code Rules**:
    - UI code imports styling only from `packages/design-system`.
-   - No raw CSS colors in `.tsx` files (enforced by `eslint-plugin-sta-design/no-raw-color`).
-   - No inline style values that should be tokens (`no-inline-style-values`).
-   - No raw HTML element imports where a design-system component exists (`no-raw-element`).
-   - No deep imports into design-system internals (`no-design-system-deep-import`).
-   - No literal z-index values (`no-literal-z-index`).
-   - No literal breakpoint px values (`no-literal-breakpoint-px`).
+   - No raw CSS color values in `.tsx` files — use tokens.
+   - No inline style values that should be tokens.
+   - No raw HTML element imports where a design-system component exists.
+   - No deep imports into design-system internals — import only from the package root.
+   - No literal z-index or breakpoint px values — use tokens.
 5. **Add** new section **Workspace Rules**:
    - Package dependency graph: `schema (leaf) ← selectors ← design-system ← integrations; apps/* consume all packages.`
    - `packages/design-system` never imports from `packages/selectors`.
-   - Cross-layer imports blocked by `eslint-plugin-sta-design/no-restricted-imports`.
+   - Cross-layer imports blocked by standard ESLint `no-restricted-imports` configured in `eslint.config.js`.
    - `tokens.css` is generated from `tokens.ts`; hand edits fail the pre-commit hook.
 6. **Add** new section **Admin App Rules**:
    - `apps/admin` is loopback-only; binds `127.0.0.1:5174`.
@@ -1022,72 +1016,69 @@ Replaces the 294-line scoring-product README. Top-level sections:
 
 **ADRs (MADR format — pinned to latest stable (currently MADR 3.0 as of 2026-04), numbered `NNNN-slug.md`, indexed at `docs/adr/README.md`):**
 
-| ADR | Title |
-|---|---|
-| 0001 | Pivot to data-transparency (scoring removed) |
-| 0002 | Split durable resort from live signals |
-| 0003 | Phase 2 Fastify + Lucia (not Next + Auth.js) |
-| 0004 | URL-state-first + merge/replace on collision |
-| 0005 | Design-system tokens as TypeScript (generated CSS) |
-| 0006 | Apache-2.0 + DCO + zero-tracking |
-| 0007 | ADR process itself |
+| ADR | Title | Lands |
+|---|---|---|
+| 0001 | Pivot to data-transparency (scoring removed) | this PR |
+| 0002 | Split durable resort from live signals | this PR |
+| 0003 | Phase 2 target stack: Hono + Drizzle + Postgres + Better Auth | Epic 7 PR 7.3 backfill |
+| 0004 | URL-state-first + merge/replace on collision | Epic 7 PR 7.3 backfill |
+| 0005 | Design-system tokens as TypeScript (generated CSS) | Epic 7 PR 7.3 backfill |
+| 0006 | Apache-2.0 + DCO + zero-tracking | Epic 7 PR 7.3 backfill |
+| 0007 | ADR process itself | Epic 7 PR 7.3 backfill |
 
-**ADR cadence note:** ADR-0001 lands with this spec (same PR). ADRs 0002-0007 are backfilled at Epic 7 PR 7.3. Additional ADRs are expected to land during Epic 6 (real-adapter integration raises new decisions — upstream TOS negotiation, rate-limit tuning, redaction corpus maintenance). The ADR process (0007) describes how to propose new ones mid-stream; any architectural decision reached during Epic 6 that a reviewer flagged as "needs a writeup" becomes an ADR PR before the epic closes.
+**ADR cadence note:** ADR-0001 and ADR-0002 land with this spec (same PR) — 0001 records the pivot rationale and 0002 records the durable-vs-live split, both of which are load-bearing from day one. ADRs 0003-0007 are backfilled at Epic 7 PR 7.3. Additional ADRs are expected to land during Epic 6 (real-adapter integration raises new decisions — upstream TOS negotiation, rate-limit tuning, redaction corpus maintenance). The ADR process (0007) describes how to propose new ones mid-stream; any architectural decision reached during Epic 6 that a reviewer flagged as "needs a writeup" becomes an ADR PR before the epic closes.
 
-**i18n scope (Phase 1 explicit):** `LocalizedString` stores `{ en: string, [lang: string]: string | undefined }`; Phase 1 ships English-only surface copy. Any non-English content in `LocalizedString` (resort regional names, attribution blocks) is **operator-curated translation** — never machine-translated server-side, and never rendered without a `lang="xx"` attribute on the element. `docs/i18n-policy.md` describes how operators add additional locales by shipping translation bundles; no UI string ever auto-falls-back to `en` silently (missing translations surface a visible indicator).
+**i18n scope (Phase 1 explicit):** `LocalizedString` stores `{ en: string, [lang: string]: string | undefined }`; Phase 1 ships English-only surface copy. Any non-English content in `LocalizedString` (resort regional names, attribution blocks) is operator-curated translation — never machine-translated server-side, and never rendered without a `lang="xx"` attribute. Missing translations surface a visible indicator rather than silently falling back to `en`. A dedicated `docs/i18n-policy.md` is deferred until a second locale actually ships (§11.3 deferred-docs table).
 
 **Release policy — internal packages:** In Phase 1, all `packages/*` move in lockstep with the repo tag. They are NOT published to npm and are consumed via workspace protocol. Each tag on `main` is the version; `packages/schema/package.json` carries the `schema_version` integer (separate from semver), and a schema-version bump is itself a breaking repo-level change per ADR-0001. Phase 2 may publish `packages/schema` to npm independently (operators embedding the schema in their own services); that decision is deferred to a Phase 2 ADR.
 
 **Other new docs:**
 
-| Path | Purpose |
+**Phase 1 (shipped alongside the code epics that need them):**
+
+| Path | Purpose | Lands in |
+|---|---|---|
+| `LICENSE` | Apache-2.0 | Epic 1 PR 1.1 |
+| `NOTICE` | Project trademarks; CC BY 4.0 notice on data; upstream third-party mark attributions | Epic 1 PR 1.1 |
+| `CONTRIBUTING.md` | Onboarding + DCO sign-off + TDD + PR template pointer | Epic 1 PR 1.1 |
+| `CODE_OF_CONDUCT.md` | Contributor Covenant v2.1 | Epic 1 PR 1.1 |
+| `SECURITY.md` | Minimal GitHub Security Advisories disclosure policy (see 11.3.1) | Epic 1 PR 1.1 |
+| `docs/data-schema-versioning.md` | `schema_version` semantics; when to bump; migration CLI contract | Epic 2 PR 2.1 |
+| `docs/local-dev.md` | Loopback admin; font setup; Playwright install; MSW | Epic 5 PR 5.1 |
+| `docs/admin.md` | Single admin doc: shell, loopback binding, read-only-below-md, publish workflow, adapter usage, `RECORD_ALLOWED`, attribution requirements | Epic 5 or 6 |
+
+Rationale: one admin doc, one dev-setup doc, one schema-versioning doc — not three admin docs plus separate ethics/trademark/i18n/release policies. Those split off only when one of them is big enough to need its own file.
+
+**Deferred until Phase 2 (or until there's a second maintainer / operator):**
+
+| Path | Why deferred |
 |---|---|
-| `docs/data-schema-versioning.md` | `schema_version` semantics; when to bump; current = 1; migration CLI contract |
-| `docs/data-ethics.md` | Attribution policy; upstream TOS posture; affiliate disclosure; takedown process link |
-| `docs/local-dev.md` | Loopback admin; font setup; Playwright install; MSW; Storybook |
-| `docs/admin/overview.md` | Admin shell; loopback binding; read-only-below-md rule |
-| `docs/admin/workflows.md` | `draft → in_review → approved → published` lifecycle (Phase 1: `draft → published` only, rest reserved) |
-| `docs/admin/integrations.md` | Per-adapter docs; rate limits; fixture recording; `RECORD_ALLOWED`; `test:adapter` usage; per-upstream attribution requirements |
-| `docs/operator-obligations.md` | Self-deploy operator checklist: attribution, affiliate disclosure, GDPR (Phase 2), takedown response SLA |
-| `docs/trademark-policy.md` | Nominative fair use; no logo reproduction; name-use-only; takedown carve-out |
-| `docs/i18n-policy.md` | `LocalizedString` shape; source-language + en; `lang` attribute + visible indicator; no silent machine translation |
-| `docs/release-policy.md` | Semver on `packages/schema`; container tags (SHA + semver); `cosign verify` one-liner; SBOM location; schema-breaking change policy |
-| `CONTRIBUTING.md` | 7-step onboarding + DCO sign-off + TDD + PR template pointer |
-| `CODE_OF_CONDUCT.md` | Contributor Covenant v2.1 |
-| `SECURITY.md` | GitHub Security Advisories primary + email+PGP fallback; tiered scope (see 11.3.1) |
-| `GOVERNANCE.md` | BDFL-for-now; co-maintainer promotion criteria; **dead-man clause**: a named standby maintainer (identified in the file) gains unilateral promotion authority for new co-maintainers + signing-key rotation authority after **90 days of BDFL silence** (no commits, no issues, no Discussion replies on the primary maintainer's GitHub account); signing-key custody (ADR-linked); the standby's identity is public (in the file); if the standby is also silent for 90 days, any two active committers with ≥3 merged PRs in the trailing 12 months may jointly invoke a community-promotion vote on GitHub Discussions |
-| `SUPPORT.md` | Discussions for questions; Issues for defects; Security Advisories for vulns |
-| `LICENSE` | Apache-2.0 |
-| `NOTICE` | Project trademarks; CC BY 4.0 notice on data; upstream third-party mark attributions |
+| `GOVERNANCE.md` | Single maintainer; no governance surface to describe. Revisit when a second regular contributor joins. |
+| `docs/operator-obligations.md` | Single operator (the maintainer) in Phase 1. Operator-specific legal obligations belong with the multi-operator Phase 2 rollout, not now. |
+| `docs/trademark-policy.md` | No inbound trademark questions yet. When the first one arrives, that issue is the seed for this doc. |
+| `docs/i18n-policy.md` | `LocalizedString` ships `{ en: string }` in Phase 1. When a second locale is actually added, write this doc alongside it. |
+| `docs/release-policy.md` | Phase 2 concern (no packages published to npm in Phase 1; container tagging is in CI config). |
+| `docs/data-ethics.md` | Attribution + affiliate disclosure are covered in README `Data & trust posture` for now. Promotes to its own file only if the surface grows. |
+| `SUPPORT.md` | Default GitHub Issues / Discussions routing is fine until the repo has inbound traffic that needs triage rules. |
 
-#### 11.3.1 SECURITY.md scope (tiered)
+#### 11.3.1 SECURITY.md scope
 
-**In scope:**
-- Vulnerabilities in published artifacts (source, container image at `ghcr.io/...@sha256:...`, CLI, admin binary).
-- Default configurations whose misconfiguration is likely (admin-bind defaults, CSP defaults, affiliate-default-off regression).
+Minimal vulnerability-disclosure doc. The scope for an MVP is "vulnerabilities in this repo's code and default configurations." Operator-deployment legal frameworks (GDPR, DSA, DMA, NetzDG, LCEN, national trademark/defamation law) are the deploying operator's responsibility; the upstream project does not provide legal guidance and `SECURITY.md` should say so in one line without enumerating every jurisdiction.
 
-**Out of scope:**
-- Bespoke operator deployments.
-- Third-party upstream data sources.
-- Trademark disputes (→ takedown process).
+**Report via:** GitHub Security Advisories (private). Public disclosure only after a fix is available.
 
-**Report via:**
-- GitHub Security Advisories (primary, private).
-- OR signed email to `security@<domain>` with PGP fingerprint published in this file.
+**In scope:** vulnerabilities in published artifacts (source, container image, CLI).
 
-#### 11.3.2 Takedown SLA
+**Out of scope:** bespoke operator deployments, third-party upstream data sources, legal-compliance questions (operators must seek their own counsel).
 
-- Acknowledgement: **72 hours**.
-- Triage decision (accept / reject / counter-notice): **14 calendar days**.
-- Accepted takedowns in next published dataset (**≤30 days**) OR hotfix for defamatory/PII/GDPR Art. 17.
-- **Public-interest carve-out:** accurate, sourced, non-personal factual claims (piste_km, lift_count, snowfall) are not removable on trademark-holder request alone; route to factual-correction workflow.
-- Counter-notice option for contributors whose data is removed.
+#### 11.3.2 Takedown handling
 
-**Legal framing (read before filing):**
-- This project is EU-targeted in Phase 1 but is **not itself a legal service**. The project's SLA, carve-outs, and process live in this document as operator-agnostic defaults.
-- **Operator responsibility for jurisdiction-specific legal obligations:** anyone deploying this project (the "operator") is responsible for obtaining jurisdiction-specific legal advice for their deployment — GDPR (EU/UK), DSA / DMA (EU platform obligations at scale thresholds), the German NetzDG, French LCEN notice-and-takedown, the EU Copyright Directive Art. 17, and national trademark / defamation law. The SLA in this section is a **maximum response window for the upstream project**, not a representation that operators may rely on it as their legal compliance baseline.
-- **Public-interest factual claims** are presumed retained under the carve-out; operators in jurisdictions with stricter rules (e.g., German persönlichkeitsrecht, Spanish honor laws) may need to remove content that the upstream project retains. Operator-side removal does not bind the upstream project.
-- `docs/operator-obligations.md` expands this framing and includes a non-exhaustive checklist; `docs/data-ethics.md` covers attribution and affiliate disclosure. Neither document is legal advice.
+For Phase 1 (operator count = 1, resort count ≈ 5), takedown handling is not a standing SLA commitment — it is an issue-template-driven best-effort process. A proper SLA becomes relevant when the project gains operators other than the maintainer; at that point, it lands alongside the deferred `docs/operator-obligations.md` (§11.3 deferred-docs table).
+
+Baseline best-effort process:
+- Receive via `.github/ISSUE_TEMPLATE/takedown.yml` (documented in §11.5).
+- Public-interest carve-out: sourced factual claims (piste_km, lift_count, snowfall) are not removable on trademark-holder request alone; route to a factual-correction issue.
+- Accepted takedowns flow into the next published dataset.
 
 ### 11.4 Existing docs updates
 
@@ -1107,7 +1098,7 @@ Replaces the 294-line scoring-product README. Top-level sections:
 | `.github/ISSUE_TEMPLATE/data-quality.yml` | "a displayed value looks wrong" — resort + field + source + observed vs expected |
 | `.github/ISSUE_TEMPLATE/source-integration.yml` | new source proposal: upstream TOS, rate limit, adapter checklist (`upstream_hash`, rate limit, size cap, redaction, fixture), DCO confirmation |
 | `.github/ISSUE_TEMPLATE/takedown.yml` | rights holder takedown path; references 11.3.2 SLA |
-| `.github/ISSUE_TEMPLATE/scope-question.yml` | "is this in scope?" — points to roadmap + `GOVERNANCE.md` |
+| `.github/ISSUE_TEMPLATE/scope-question.yml` | "is this in scope?" — points to README roadmap section |
 | `.github/PULL_REQUEST_TEMPLATE.md` | summary + testing + DCO reminder + screenshots (UI) + README-drift check |
 | `.github/PULL_REQUEST_TEMPLATE/source-integration.md` | adapter-specific: upstream TOS confirmed, redaction added + tested, `upstream_hash` pre-parse, rate limit respected, fixture recorded with `RECORD_ALLOWED`, size budget ok |
 | `.github/CODEOWNERS` | `/packages/schema/`, `/packages/integrations/`, `/config/csp.ts`, `/nginx.conf`, `/.github/workflows/` require maintainer review; `visual:approve` label required on visual baseline changes |
@@ -1117,9 +1108,9 @@ Replaces the 294-line scoring-product README. Top-level sections:
 ### 11.6 README-drift enforcement
 
 1. PR template checkbox: "README.md updated (if this PR changes product scope, workflow, or system boundary) — link the section OR attest not applicable."
-2. `CODEOWNERS`: any change to `apps/public/src/features/**`, `packages/schema/**`, or `research/cli.ts` requires a second reviewer to vouch for README alignment.
-3. CI job `scripts/check-readme-drift.ts`: diffs section hashes against product-scope path changes; fails the PR if touched paths lack a corresponding README section update.
-4. CLAUDE.md rule (preserved): treat README drift as a documentation bug.
+2. CLAUDE.md rule (preserved): treat README drift as a documentation bug; PRs that change product scope must update `README.md` in the same branch.
+
+A CI job that diffs README section hashes against product-scope path changes is a plausible future addition if the checkbox-plus-discipline approach stops working. Not needed at current scale.
 
 ---
 
@@ -1200,9 +1191,10 @@ The expected next artifact is a detailed implementation plan at `docs/superpower
 
 1. `docs/superpowers/specs/2026-04-22-product-pivot-design.md` — this spec, with all §12 resolutions folded in.
 2. `docs/adr/0001-pivot-to-data-transparency.md` — the decision record for the pivot itself.
-3. `README.md` — rewritten per §11.1 so the repo's public framing matches the pivot.
-4. `CLAUDE.md` — amended per §11.2 so agent instructions reflect the new product direction and code rules.
-5. `docs/superpowers/specs/2026-04-03-snowboard-trip-advisor-design.md` — renamed with an `ARCHIVED-` prefix so future readers don't confuse the superseded spec with this one.
+3. `docs/adr/0002-durable-vs-live-split.md` — promotes the durable-vs-live principle to an architectural invariant.
+4. `README.md` — rewritten per §11.1 so the repo's public framing matches the pivot.
+5. `CLAUDE.md` — amended per §11.2 so agent instructions reflect the new product direction and code rules.
+6. `docs/superpowers/specs/2026-04-03-snowboard-trip-advisor-design.md` — renamed with an `ARCHIVED-` prefix so future readers don't confuse the superseded spec with this one.
 
 ### 14.2 What happens next
 
