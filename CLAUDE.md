@@ -163,7 +163,7 @@ Each sub-rule below names the PR that activates it. Until that PR lands, the rul
 - PRs touching `apps/public/**` or `packages/design-system/tokens.ts` require a `visual:approve` label applied by a CODEOWNER before merge.
 - Agents attach screenshots and request the label; do not self-approve.
 
-### Migration / Hotfix Branch Rules (active immediately)
+### Migration / Hotfix Branch Rules (active from the merge of this spec into `pivot/data-transparency`)
 
 - Schema-version bumps land on a `schema/vN-to-vN+1` branch with migration CLI + golden-fixture conversion; maintainer review required.
 - Security hotfixes branch from the latest release tag, land on `main`, and propagate into `pivot/data-transparency` via the weekly `git merge main` (never rebase — branch protection requires non-fast-forward merges).

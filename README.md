@@ -75,7 +75,7 @@ npm run dev        # Vite dev server for the public app
 npm run qa         # lint → typecheck → coverage (hard gate)
 ```
 
-Phase 2-specific commands (`npm run dev:admin`, adapter fixture recording, etc.) become available after Epic 1 lands on `pivot/data-transparency`.
+Additional Phase 1 commands — `npm run dev:admin` (loopback admin) and `npm run research test:adapter -- --record` (fixture recording) — become available as their epics land on `pivot/data-transparency` (see spec §9). They are not on `main` yet.
 
 ## Quality gate
 
