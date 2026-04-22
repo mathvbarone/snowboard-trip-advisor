@@ -87,6 +87,27 @@ run_test "denies: eval 'git push +main'"             "$HOOK" '{"tool_input":{"co
 run_test "denies: uppercase GIT PUSH --FORCE main"   "$HOOK" '{"tool_input":{"command":"GIT PUSH --FORCE origin main"}}'                2
 run_test "denies: mixed-case git PUSH --force main"  "$HOOK" '{"tool_input":{"command":"git PUSH --force origin main"}}'                2
 
+# ---- Deny list: bundled short-flag clusters (Codex P1 finding) ----
+# `-fu` is `-f` + `-u` clustered. `-uf` likewise. Force flag must be
+# detected anywhere in a short-flag cluster.
+run_test "denies: git push -fu origin main"          "$HOOK" '{"tool_input":{"command":"git push -fu origin main"}}'                    2
+run_test "denies: git push -uf origin main"          "$HOOK" '{"tool_input":{"command":"git push -uf origin main"}}'                    2
+run_test "denies: git push -fuv origin main"         "$HOOK" '{"tool_input":{"command":"git push -fuv origin main"}}'                   2
+# Cluster without `f` is not force; should pass through (no force flag).
+run_test "allows: git push -uv origin main (no -f)"  "$HOOK" '{"tool_input":{"command":"git push -uv origin main"}}'                    0
+
+# ---- Deny list: force-push without explicit refspec (Codex P1 finding) ----
+# When the refspec is omitted, git uses the current branch — which the
+# hook can't determine and could be `main`. Block these unconditionally.
+run_test "denies: git push --force (no args)"        "$HOOK" '{"tool_input":{"command":"git push --force"}}'                            2
+run_test "denies: git push -f (no args)"             "$HOOK" '{"tool_input":{"command":"git push -f"}}'                                 2
+run_test "denies: git push --force origin (no ref)"  "$HOOK" '{"tool_input":{"command":"git push --force origin"}}'                     2
+run_test "denies: git push --force-with-lease only"  "$HOOK" '{"tool_input":{"command":"git push --force-with-lease"}}'                 2
+run_test "denies: git push -fu origin (no ref)"      "$HOOK" '{"tool_input":{"command":"git push -fu origin"}}'                         2
+# But: explicit non-protected refspec passes through.
+run_test "allows: git push --force origin feat/foo"  "$HOOK" '{"tool_input":{"command":"git push --force origin feat/foo"}}'            0
+run_test "allows: git push -fu origin feat/foo"      "$HOOK" '{"tool_input":{"command":"git push -fu origin feat/foo"}}'                0
+
 # ---------- session-start-context.sh ----------
 HOOK="$HOOKS_DIR/session-start-context.sh"
 run_test "session-start: exits 0"                    "$HOOK" ''                                                                         0
