@@ -70,7 +70,7 @@ No implementation code is written without a failing test first.
 
 ## Code Rules
 
-Several of these rules are enforced by ESLint.
+Several of these rules are enforced by ESLint. **All ESLint rules ship at `severity: 'error'` from Day 1.** No `warn`-level rules, no "add when it becomes a problem" stance. Strict lint is a load-bearing discipline for this project because code is frequently agent-generated; a rule that isn't enforced is a rule that will drift silently. Full rule catalog and rationale in spec §6.3.
 
 TypeScript:
 
@@ -143,21 +143,21 @@ Each sub-rule below names the PR that activates it. Until that PR lands, the rul
 - No deep imports into design-system internals — import only from the package root.
 - No literal z-index or breakpoint px values — use tokens.
 
-### Admin App Rules (active from PR 5.1)
+### Admin App Rules (active from PR 4.1)
 
 - `apps/admin` is loopback-only; binds `127.0.0.1:5174` with `strictPort: true`.
 - Never build `apps/admin` into a production container image.
 - Admin UI is read-only below the `md` breakpoint; edit controls are removed from the tab order, not merely disabled.
 
-### Integration Adapter Rules (active from PR 1.3 for the contract; from PR 6.1 for the dispatcher)
+### Integration Adapter Rules (active from PR 1.3 for the contract; from PR 5.1 for the dispatcher baseline, PR 5.2 for dispatcher hardening)
 
-- All external HTTP goes through `packages/integrations/http/constrainedDispatcher.ts` (PR 6.1).
+- All external HTTP goes through `packages/integrations/http/constrainedDispatcher.ts` (Stage 1 baseline from PR 5.1; Stage 2 hardening — DNS pin, canonicalization, redirect re-check — lands with the first real adapter in PR 5.2).
 - Adapters never throw; they return `AdapterResult` (tagged union) — contract active from PR 1.3.
 - `upstream_hash` is computed from raw bytes **before** parse.
 - `RECORD_ALLOWED=true` gates fixture recording at process boot AND at the adapter level; mocks in `*.test.ts` are unconditionally allowed.
 - Fixture PII redaction is a hard test requirement; redaction rules live alongside each adapter.
 
-### Visual-Diff Workflow (active from PR 4.5 when visual regression wires up)
+### Visual-Diff Workflow (active from PR 6.3 when visual regression wires up)
 
 - PRs touching `apps/public/**` or `packages/design-system/tokens.ts` require a `visual:approve` label applied by a CODEOWNER before merge.
 - Agents attach screenshots and request the label; do not self-approve.

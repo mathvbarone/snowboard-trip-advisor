@@ -49,7 +49,7 @@ Every metric field has a matching `field_sources` entry carrying `source`, `sour
 
 ## Current state today
 
-**The pivot is documented but not executed.** The codebase on `main` is still the pre-pivot scoring pipeline. Migration happens on the `pivot/data-transparency` branch across seven epics (spec §9); `main` stays deployable until Epic 7 closes.
+**The pivot is documented but not executed.** The codebase on `main` is still the pre-pivot scoring pipeline. Migration happens on the `pivot/data-transparency` branch across six epics (spec §9); `main` stays deployable until Epic 6 closes.
 
 What exists on `main` today:
 
@@ -118,11 +118,11 @@ docs/adr/                Architecture decision records (current: ADR-0001)
 - Data snapshots: **CC BY 4.0**.
 - Contributions: **DCO sign-off** (`git commit -s`). No CLA.
 
-The full license boundary (which file types fall under which license) is specified in spec §11.1.1. `LICENSE`, `NOTICE`, and `CONTRIBUTING.md` land with Epic 7 PR 7.3.
+The full license boundary (which file types fall under which license) is specified in spec §11.1.1. `LICENSE`, `NOTICE`, and `CONTRIBUTING.md` land with Epic 1 PR 1.1 (earliest workspace scaffolding PR) per §11.3.
 
 ## Status & roadmap
 
-- **Phase 1** — in progress on `pivot/data-transparency`. Seven epics; `main` stays deployable until the branch merges back.
+- **Phase 1** — in progress on `pivot/data-transparency`. Six epics, ~30 PRs; `main` stays deployable until the branch merges back.
 - **Phase 2** — target; detailed in spec §8. Starts after Phase 1 ships and a dedicated Phase 2 spec is written.
 - **Phase 3+** — out of scope. Any proposal requires a GitHub Discussion and an ADR before PRs.
 

@@ -74,4 +74,4 @@ Rejected because the existing pipeline is still small enough (one Vite app, a ha
 ## Notes
 
 - This ADR lands in the same PR as the spec (`docs/superpowers/specs/2026-04-22-product-pivot-design.md`), the `README.md` rewrite, and the `CLAUDE.md` amendments. The intent is that `pivot/data-transparency` does not carry a split-brain state where the spec describes the new direction and the README still describes the old one.
-- ADRs 0002-0007 are scheduled for backfill at Epic 7 PR 7.3 per the spec §11.3. This is the first ADR in the repo; the ADR process itself (numbering, MADR-style format, review requirements) is codified in ADR-0007 (to be written).
+- ADR-0002 (durable-vs-live split) lands in the same PR as this ADR — both are load-bearing from day one. ADRs 0003-0007 are scheduled for backfill at Epic 6 PR 6.4 per the spec §11.3. The ADR process itself (numbering, MADR-style format, review requirements) is codified in ADR-0007 (to be written).
