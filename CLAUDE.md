@@ -13,6 +13,43 @@ npm run setup
 
 `npm run setup` installs the pre-commit hook from `scripts/pre-commit` into `.git/hooks/`. The hook runs the full quality gate on every commit. Post-pivot, `npm run setup` also runs `scripts/generate-tokens.ts` to materialize the design-system CSS.
 
+## Enforcement Layers
+
+The rules in this file are not suggestions. They are backed by mechanical gates that fire before content lands in git:
+
+- **CI required status check `quality-gate / qa`** — runs `npm run qa` (lint → typecheck → coverage → test:hooks) on every PR. PR cannot merge if red.
+- **CI required status check `dco`** — verifies every commit in the PR carries a `Signed-off-by:` trailer. Missing trailer fails the PR.
+- **Pre-commit hook** — `npm run qa` runs before every local commit (`scripts/pre-commit`, installed by `npm run setup`).
+- **Claude Code `PreToolUse:Bash` hook** — blocks `--no-verify` anywhere and `git push --force` (or `--force-with-lease` / `-f`) to `main`/`master` (`scripts/hooks/deny-dangerous-git.sh`). A blocked call surfaces the reason to the agent; adjust, don't retry.
+- **Claude Code `PostToolUse:Edit|Write` hook** — runs targeted ESLint on the file just edited; violations surface while the agent is still in the loop.
+- **Claude Code `SessionStart` hook** — auto-loads this enforcement summary and current branch state at the start of every session.
+- **CODEOWNERS** — load-bearing paths (spec, ADRs, `CLAUDE.md`, workflows, the hook scripts themselves) require maintainer review.
+- **Branch protection** — applied via `scripts/apply-branch-protection.sh`. `main` and `pivot/data-transparency` require PR + CODEOWNERS review + passing status checks + no force-push. Admins are NOT exempted (`enforce_admins: true`).
+
+**Rule violations are reverted, not retroactively approved.** The agent that broke a rule writes a follow-up PR explaining the failure mode.
+
+**Known gap (non-blocking):** `eslint.config.js` does not yet enforce the full rule set specified in spec §6.3; Epic 1 PR 1.6 closes the gap. Until then, the `PostToolUse:Edit|Write` hook runs the currently configured ruleset.
+
+## Subagent Review Discipline
+
+Load-bearing changes require an independent general-purpose subagent review before merge. The trigger is **mechanical** — any PR that touches one of these paths qualifies:
+
+- `CLAUDE.md`
+- `README.md`
+- `docs/superpowers/specs/**`
+- `docs/adr/**`
+- `.github/CODEOWNERS`, `.github/workflows/**`, `.github/pull_request_template.md`, `.github/BRANCH_PROTECTION.md`
+- `.claude/settings.json`
+- `scripts/hooks/**`
+- `scripts/apply-branch-protection.sh`
+- `eslint.config.js`
+- `packages/schema/**` (once it exists)
+- `packages/schema/api/**` contract schemas (once they exist)
+
+The review brief must include: context, the load-bearing invariants to verify, specific things to grep for, and an explicit instruction to be critical (not validating). Fold findings into a follow-up commit on the same PR branch before requesting maintainer review.
+
+If a trigger path is touched but no subagent review was run, document why in the PR description. CODEOWNERS review will otherwise block the merge.
+
 ## Project Intent
 
 Snowboard Trip Advisor is a **data-transparency comparison tool** for European ski resorts, built for a snowboard trip organizer choosing resorts for a group.
