@@ -40,6 +40,7 @@ Load-bearing changes require an independent general-purpose subagent review befo
 - `docs/adr/**`
 - `.github/CODEOWNERS`, `.github/workflows/**`, `.github/pull_request_template.md`, `.github/BRANCH_PROTECTION.md`
 - `.claude/settings.json`
+- `.claude/skills/**`
 - `scripts/hooks/**`
 - `scripts/apply-branch-protection.sh`
 - `eslint.config.js`

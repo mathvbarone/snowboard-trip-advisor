@@ -2,10 +2,13 @@ node_modules/
 dist/
 .worktrees/
 
-# Local agent/editor state (but .claude/settings.json IS tracked — it carries
-# the shared project hook config; see CLAUDE.md Enforcement Layers)
+# Local agent/editor state. The shared project config IS tracked:
+#   .claude/settings.json   — hook wiring (see CLAUDE.md Enforcement Layers)
+#   .claude/skills/         — project-shared agent skills
 .claude/*
 !.claude/settings.json
+!.claude/skills/
+!.claude/skills/**
 
 # Logs and coverage
 coverage/

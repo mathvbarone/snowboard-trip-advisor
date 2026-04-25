@@ -16,6 +16,7 @@
 /.github/BRANCH_PROTECTION.md            @mathvbarone
 /.github/workflows/**                    @mathvbarone
 /.claude/settings.json                   @mathvbarone
+/.claude/skills/**                       @mathvbarone
 /scripts/hooks/**                        @mathvbarone
 /scripts/pre-commit                      @mathvbarone
 /scripts/apply-branch-protection.sh      @mathvbarone
