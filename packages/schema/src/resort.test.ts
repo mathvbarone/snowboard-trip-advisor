@@ -46,4 +46,23 @@ describe('Resort', (): void => {
   it('rejects publish_state outside {draft, published}', (): void => {
     expect(() => Resort.parse({ ...validResort, publish_state: 'in_review' })).toThrow()
   })
+  it('parses with empty field_sources', (): void => {
+    const result = Resort.parse({ ...validResort, field_sources: {} })
+    expect(result.field_sources).toEqual({})
+  })
+  it('rejects when a field_sources value is not a valid FieldSource', (): void => {
+    expect(() => Resort.parse({
+      ...validResort,
+      field_sources: { 'slopes_km': { ...validFieldSource, source_url: 'http://insecure.example/data' } }
+    })).toThrow()
+  })
+  it('rejects when a field_sources value is missing attribution_block', (): void => {
+    const incompleteSource = Object.fromEntries(
+      Object.entries(validFieldSource).filter(([k]): boolean => k !== 'attribution_block')
+    )
+    expect(() => Resort.parse({
+      ...validResort,
+      field_sources: { 'slopes_km': incompleteSource }
+    })).toThrow()
+  })
 })
