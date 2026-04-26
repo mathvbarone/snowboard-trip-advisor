@@ -5,11 +5,24 @@ import tseslint from 'typescript-eslint'
 
 export default tseslint.config(
   {
-    ignores: ['dist/**', 'node_modules/**', '.worktrees/**', 'coverage/**'],
+    ignores: [
+      'dist/**',
+      'node_modules/**',
+      '.worktrees/**',
+      'coverage/**',
+      '**/dist/**',
+      '**/coverage/**',
+      '**/node_modules/**',
+    ],
   },
   js.configs.recommended,
   {
-    files: ['src/**/*.{ts,tsx}', 'research/**/*.{ts,tsx}', 'config/**/*.ts'],
+    files: [
+      'apps/*/src/**/*.{ts,tsx}',
+      'packages/*/src/**/*.{ts,tsx}',
+      'research/**/*.{ts,tsx}',
+      'config/**/*.ts',
+    ],
     extends: tseslint.configs.strictTypeChecked,
     languageOptions: {
       parserOptions: {

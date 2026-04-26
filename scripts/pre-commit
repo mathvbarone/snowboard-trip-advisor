@@ -1,0 +1,6 @@
+#!/bin/sh
+# scripts/pre-commit — runs the project quality gate.
+# Installed by `npm run setup` into .git/hooks/pre-commit.
+set -eu
+echo "Running quality gate (lint → typecheck → coverage → test:hooks)…"
+npm run qa

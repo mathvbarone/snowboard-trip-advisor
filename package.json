@@ -3,9 +3,11 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "workspaces": ["apps/*", "packages/*"],
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
+    "dev": "npm run dev --workspace=apps/public",
+    "dev:admin": "npm run dev --workspace=apps/admin",
+    "build": "npm run build --workspaces --if-present",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
@@ -15,11 +17,6 @@
     "qa": "npm run lint && npm run typecheck && npm run coverage && npm run test:hooks",
     "setup": "cp scripts/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit",
     "research": "tsx research/cli.ts"
-  },
-  "dependencies": {
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "zod": "^3.24.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",

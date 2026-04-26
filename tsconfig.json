@@ -1,18 +1,18 @@
 {
+  "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "target": "ES2022",
-    "useDefineForClassFields": true,
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "module": "ESNext",
-    "skipLibCheck": true,
-    "moduleResolution": "Bundler",
-    "allowImportingTsExtensions": false,
-    "resolveJsonModule": true,
-    "isolatedModules": true,
-    "noEmit": true,
-    "jsx": "react-jsx",
-    "strict": true,
-    "types": ["node", "vitest/globals", "@testing-library/jest-dom"]
+    "types": ["node", "vite/client", "vitest/globals", "@testing-library/jest-dom"]
   },
-  "include": ["src", "research", "config", "vite.config.ts"]
+  "include": [
+    "apps/*/src/**/*",
+    "apps/*/vite.config.ts",
+    "packages/*/src/**/*",
+    "packages/*/vite.config.ts",
+    "tests/integration/**/*",
+    "config/**/*",
+    "scripts/**/*",
+    "vitest.config.ts",
+    "vitest.workspace.ts"
+  ],
+  "exclude": ["**/dist/**", "**/coverage/**", "**/node_modules/**"]
 }
