@@ -69,18 +69,29 @@ describe('current.v1.json fixture (Epic 2 PR 2.1)', (): void => {
     for (const live of parsed.live_signals) {
       const liftPassEntry = live.field_sources['lift_pass_day']
       expect(liftPassEntry, `live signal ${live.resort_slug} missing lift_pass_day FieldSource`).toBeDefined()
-      // PR 2.0a/PR 2.2 add the optional `fx` sub-object to FieldSource. Until PR 2.2 lands, this
-      // assertion is a contract the fixture intends to satisfy. Treat as a TODO if PR 2.2 is
-      // still pending; gate with an environment flag if needed.
-      // Once PR 2.2 lands:
-      // expect(liftPassEntry?.fx).toBeDefined()
-      // expect(liftPassEntry?.fx?.native_currency).toMatch(/^(PLN|CZK)$/)
+      // PR 2.2 landed the optional `fx` sub-object on FieldSource; both seed resorts carry FX provenance.
+      expect(liftPassEntry?.fx).toBeDefined()
+      expect(liftPassEntry?.fx?.native_currency).toMatch(/^(PLN|CZK)$/)
+      const lodgingEntry = live.field_sources['lodging_sample.median_eur']
+      expect(lodgingEntry?.fx).toBeDefined()
     }
   })
 
   it('has METRIC_FIELDS coverage parity (every path that has a non-null value has a field source)', (): void => {
-    // Belt-and-braces structural test independent of the per-resort assertions above. PR 2.2's
-    // validator enforces this rigorously; this test is a fast smoke check.
-    expect(METRIC_FIELDS.length).toBe(12)
+    // Belt-and-braces structural test: the fixture's field_sources keys are a subset of METRIC_FIELDS.
+    // PR 2.2's validator enforces this rigorously; this test is a fast smoke check that the fixture
+    // does not invent paths outside the canonical METRIC_FIELDS list.
+    const parsed = PublishedDataset.parse(raw)
+    const metricSet = new Set<string>(METRIC_FIELDS)
+    for (const resort of parsed.resorts) {
+      for (const path of Object.keys(resort.field_sources)) {
+        expect(metricSet.has(path), `resort ${resort.slug} field_sources has unknown path: ${path}`).toBe(true)
+      }
+    }
+    for (const live of parsed.live_signals) {
+      for (const path of Object.keys(live.field_sources)) {
+        expect(metricSet.has(path), `live signal ${live.resort_slug} field_sources has unknown path: ${path}`).toBe(true)
+      }
+    }
   })
 })
