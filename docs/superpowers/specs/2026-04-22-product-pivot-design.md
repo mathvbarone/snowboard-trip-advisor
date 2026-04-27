@@ -900,6 +900,7 @@ Merge gate on every PR: `qa` + `test:integration` + `test:a11y`. Visual-regressi
 | `data/published/manifest.json` | **DELETE** | absorbed into the `manifest` sub-object of the new `current.v1.json` envelope per §4.5.1; removed with the legacy `current.json` in PR 2.4b |
 
 *Editor's note (2026-04-27, plan-writing pass for Epic 2): both files were already absent at Epic-2 plan-write time, so PR 2.1 authors `current.v1.json` from scratch and PR 2.4b is a no-op accounting record. The table rows are preserved for spec traceability.*
+
 | `data/published/history/` | **CREATE** | does not exist on disk today; new directory holds the `{monotonic-counter}-{iso-ms}.json` archives written by the rewritten `publishDataset.ts` (PR 2.3). Future archives live here; the directory is immutable once populated |
 | `src/App.tsx` + `src/App.test.tsx` + `src/main.tsx` | **REWRITE** | → `apps/public/src/{App,App.test,main}.tsx` |
 | `src/components/Hero.*` | **REWRITE** | → `apps/public/src/routes/Landing.tsx` |

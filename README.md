@@ -2,7 +2,7 @@
 
 A **data-transparency comparison tool** for European ski resorts, built for a snowboard trip organizer choosing resorts for a group. The product surfaces durable resort facts and live market signals **side-by-side with visible source provenance** (source, `observed_at`, `fetched_at`) and lets the organizer rank the shortlist themselves. It does not compute an overall score.
 
-Phase 1 is a local, filesystem-only build with ~5 seed resorts. Phase 2 extends it toward multi-operator deployments. Booking stays external.
+Phase 1 is a local, filesystem-only build with two seed resorts. Phase 2 extends it toward multi-operator deployments. Booking stays external.
 
 ## What this is NOT
 
