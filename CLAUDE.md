@@ -28,7 +28,7 @@ The rules in this file are not suggestions. They are backed by mechanical gates 
 
 **Rule violations are reverted, not retroactively approved.** The agent that broke a rule writes a follow-up PR explaining the failure mode.
 
-**Known gap (non-blocking):** `eslint.config.js` does not yet enforce the full rule set specified in spec §6.3; Epic 1 PR 1.6 closes the gap. Until then, the `PostToolUse:Edit|Write` hook runs the currently configured ruleset.
+**Known gap (non-blocking):** Epic 1 PR 1.6 closes most of spec §6.3, including package-DAG bans, branded-type cast bans, color-literal bans, raw-HTML-element bans, deep-import bans, and the standard TS-strict ruleset. The remaining spec §6.3 line 491 px-literal selector (banning literal `px` values inside `style={{ }}` objects + CSS-in-JS template literals) is **deferred to Epic 3 PR 3.1**, when `apps/public` first uses inline styles and the rule has actual violations to validate against. Until then, the in-loop hook runs the currently configured ruleset.
 
 ## Subagent Review Discipline
 

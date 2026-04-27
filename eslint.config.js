@@ -9,7 +9,13 @@ import tseslint from 'typescript-eslint'
 // BreakpointToken from spec §6.1 are deferred — the design-system Phase 1 uses `as const`
 // without nominal brands. Add them here when those brands land (Epic 3 or later).
 const BRAND_NAMES = 'ResortSlug|UpstreamHash|ISOCountryCode|ISODateTimeString'
-const COLOR_LITERAL = '^(#[0-9a-fA-F]{3,8}|(rgb|rgba|hsl|hsla|oklch)\\()'
+// Color literals are emitted by the design-system tokens.css generator only.
+// Apps must reference tokens via CSS custom properties (var(--color-...)) — never
+// hex/rgb/hsl/oklch literals. Two separate patterns instead of one folded group
+// so each branch carries its own ^…$ anchors (otherwise the hex branch would
+// over-fire on SHA prefixes / UUID-shaped strings).
+const COLOR_HEX_LITERAL = '^#[0-9a-fA-F]{3,8}$'
+const COLOR_FN_LITERAL = '^(rgb|rgba|hsl|hsla|oklch)\\('
 const RAW_HTML_ELS = '^(button|input|a|dialog|select|textarea)$'
 
 const BRAND_CAST_SELECTOR = `TSAsExpression[typeAnnotation.typeName.name=/^(${BRAND_NAMES})$/]`
@@ -130,6 +136,14 @@ export default tseslint.config(
               message:
                 'packages/schema is the leaf — it must not import from other workspaces.',
             },
+            {
+              group: [
+                '@snowboard-trip-advisor/*/internals/*',
+                '@snowboard-trip-advisor/*/internal/*',
+              ],
+              message:
+                'Deep imports into other workspaces are banned. Use the package root entry only (spec §6.3 line 483).',
+            },
           ],
         },
       ],
@@ -149,6 +163,14 @@ export default tseslint.config(
                 '@snowboard-trip-advisor/admin-app',
               ],
               message: 'design-system depends only on schema.',
+            },
+            {
+              group: [
+                '@snowboard-trip-advisor/*/internals/*',
+                '@snowboard-trip-advisor/*/internal/*',
+              ],
+              message:
+                'Deep imports into other workspaces are banned. Use the package root entry only (spec §6.3 line 483).',
             },
           ],
         },
@@ -170,6 +192,36 @@ export default tseslint.config(
               ],
               message: 'integrations depends only on schema.',
             },
+            {
+              group: [
+                '@snowboard-trip-advisor/*/internals/*',
+                '@snowboard-trip-advisor/*/internal/*',
+              ],
+              message:
+                'Deep imports into other workspaces are banned. Use the package root entry only (spec §6.3 line 483).',
+            },
+          ],
+        },
+      ],
+    },
+  },
+
+  // Apps consume packages but must not deep-import internals (§6.3 line 483).
+  {
+    files: ['apps/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                '@snowboard-trip-advisor/*/internals/*',
+                '@snowboard-trip-advisor/*/internal/*',
+              ],
+              message:
+                'Deep imports into packages are banned. Import from the package root only (spec §6.3 line 483).',
+            },
           ],
         },
       ],
@@ -190,9 +242,14 @@ export default tseslint.config(
           message: 'Brand types via Schema.parse only.',
         },
         {
-          selector: `Literal[value=/${COLOR_LITERAL}/]`,
+          selector: `Literal[value=/${COLOR_HEX_LITERAL}/]`,
           message:
-            'Raw color literals are forbidden in apps/**. Use design-system tokens.',
+            'Raw hex color literals are forbidden in apps/**. Use design-system tokens (var(--color-...)).',
+        },
+        {
+          selector: `Literal[value=/${COLOR_FN_LITERAL}/]`,
+          message:
+            'Raw rgb/hsl/oklch color literals are forbidden in apps/**. Use design-system tokens.',
         },
         {
           selector: `JSXOpeningElement[name.name=/${RAW_HTML_ELS}/]`,

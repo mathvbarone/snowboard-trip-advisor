@@ -52,6 +52,25 @@ describe('eslint design-system discipline', (): void => {
     const ids = await violations('packages/design-system/src/tokens.ts', src)
     expect(ids).not.toContain('no-restricted-syntax')
   })
+
+  it("does NOT fire on hex-shaped strings that aren't CSS colors (e.g. SHA prefixes)", async (): Promise<void> => {
+    const src = "export const sha = '#deadbeef-1234'\n"
+    const ids = await violations('apps/public/src/__eslint_fixture__.ts', src)
+    expect(ids).not.toContain('no-restricted-syntax')
+  })
+})
+
+describe('eslint deep-import discipline', (): void => {
+  it('blocks `@snowboard-trip-advisor/design-system/internals/foo` deep imports from apps', async (): Promise<void> => {
+    const src = "import { foo } from '@snowboard-trip-advisor/design-system/internals/foo'\nexport { foo }\n"
+    const ids = await violations('apps/public/src/__eslint_fixture__.ts', src)
+    expect(ids).toContain('no-restricted-imports')
+  })
+  it('allows package-root imports', async (): Promise<void> => {
+    const src = "import { tokens } from '@snowboard-trip-advisor/design-system'\nexport { tokens }\n"
+    const ids = await violations('apps/public/src/__eslint_fixture__.ts', src)
+    expect(ids).not.toContain('no-restricted-imports')
+  })
 })
 
 describe('eslint branded-type discipline', (): void => {
