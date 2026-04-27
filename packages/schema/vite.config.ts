@@ -24,6 +24,13 @@ export default defineConfig({
         // surface. This entry is belt-and-braces in case future test files inline the
         // fixture path differently.
         'src/fixtures/**/*.json',
+        // PR 2.4: resortView.ts is a types-only file — it exports `FieldValue<T>` and
+        // `ResortView` as pure TypeScript type aliases. There are zero executable statements;
+        // v8 shows 0% coverage because there is nothing to instrument. No runtime logic
+        // lives here: the file exists solely to provide type-level contracts that
+        // `loadResortDataset.ts` and the public app satisfy. Adding a dummy export just to
+        // lift the number would ship dead runtime code for purely cosmetic reasons.
+        'src/resortView.ts',
         // PR 2.3: publishDataset.ts has two branches that are structurally unreachable
         // in a fast test environment without violating the audit or adding injection seams:
         //

@@ -18,6 +18,8 @@ import {
   PublishedDataset,
   validatePublishedDataset,
   publishDataset,
+  loadResortDataset,
+  FRESHNESS_TTL_DAYS,
 } from './index'
 
 describe('package barrel (index.ts)', (): void => {
@@ -41,5 +43,7 @@ describe('package barrel (index.ts)', (): void => {
     expect(FxProvenance).toBeDefined()
     expect(validatePublishedDataset).toBeDefined()
     expect(publishDataset).toBeDefined()
+    expect(loadResortDataset).toBeDefined()
+    expect(FRESHNESS_TTL_DAYS).toBeDefined()
   })
 })
