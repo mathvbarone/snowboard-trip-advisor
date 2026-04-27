@@ -18,7 +18,7 @@ declare module 'vite' {
 // participate in the global coverage gate without belonging to a workspace.
 export default defineConfig({
   test: {
-    include: ['scripts/**/*.test.ts'],
+    include: ['scripts/**/*.test.ts', 'tests/**/*.test.ts', 'config/**/*.test.ts'],
     coverage: {
       provider: 'v8',
       include: [

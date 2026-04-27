@@ -12,5 +12,9 @@ import { resolve } from 'node:path'
 import { tokens } from '../packages/design-system/src/tokens'
 import { renderTokensCss } from './generate-tokens'
 
+if (process.argv[1] === undefined || !process.argv[1].endsWith('generate-tokens.cli.ts')) {
+  throw new Error('generate-tokens.cli.ts is a CLI entry point; do not import it')
+}
+
 const out = resolve(import.meta.dirname, '../packages/design-system/tokens.css')
 writeFileSync(out, renderTokensCss(tokens), 'utf8')

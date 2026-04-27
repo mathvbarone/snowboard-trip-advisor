@@ -23,6 +23,7 @@ export const tokens = {
   zIndex: { drawer: 50, modal: 60, toast: 70, tooltip: 80 },
   duration: { fast: 120, base: 180, slow: 280 },
   fontWeight: { regular: 400, medium: 500, semibold: 600, bold: 700 },
+  // TODO(epic-3): consider rem-based font sizes for user-font-size honoring (a11y).
   fontSize: { xs: 12, sm: 14, md: 16, lg: 20, xl: 24, '2xl': 32 },
   font: {
     family: {
