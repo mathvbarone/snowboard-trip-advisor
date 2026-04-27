@@ -10,5 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@snowboard-trip-advisor/schema": "*"
   }
 }

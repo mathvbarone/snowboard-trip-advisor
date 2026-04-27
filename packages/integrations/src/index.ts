@@ -1,1 +1,2 @@
-export const PACKAGE_NAME = '@snowboard-trip-advisor/integrations' as const
+export * from './contract'
+export * from './registry'
