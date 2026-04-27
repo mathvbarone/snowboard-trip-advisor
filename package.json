@@ -20,8 +20,7 @@
     "tokens:generate": "tsx scripts/generate-tokens.cli.ts",
     "tokens:check": "npm run tokens:generate && git diff --exit-code packages/design-system/tokens.css",
     "qa": "npm run lint && npm run typecheck && npm run coverage && npm run tokens:check && npm run test:hooks",
-    "setup": "cp scripts/pre-commit \"$(git rev-parse --git-path hooks)/pre-commit\" && chmod +x \"$(git rev-parse --git-path hooks)/pre-commit\" && npm run tokens:generate",
-    "research": "tsx research/cli.ts"
+    "setup": "cp scripts/pre-commit \"$(git rev-parse --git-path hooks)/pre-commit\" && chmod +x \"$(git rev-parse --git-path hooks)/pre-commit\" && npm run tokens:generate"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",

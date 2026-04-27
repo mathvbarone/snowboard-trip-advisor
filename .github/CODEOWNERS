@@ -23,7 +23,6 @@
 # Quality-gate wiring
 /package.json                            @mathvbarone
 /tsconfig*.json                          @mathvbarone
-/vite.config.ts                          @mathvbarone
 /vitest.config.ts                        @mathvbarone
 /eslint.config.js                        @mathvbarone
 

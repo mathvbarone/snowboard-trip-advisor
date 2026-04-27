@@ -22,3 +22,5 @@ apps/*/dist/
 apps/*/coverage/
 packages/*/dist/
 packages/*/coverage/
+tests/integration/dist/
+tests/integration/coverage/

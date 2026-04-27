@@ -260,14 +260,10 @@ export default tseslint.config(
     },
   },
 
-  // CLI / migration / scripts: console allowed.
+  // Scripts (token generator, future generators) may use console; CLI/research
+  // overrides will be reintroduced in Epic 5 PR 5.1 when research/cli.ts lands.
   {
-    files: [
-      'research/cli.ts',
-      'research/cli.test.ts',
-      'research/migrate/**/*.ts',
-      'scripts/**/*.ts',
-    ],
+    files: ['scripts/**/*.ts'],
     rules: { 'no-console': 'off' },
   },
 
