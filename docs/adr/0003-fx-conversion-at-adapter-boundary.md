@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-04-27
 - **Deciders:** @mathvbarone
-- **Related spec:** [`docs/superpowers/specs/2026-04-22-product-pivot-design.md`](../superpowers/specs/2026-04-22-product-pivot-design.md) §0 line 34, §4.3, §4.3.1, §4.5, §7.1
+- **Related spec:** [`docs/superpowers/specs/2026-04-22-product-pivot-design.md`](../superpowers/specs/2026-04-22-product-pivot-design.md) §0 line 33, §4.3, §4.3.1, §4.5, §7.1
 - **Related ADRs:** [ADR-0001](./0001-pivot-to-data-transparency.md), [ADR-0002](./0002-durable-vs-live-split.md)
 
 ## Context

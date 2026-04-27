@@ -1070,7 +1070,7 @@ Replaces the 294-line scoring-product README. Top-level sections:
 |---|---|---|
 | 0001 | Pivot to data-transparency (scoring removed) | this PR |
 | 0002 | Split durable resort from live signals | this PR |
-| 0003 | Phase 2 target stack: Hono + Drizzle + Postgres + Better Auth | Epic 6 PR 6.4 backfill |
+| 0003 | FX conversion at adapter boundary | Epic 2 PR 2.0b |
 | 0004 | URL-state-first + merge/replace on collision | Epic 6 PR 6.4 backfill |
 | 0005 | Design-system tokens as TypeScript (generated CSS) | Epic 6 PR 6.4 backfill |
 | 0006 | Apache-2.0 + DCO + zero-tracking | Epic 6 PR 6.4 backfill |
