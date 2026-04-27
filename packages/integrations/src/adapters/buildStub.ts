@@ -19,12 +19,20 @@ export function buildStub<S extends AdapterSourceKey>(input: {
   // Shallow freeze: the outer map and each FieldSource are frozen, but the nested
   // attribution_block is not. Phase 1 consumers stay within-package, so deep-freeze is
   // not yet load-bearing. Revisit if external consumers can mutate result shapes.
+  //
+  // FieldSource.source carries the adapter's actual identity (input.source), NOT a
+  // literal 'manual' — losing adapter identity here would silently break any consumer
+  // keying off field_sources[*].source for provenance, attribution, or per-source
+  // freshness logic. Spec §7.8 says "sources[*].status = 'manual'" — that 'manual' lives
+  // on the admin-side `FieldStateFor<T>.status` (§5.1.1), not on the published
+  // FieldSource.source. Stub-ness is signalled by the empty values:{}, the
+  // STUB_HASH (all zeros), and the synthetic source_url + attribution_block.
   const sources: FieldSourceMap = Object.freeze(
     Object.fromEntries(
       input.fields.map((path): [MetricPath, FieldSource] => [
         path,
         Object.freeze({
-          source: 'manual',
+          source: input.source,
           source_url: 'https://example.invalid/stub',
           observed_at: STUB_OBSERVED_AT,
           fetched_at: STUB_FETCHED_AT,

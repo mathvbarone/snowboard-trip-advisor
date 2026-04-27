@@ -15,7 +15,7 @@ describe('resort-feed stub', (): void => {
       'season.end_month',
     ])
   })
-  it('returns ok=true with no values + manual-source map (never throws)', async (): Promise<void> => {
+  it('returns ok=true with no values + adapter-source provenance (never throws)', async (): Promise<void> => {
     const result = await resortFeedStub.fetch({
       requestId: 'req-1',
       traceparent: '00-0-0-00',
@@ -28,7 +28,7 @@ describe('resort-feed stub', (): void => {
     }
     expect(result.values).toEqual({})
     for (const field of resortFeedStub.fields) {
-      expect(result.sources[field]?.source).toBe('manual')
+      expect(result.sources[field]?.source).toBe('resort-feed')
     }
   })
 })
