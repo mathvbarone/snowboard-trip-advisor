@@ -1,5 +1,17 @@
 # syntax=docker/dockerfile:1.7
 #
+# DEFERRED — DO NOT BUILD UNTIL EPIC 6.
+#
+# This Dockerfile is pre-pivot. The `COPY --from=builder /app/dist` and
+# `COPY --from=builder /app/data/published` lines below assume a single-SPA
+# build at the repo root and a published dataset directory — both gone after
+# the Epic 1 workspace pivot (Vite output is now per-workspace at
+# `apps/public/dist`; the dataset publishing pipeline is an Epic 2 deliverable).
+# `docker build .` will fail until this file is rewritten to build
+# `apps/public` only and the data-baking step is replaced by a runtime fetch.
+# Spec §11.4 (line 889) AMENDs this and `.github/workflows/image.yml` together
+# in the Epic 6 polish PR.
+#
 # Base images are pinned by IMMUTABLE DIGEST (not just tag) per the homelab
 # repo's security spec — a plain `:22-alpine` / `:1.29-alpine` can drift
 # silently as Docker Hub repoints the tag. Pinning the digest means every

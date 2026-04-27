@@ -1,5 +1,17 @@
 name: Build & Push Image
 
+# DEFERRED — UNREACHABLE UNTIL EPIC 6.
+#
+# This workflow is `workflow_call`-only and its sole caller (the `image:` job
+# in `.github/workflows/ci.yml`) was removed when Epic 1 landed. The Dockerfile
+# below assumes a pre-pivot single-SPA layout (`/app/dist`, `/app/data/published`)
+# that no longer matches reality post-Epic-1. Spec §11.4 (line 889) AMENDs this
+# workflow to trigger on `release: published` once the Dockerfile, nginx.conf,
+# and this file are reworked for the workspace layout. Re-enable in the Epic 6
+# polish PR. See top-level comment in `ci.yml` and the banner in `Dockerfile`.
+#
+# Original purpose follows.
+#
 # Produces the production release artifact:
 #   1. Multi-arch (linux/amd64 + linux/arm64) nginx image built from the repo.
 #   2. Pushed to GHCR as ghcr.io/<owner>/snowboard-trip-advisor with tags
