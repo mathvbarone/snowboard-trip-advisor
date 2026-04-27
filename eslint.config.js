@@ -22,6 +22,11 @@ export default tseslint.config(
       'packages/*/src/**/*.{ts,tsx}',
       'research/**/*.{ts,tsx}',
       'config/**/*.ts',
+      // tests/integration ships its own *.ts files (harness + harness tests);
+      // skip vite.config.ts here — its `InlineConfig` import-from-vitest pattern
+      // mirrors the per-workspace `vite.config.ts` files that aren't linted
+      // either.
+      'tests/integration/!(vite.config).ts',
     ],
     extends: tseslint.configs.strictTypeChecked,
     languageOptions: {

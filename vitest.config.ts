@@ -16,21 +16,33 @@ declare module 'vite' {
 // `scripts/**/*.test.ts` — package workspaces still own everything under
 // `apps/*` and `packages/*`. This is what lets `scripts/generate-tokens.test.ts`
 // participate in the global coverage gate without belonging to a workspace.
+//
+// `tests/integration/**` is excluded from the root project because it is its
+// own Vitest workspace (jsdom environment). Running its specs at the root
+// would re-execute them in the default `node` environment where `DOMParser`
+// and friends are undefined.
 export default defineConfig({
   test: {
-    include: ['scripts/**/*.test.ts', 'tests/**/*.test.ts', 'config/**/*.test.ts'],
+    include: ['scripts/**/*.test.ts', 'config/**/*.test.ts'],
     coverage: {
       provider: 'v8',
       include: [
         'apps/*/src/**',
         'packages/*/src/**',
         'scripts/**',
+        'config/**',
+        'tests/integration/**',
       ],
       exclude: [
         '**/main.tsx',
         '**/test-setup.ts',
         '**/*.test.{ts,tsx}',
         '**/*.d.ts',
+        // Per-workspace `vite.config.ts` files are configuration, not
+        // production source. They aren't picked up under `apps/*/src/**`
+        // or `packages/*/src/**`, but `tests/integration/**` is broader
+        // (no `src/` subdir) so we exclude its config file explicitly.
+        'tests/integration/vite.config.ts',
         // `scripts/hooks/**` are shell scripts (test-hooks.sh, deny-dangerous-git.sh).
         'scripts/hooks/**',
         // `scripts/pre-commit` is a shell script installed into the worktree
