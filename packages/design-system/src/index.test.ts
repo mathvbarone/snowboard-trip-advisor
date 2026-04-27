@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { PACKAGE_NAME } from './index'
+import { tokens } from './index'
 
-describe('design-system package', (): void => {
-  it('exposes its package name constant', (): void => {
-    expect(PACKAGE_NAME).toBe('@snowboard-trip-advisor/design-system')
+describe('package barrel (index.ts)', (): void => {
+  it('re-exports the design tokens object the public API needs', (): void => {
+    // Smoke check: each re-export resolves to a defined value at runtime.
+    // Catches accidental mis-spellings or dropped exports in the barrel.
+    expect(tokens).toBeDefined()
   })
 })
