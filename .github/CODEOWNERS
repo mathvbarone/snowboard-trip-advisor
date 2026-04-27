@@ -28,7 +28,7 @@
 /eslint.config.js                        @mathvbarone
 
 # Post-pivot paths (activate when the directories exist per spec §9)
-# /packages/schema/**                    @mathvbarone
-# /packages/integrations/**              @mathvbarone
-# /packages/design-system/**             @mathvbarone
-# /apps/**                               @mathvbarone
+/packages/schema/**                      @mathvbarone
+/packages/integrations/**                @mathvbarone
+/packages/design-system/**               @mathvbarone
+/apps/**                                 @mathvbarone

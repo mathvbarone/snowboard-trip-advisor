@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
+
 import { tokens } from '../packages/design-system/src/tokens'
+
 import { renderTokensCss } from './generate-tokens'
 
 describe('renderTokensCss', (): void => {

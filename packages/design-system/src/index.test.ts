@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+
 import { tokens } from './index'
 
 describe('package barrel (index.ts)', (): void => {

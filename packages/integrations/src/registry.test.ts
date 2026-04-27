@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest'
 import { AdapterSourceKey } from '@snowboard-trip-advisor/schema'
+import { describe, expect, it } from 'vitest'
+
 import { registry } from './registry'
 
 describe('registry', (): void => {

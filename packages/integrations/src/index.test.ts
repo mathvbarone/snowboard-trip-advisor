@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+
 import { isRecordAllowed, registry } from './index'
 
 describe('integrations package barrel (index.ts)', (): void => {

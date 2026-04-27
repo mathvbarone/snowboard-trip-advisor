@@ -1,4 +1,5 @@
 import { z } from 'zod'
+
 import { ISODateTimeString, UpstreamHash } from './branded'
 
 export const Money = z.object({

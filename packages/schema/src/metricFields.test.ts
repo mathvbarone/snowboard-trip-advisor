@@ -1,4 +1,5 @@
 import { describe, expect, expectTypeOf, it } from 'vitest'
+
 import { METRIC_FIELDS, type MetricPath } from './metricFields'
 
 describe('METRIC_FIELDS', (): void => {

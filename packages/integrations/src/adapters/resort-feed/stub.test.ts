@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest'
 import { ResortSlug } from '@snowboard-trip-advisor/schema'
+import { describe, expect, it } from 'vitest'
+
 import { resortFeedStub } from './stub'
 
 describe('resort-feed stub', (): void => {

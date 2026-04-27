@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+
 import { Money, LocalizedString, FieldSource, PublishState, SourceKey, AdapterSourceKey } from './primitives'
 
 describe('Money', (): void => {

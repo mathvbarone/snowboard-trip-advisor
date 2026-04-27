@@ -4,6 +4,7 @@ import type {
   FieldSource,
 } from '@snowboard-trip-advisor/schema'
 import { ISODateTimeString, UpstreamHash } from '@snowboard-trip-advisor/schema'
+
 import type { Adapter, AdapterResult, FieldSourceMap } from '../contract'
 
 const STUB_OBSERVED_AT = ISODateTimeString.parse('2026-04-01T00:00:00Z')

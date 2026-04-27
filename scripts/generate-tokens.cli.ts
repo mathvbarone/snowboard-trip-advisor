@@ -9,7 +9,9 @@
 
 import { writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+
 import { tokens } from '../packages/design-system/src/tokens'
+
 import { renderTokensCss } from './generate-tokens'
 
 if (process.argv[1] === undefined || !process.argv[1].endsWith('generate-tokens.cli.ts')) {

@@ -1,4 +1,6 @@
-import axe from 'axe-core'
+// axe-core ships a CJS namespace (`export = axe`); import it as a namespace so
+// the import-x default-export check (which doesn't resolve `export =`) passes.
+import * as axe from 'axe-core'
 import type { AxeResults } from 'axe-core'
 
 // Shared integration test harness. Per-route extensions (MSW handlers,

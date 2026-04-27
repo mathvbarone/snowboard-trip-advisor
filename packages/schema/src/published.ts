@@ -1,7 +1,8 @@
 import { z } from 'zod'
+
 import { ISODateTimeString } from './branded'
-import { Resort } from './resort'
 import { ResortLiveSignal } from './liveSignal'
+import { Resort } from './resort'
 
 export const PublishedDataset = z.object({
   schema_version: z.literal(1),

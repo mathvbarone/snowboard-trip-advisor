@@ -1,10 +1,11 @@
 import type { AdapterSourceKey } from '@snowboard-trip-advisor/schema'
-import type { Adapter } from './contract'
-import { opensnowStub } from './adapters/opensnow/stub'
-import { snowforecastStub } from './adapters/snowforecast/stub'
-import { resortFeedStub } from './adapters/resort-feed/stub'
-import { bookingStub } from './adapters/booking/stub'
+
 import { airbnbStub } from './adapters/airbnb/stub'
+import { bookingStub } from './adapters/booking/stub'
+import { opensnowStub } from './adapters/opensnow/stub'
+import { resortFeedStub } from './adapters/resort-feed/stub'
+import { snowforecastStub } from './adapters/snowforecast/stub'
+import type { Adapter } from './contract'
 
 // Phase 1 ownership map (per stub fields[]):
 //   - opensnow:     snow_depth_cm, lifts_open.{count,total}

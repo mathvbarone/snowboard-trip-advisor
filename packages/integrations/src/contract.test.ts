@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest'
 import { UpstreamHash } from '@snowboard-trip-advisor/schema'
+import { describe, expect, it } from 'vitest'
+
 import type { AdapterError, AdapterResult } from './contract'
 import { isRecordAllowed } from './contract'
 

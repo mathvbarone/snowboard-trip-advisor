@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+
 import { runAxe, MOBILE_VIEWPORT } from './harness'
 
 describe('harness defaults', (): void => {
