@@ -23,8 +23,8 @@ The rules in this file are not suggestions. They are backed by mechanical gates 
 - **Claude Code `PreToolUse:Bash` hook** — blocks `--no-verify` anywhere and `git push --force` (or `--force-with-lease` / `-f`) to `main`/`master` (`scripts/hooks/deny-dangerous-git.sh`). A blocked call surfaces the reason to the agent; adjust, don't retry.
 - **Claude Code `PostToolUse:Edit|Write` hook** — runs targeted ESLint on the file just edited; violations surface while the agent is still in the loop.
 - **Claude Code `SessionStart` hook** — auto-loads this enforcement summary and current branch state at the start of every session.
-- **CODEOWNERS** — load-bearing paths (spec, ADRs, `CLAUDE.md`, workflows, the hook scripts themselves) require maintainer review.
-- **Branch protection** — applied via `scripts/apply-branch-protection.sh`. `main` and `pivot/data-transparency` require PR + CODEOWNERS review + passing status checks + no force-push. Admins are NOT exempted (`enforce_admins: true`).
+- **CODEOWNERS** — `.github/CODEOWNERS` lists ownership for every load-bearing path. In Phase 1 (single-maintainer) it is **advisory** — it auto-requests review and signals which paths trigger the Subagent Review Discipline below. The hard *required-review-before-merge* gate on `main` is **deferred until a second maintainer joins** the project (re-enable by flipping `required_pull_request_reviews.required_approving_review_count >= 1` and `require_code_owner_reviews: true` on the `main` branch protection — see §11.2 of the spec for the Phase 2 hand-off).
+- **Branch protection** — `main` requires passing status checks (`quality-gate / qa`, `dco`), signed/DCO-trailed commits, linear history, no force-push, no deletion, and conversation resolution; `enforce_admins: true` so admin status confers no bypass. Required-review is *off* in Phase 1 per the bullet above. The `pivot/data-transparency` branch retains its own protection per spec §10.4. (The original `scripts/apply-branch-protection.sh` was lost in the pre-Epic-1 cleanup; re-applying protection by script is a follow-up Epic 6 task.)
 
 **Rule violations are reverted, not retroactively approved.** The agent that broke a rule writes a follow-up PR explaining the failure mode.
 
@@ -48,7 +48,7 @@ Load-bearing changes require an independent general-purpose subagent review befo
 
 The review brief must include: context, the load-bearing invariants to verify, specific things to grep for, and an explicit instruction to be critical (not validating). Fold findings into a follow-up commit on the same PR branch before requesting maintainer review.
 
-If a trigger path is touched but no subagent review was run, document why in the PR description. CODEOWNERS review will otherwise block the merge.
+If a trigger path is touched but no subagent review was run, document why in the PR description. (In Phase 2 — once the required-CODEOWNER-review gate is re-enabled on `main` — this becomes a hard merge block; today it is a discipline note for the maintainer.)
 
 ## Project Intent
 
