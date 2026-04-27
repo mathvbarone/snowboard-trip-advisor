@@ -47,6 +47,8 @@ Two document types, separated because their freshness and validation rules diffe
 
 Every metric field has a matching `field_sources` entry carrying `source`, `source_url`, `observed_at`, `fetched_at`, `upstream_hash`, and an attribution block. `validatePublishedDataset` enforces that coverage at publish time.
 
+The Phase 1 seed dataset ships two resorts: **Kotelnica Białczańska** (`kotelnica-bialczanska`, Poland, prices natively in PLN) and **Špindlerův Mlýn** (`spindleruv-mlyn`, Czech Republic, prices natively in CZK). Because both resorts are EU but neither uses the euro, every Money-typed field carries an additional `fx` sub-object on its `FieldSource` recording the ECB reference rate used to convert into EUR — see [ADR-0003](docs/adr/0003-fx-conversion-at-adapter-boundary.md) for rationale and the validator-enforced shape.
+
 ## Current state today
 
 **The pivot is documented but not executed.** The codebase on `main` is still the pre-pivot scoring pipeline. Migration happens on the `pivot/data-transparency` branch across six epics (spec §9); `main` stays deployable until Epic 6 closes.

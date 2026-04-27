@@ -31,7 +31,7 @@ Snowboard Trip Advisor pivots from a scoring-based ranker to a **data-transparen
 
 - European resorts only (Alps + Pyrenees + Nordic Europe; no North America, no Japan).
 - EUR-only pricing, metric-only units.
-- Two documents in the seed dataset: `three-valleys` and `st-anton`.
+- Two documents in the seed dataset: `kotelnica-bialczanska` (Kotelnica Białczańska, PL — Tatra Mountains) and `spindleruv-mlyn` (Špindlerův Mlýn, CZ — Krkonoše/Giant Mountains). Both resorts price natively in non-EUR currencies (PLN and CZK respectively) and are deliberately chosen to exercise the FX-conversion pattern from ADR-0003 in the seed fixture.
 - Two Vite apps (`apps/public`, `apps/admin`); admin is loopback-only.
 - No backend; no auth; no database. Filesystem-only persistence.
 
@@ -99,7 +99,7 @@ All routing is **URL-param-driven**; no router library. URL keys (parsed by a Zo
 ?shortlist=<slug>[,<slug>]*       ordered, capped at 6
 &view=cards|matrix|detail         default: cards
 &sort=price_asc|price_desc|name   missing values sink; name A→Z is default tiebreaker
-&country=FR[,AT,CH,IT,ES,SE]*     ISO 3166-1 alpha-2
+&country=FR[,AT,CH,IT,ES,SE,PL,CZ]*     ISO 3166-1 alpha-2 (PL + CZ added in Epic 2 alongside the seed-list change)
 &highlight=<field_key>            highlights a field across the matrix
 &resort=<slug>                    detail view target (only when view=detail)
 ```
@@ -313,8 +313,42 @@ type FieldSource     = {
   fetched_at: ISODateTimeString;                              // per-response
   upstream_hash: UpstreamHash;                                // sha256(raw bytes pre-parse)
   attribution_block: LocalizedString;                         // Markdown, rendered verbatim
+  fx?: FxProvenance;                                          // present iff upstream priced in non-EUR; see §4.3.1 + ADR-0003
+};
+
+// §4.3.1 — FX provenance for non-Eurozone Money fields
+type FxProvenance = {
+  source: 'ecb-reference-rate';                               // Phase 1: ECB daily reference rate is the only acceptable source
+  observed_at: ISODateTimeString;                             // the date the rate was published (ECB rates are end-of-day TARGET)
+  rate: number;                                               // EUR per native unit, e.g. 0.231 for PLN→EUR on a given day
+  native_amount: number;                                      // amount in the upstream's native currency
+  native_currency: 'PLN' | 'CZK' | 'CHF' | 'GBP' | 'NOK' | 'SEK' | 'DKK' | 'HUF' | 'RON' | 'BGN'; // EU + Switzerland + UK; widen via schema_version bump
 };
 ```
+
+Worked example — a Špindlerův Mlýn `lift_pass_day` priced in CZK, converted to EUR via ECB reference rate:
+
+```ts
+// Example FieldSource for a Špindlerův Mlýn lift_pass_day priced 1500 CZK on 2026-04-26.
+// ECB reference rate for that day was ~0.04 EUR/CZK, yielding a published Money.amount of 60 EUR.
+const example: FieldSource = {
+  source: 'resort-feed',
+  source_url: 'https://www.skiareal.cz/en/lift-passes',
+  observed_at: '2026-04-26T08:00:00Z',
+  fetched_at: '2026-04-26T08:00:01Z',
+  upstream_hash: '...',
+  attribution_block: { en: 'Source: Špindlerův Mlýn official feed (CZK; converted to EUR via ECB reference rate)' },
+  fx: {
+    source: 'ecb-reference-rate',
+    observed_at: '2026-04-26T16:00:00Z',                      // ECB publishes ~16:00 CET
+    rate: 0.04,
+    native_amount: 1500,
+    native_currency: 'CZK',
+  },
+};
+```
+
+The validator (§4.5 + Epic 5 PR 5.x) enforces: any `Money` field whose `FieldSource.source !== 'manual'` AND whose source is known to price natively in non-EUR currency MUST carry `fx`. For `source: 'manual'` the `fx` block is OPTIONAL but recommended; the seed fixture in PR 2.1 demonstrates it on the two non-Eurozone resorts. (Per the ai-clean-code-adherence audit, the table + enforcement branch are deferred from Epic 2 PR 2.2 to Epic 5 PR 5.x — Phase 1 has zero non-EUR adapter sources to enforce against; PR 2.2 ships only FX-math sanity on already-present `fx`.)
 
 ### 4.4 `METRIC_FIELDS` const
 
@@ -343,7 +377,7 @@ At ~12 fields this is maintainable by hand; a typo in the array that's not in th
 
 - Every URL field matches `^https:`.
 - Every `ResortSlug` matches `/^[a-z0-9-]{1,64}$/`.
-- Every `Money.currency === 'EUR'` in Phase 1.
+- Every `Money.currency === 'EUR'` in Phase 1. Adapters for non-Eurozone EU resorts MUST convert native currency → EUR using a daily ECB reference rate **before** producing `Money` values, and MUST attach the FX provenance to the corresponding `FieldSource.fx` sub-object (§4.3.1). From Epic 5 onward the validator enforces presence of `fx` on any non-`'manual'` `FieldSource` whose adapter is registered in `packages/schema/src/fx.ts` as non-EUR-native (the table + enforcement branch land in Epic 5 PR 5.x with the first real non-EUR adapter; per ADR-0003).
 - Every `ResortLiveSignal.observed_at` is within the last 14 days for `status=ok`, within 30 days for `status=stale`, else `status=failed` (driven by per-field TTLs in `config/freshness.ts`).
 - `schema_version === 1` on every record.
 - **publish_state guard:** `validatePublishedDataset` asserts `publish_state ∈ {'draft', 'published'}`. The enum has exactly those two values in Phase 1, so this is belt-and-braces — but it catches accidental widening by a future PR before the workflow is designed.
@@ -584,6 +618,8 @@ type AdapterError =
 ```
 
 **Adapters never throw.** `unknown_error` is the catch-all for unexpected runtime failures; it is typed, not string-tagged. All error variants use the `code` discriminator (uniform switch statements, `noFallthroughCasesInSwitch` narrows correctly).
+
+**FX conversion** — adapters that fetch prices in a non-Eurozone currency (PLN, CZK, CHF, GBP, NOK, SEK, DKK, HUF, RON, BGN) MUST convert to EUR before populating `AdapterValueMap` and MUST emit `FieldSourceMap[<path>].fx` for every Money-typed field they produce. The conversion source is fixed to the ECB daily reference rate in Phase 1; alternative sources require a schema_version bump. See ADR-0003 for rationale and the alternatives considered.
 
 ### 7.2 Registry (exhaustive typing)
 
@@ -862,6 +898,8 @@ Merge gate on every PR: `qa` + `test:integration` + `test:a11y`. Visual-regressi
 | `research/__fixtures__/*` | **MIGRATE + RE-RECORD** | durable content migrates; scoring fixtures deleted; NEW per-adapter fixtures recorded via `test:adapter --record` (Epic 5 PR 5.1) |
 | `data/published/current.json` | **MIGRATE** | one-shot → `current.v1.json`; legacy file deleted after 1-week soak (PR 2.4b) |
 | `data/published/manifest.json` | **DELETE** | absorbed into the `manifest` sub-object of the new `current.v1.json` envelope per §4.5.1; removed with the legacy `current.json` in PR 2.4b |
+
+*Editor's note (2026-04-27, plan-writing pass for Epic 2): both files were already absent at Epic-2 plan-write time, so PR 2.1 authors `current.v1.json` from scratch and PR 2.4b is a no-op accounting record. The table rows are preserved for spec traceability.*
 | `data/published/history/` | **CREATE** | does not exist on disk today; new directory holds the `{monotonic-counter}-{iso-ms}.json` archives written by the rewritten `publishDataset.ts` (PR 2.3). Future archives live here; the directory is immutable once populated |
 | `src/App.tsx` + `src/App.test.tsx` + `src/main.tsx` | **REWRITE** | → `apps/public/src/{App,App.test,main}.tsx` |
 | `src/components/Hero.*` | **REWRITE** | → `apps/public/src/routes/Landing.tsx` |
@@ -1097,7 +1135,7 @@ Baseline best-effort process:
 |---|---|
 | `docs/delivery-model.md` | Reference 6-epic plan, PR cadence, branch protection rules |
 | `docs/deployment-contract.md` | Two-app layout; production builds `apps/public` only; admin is dev-only loopback; CSP baked at build time |
-| `docs/testing-strategy.md` | Add visual regression (Playwright 360/900/1280 with `visual:approve` label), axe-core-per-route, size-limit, integration harness, mobile-first default viewport |
+| `docs/testing-strategy.md` | Add visual regression (Playwright 360/900/1280 with `visual:approve` label), axe-core-per-route, size-limit, integration harness, mobile-first default viewport. Note (Epic 2): every adapter test MUST assert `FieldSourceMap[<path>].fx` is present for non-EUR upstream prices. The shared assertion helper lives in `packages/schema/src/fx.ts` (introduced in Epic 5 PR 5.x alongside the first non-EUR adapter; deferred from Epic 2 per ai-clean-code-adherence audit). |
 | `docs/workstation-setup.md` | Add `npm run storybook`, `npm run dev:admin`, font setup, MSW+Playwright install, mise tool list update |
 
 ### 11.5 GitHub meta files
