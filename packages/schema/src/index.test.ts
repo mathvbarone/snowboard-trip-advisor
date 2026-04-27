@@ -17,6 +17,7 @@ import {
   ResortLiveSignal,
   PublishedDataset,
   validatePublishedDataset,
+  publishDataset,
 } from './index'
 
 describe('package barrel (index.ts)', (): void => {
@@ -39,5 +40,6 @@ describe('package barrel (index.ts)', (): void => {
     expect(PublishedDataset).toBeDefined()
     expect(FxProvenance).toBeDefined()
     expect(validatePublishedDataset).toBeDefined()
+    expect(publishDataset).toBeDefined()
   })
 })
