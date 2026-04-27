@@ -3,23 +3,24 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
+    "dev": "npm run dev --workspace=apps/public",
+    "dev:admin": "npm run dev --workspace=apps/admin",
+    "build": "npm run build --workspaces --if-present",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "coverage": "vitest run --coverage",
     "test:hooks": "./scripts/hooks/test-hooks.sh",
-    "qa": "npm run lint && npm run typecheck && npm run coverage && npm run test:hooks",
-    "setup": "cp scripts/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit",
-    "research": "tsx research/cli.ts"
-  },
-  "dependencies": {
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "zod": "^3.24.0"
+    "tokens:generate": "tsx scripts/generate-tokens.cli.ts",
+    "tokens:check": "npm run tokens:generate && git diff --exit-code packages/design-system/tokens.css",
+    "qa": "npm run lint && npm run typecheck && npm run coverage && npm run tokens:check && npm run test:hooks",
+    "setup": "cp scripts/pre-commit \"$(git rev-parse --git-path hooks)/pre-commit\" && chmod +x \"$(git rev-parse --git-path hooks)/pre-commit\" && npm run tokens:generate"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
@@ -31,10 +32,15 @@
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^5.0.0",
     "@vitest/coverage-v8": "^2.1.9",
+    "axe-core": "^4.11.3",
     "eslint": "^9.39.4",
+    "eslint-import-resolver-typescript": "^4.4.4",
+    "eslint-plugin-import-x": "^4.16.2",
+    "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "jsdom": "^25.0.1",
+    "msw": "^2.13.6",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "typescript-eslint": "^8.58.0",
