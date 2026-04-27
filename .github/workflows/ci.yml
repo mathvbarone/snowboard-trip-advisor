@@ -53,17 +53,13 @@ jobs:
             exit 1
           fi
 
-  image:
-    needs: quality-gate
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    uses: ./.github/workflows/image.yml
-    secrets: inherit
-    # Reusable-workflow callers must grant AT LEAST the permissions the
-    # callee declares. image.yml needs id-token + attestations on top of
-    # contents/packages to do cosign keyless signing and push SLSA + SBOM
-    # attestations as OCI referrers.
-    permissions:
-      contents: read
-      packages: write
-      id-token: write
-      attestations: write
+  # Image build job is intentionally absent until Epic 6.
+  #
+  # The pre-pivot Dockerfile (`COPY --from=builder /app/dist`,
+  # `COPY --from=builder /app/data/published`) does not match the post-Epic-1
+  # workspace layout: Vite output is per-workspace (`apps/public/dist`) and the
+  # dataset publishing pipeline is an Epic 2 deliverable. Spec §11.4 (line 889)
+  # AMENDs `image.yml` to trigger on `release: published` once Dockerfile +
+  # nginx.conf + image.yml are reworked for the workspace layout. Until then,
+  # `image.yml` is unreachable (its only caller was here) and banners at the
+  # top of `image.yml` and `Dockerfile` flag them as deferred.
