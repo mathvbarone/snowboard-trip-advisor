@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { UpstreamHash } from '@snowboard-trip-advisor/schema'
 import type { AdapterError, AdapterResult } from './contract'
 import { isRecordAllowed } from './contract'
 
@@ -22,7 +23,7 @@ describe('AdapterResult', (): void => {
       ok: true,
       values: {},
       sources: {},
-      upstream_hash: 'a'.repeat(64) as never,
+      upstream_hash: UpstreamHash.parse('a'.repeat(64)),
     }
     const err: AdapterResult = { ok: false, error: { code: 'timeout' } }
     expect(ok.ok).toBe(true)

@@ -15,6 +15,9 @@ export function buildStub<S extends AdapterSourceKey>(input: {
   fields: ReadonlyArray<MetricPath>
   attribution_block_en: string
 }): Adapter<S> {
+  // Shallow freeze: the outer map and each FieldSource are frozen, but the nested
+  // attribution_block is not. Phase 1 consumers stay within-package, so deep-freeze is
+  // not yet load-bearing. Revisit if external consumers can mutate result shapes.
   const sources: FieldSourceMap = Object.freeze(
     Object.fromEntries(
       input.fields.map((path): [MetricPath, FieldSource] => [
