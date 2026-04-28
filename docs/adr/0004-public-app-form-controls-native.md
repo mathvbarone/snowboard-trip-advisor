@@ -18,7 +18,7 @@ The spec §6.4 design-system inventory already settled on `<Input>` / `<Select>`
 
 Phase 1 `apps/public` ships **native** `<input type="date">` and **native** `<select>` form controls. The design-system `<Input>` and `<Select>` wrappers exist purely to apply tokenized styling (border, radius, focus-ring, color); they delegate behavior, focus, keyboard handling, and accessibility tree entirely to the underlying native element.
 
-A related decision falls out of the same axis: the price filter is a **bucketed `<Select>`** (`≤€40` / `€40–80` / `€80+`) rather than a slider. A range slider is dramatically harder to keyboard-drive and screen-read accurately than three discrete options, and at N=2 resorts the bucket precision is more than sufficient.
+A related decision falls out of the same axis: the price filter is a **bucketed `<Select>`** (`≤€40` / `€40–80` / `€80+`) rather than a slider. A range slider is dramatically harder to keyboard-drive and screen-read accurately than three discrete options, and at N=2 resorts the bucket precision is more than sufficient. Revisit when N≥10 resorts and `lift_pass_day` price variance >€20.
 
 ## Consequences
 
@@ -32,7 +32,7 @@ A related decision falls out of the same axis: the price filter is a **bucketed 
 ### Negative / costs
 
 - **The custom-styled date picker in the visual reference is not delivered in Phase 1.** Where the OS picker is ugly or inconsistent across browsers, that is the visible cost. Documented in the design-system README as an accepted Phase 1 trade-off.
-- **The slider affordance for price is also deferred.** Some users prefer a continuous control. At N=2, this is not a usability problem; at N≥10 with high price variance it might be.
+- **The slider affordance for price is also deferred.** Some users prefer a continuous control. At N=2, this is not a usability problem. Revisit when N≥10 resorts and `lift_pass_day` price variance >€20.
 
 ### Neutral / follow-on
 
@@ -56,10 +56,11 @@ Rejected for Phase 1. A slider is harder to make accessible than a `<select>`, a
 
 ## Revisit conditions
 
-Reopen this decision when **either** of:
+Reopen this decision when **any** of:
 
 - Phase 2 design refresh demands custom date/select popovers that the native controls cannot deliver (and the design refresh ships an a11y budget for the new components).
 - A scheduled a11y audit (manual + axe + screen-reader walkthrough) shows the native-control surface is no longer compliant with the project's target WCAG level.
+- The bucketed price filter specifically: revisit when N≥10 resorts and `lift_pass_day` price variance >€20 (the spec-mandated numeric trigger for reconsidering a slider or finer-grained buckets).
 
 ## Notes
 
