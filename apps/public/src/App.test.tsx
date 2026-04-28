@@ -85,6 +85,25 @@ describe('App', (): void => {
     expect(await screen.findByRole('alert')).toBeInTheDocument()
   })
 
+  it('wires useDocumentMeta into AppContent so title + canonical track URL state', async (): Promise<void> => {
+    // Initial load: AppContent calls useDocumentMeta(url), which writes
+    // document.title and creates / updates <link rel="canonical">. We start
+    // empty (jsdom default title is '') and verify both are populated after
+    // mount — that proves the hook is wired in. The hook's own behavior
+    // (matrix vs cards titling, query-string-aware canonical) is covered in
+    // useDocumentMeta.test.ts; here we only assert the wiring.
+    document.title = ''
+    document.querySelector('link[rel="canonical"]')?.remove()
+    window.history.replaceState({}, '', '/?view=cards')
+    const view = await renderAsync(<App />)
+    await screen.findByTestId('cards-placeholder')
+    expect(document.title).toBe('Snowboard Trip Advisor')
+    const canonical = document.querySelector('link[rel="canonical"]')
+    expect(canonical).not.toBeNull()
+    expect(canonical?.getAttribute('href')).toBeTruthy()
+    view.unmount()
+  })
+
   it('mounts the DetailDrawer when ?detail= matches a dataset slug', async (): Promise<void> => {
     // detail.tsx is a frozen stub that throws on render; this test only
     // exercises the App.tsx find() projection that resolves url.detail to a

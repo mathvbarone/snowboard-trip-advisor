@@ -11,6 +11,7 @@ import {
 
 import { onDatasetError } from './lib/errors'
 import { invalidateDataset, useDataset } from './state/useDataset'
+import { useDocumentMeta } from './state/useDocumentMeta'
 import { useURLState } from './state/useURLState'
 import CardsView from './views/cards'
 import type DetailDrawerType from './views/detail'
@@ -71,6 +72,10 @@ function AppContent(): JSX.Element {
   // detail overlay's slug-existence check depends on the dataset's slug set
   // — co-locating the two reads keeps the gate atomic.
   const url = useURLState()
+  // Mirror URL state into <title> and <link rel="canonical"> so SPA route
+  // changes (?view=matrix, future sort/filter shares, etc.) keep document
+  // metadata in sync. Hook is effect-based; spec §3.7 + §6.1.
+  useDocumentMeta(url)
   const { slugs, views } = useDataset()
   const View = url.view === 'matrix' ? MatrixView : CardsView
   // The dataset slug set is widened to ReadonlySet<string> for the lookup —
