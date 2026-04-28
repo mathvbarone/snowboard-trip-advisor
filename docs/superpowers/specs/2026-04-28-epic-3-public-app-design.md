@@ -149,11 +149,28 @@ Two custom plugins, factored for coverage (pure helpers in `lib/`, lifecycle ada
 - Build: `writeBundle` copies once into `dist/data/current.v1.json`.
 - Pure helpers: `serveDatasetMiddleware(srcPath): RequestHandler` and `copyDataset(src, dest): Promise<void>` are unit-tested in `lib/datasetPlugin.test.ts`.
 
-**`cspDevPlugin`** emits the dev CSP header with a per-request nonce:
-- `configureServer` middleware generates a fresh nonce via `crypto.getRandomValues` per request and stashes it on `req`.
-- `transformIndexHtml` reads the nonce from `req`, injects `<meta name="csp-nonce" content="...">` (debug aid only — React doesn't read it), and rewrites Vite HMR inline `<script>` tags with the nonce.
-- Pure helpers: `generateNonce()` and `injectNonce(html, nonce)` are unit-tested for purity in `lib/csp.test.ts`.
-- Smoke test: vitest `cspDevPlugin.test.ts` asserts two middleware invocations produce different `script-src 'nonce-...'` header values.
+**`cspDevPlugin`** emits the dev CSP header with a per-request nonce. **Pattern:** all per-request work happens inside a single `configureServer` middleware that calls `server.transformIndexHtml(...)` itself — Vite's `transformIndexHtml` *hook* receives only `(html, ctx)` with no `req`, so reading the nonce off `req` from inside the hook is not possible. Doing the HTML transform from inside the middleware is the supported way to share per-request state with the resulting markup.
+
+```ts
+// apps/public/vite.config.ts (5-line lifecycle adapter; coverage-excluded)
+configureServer(server) {
+  return () => {
+    server.middlewares.use(async (req, res, next) => {
+      if (!req.url || (!req.url.endsWith('.html') && req.url !== '/')) return next()
+      const nonce = generateNonce()
+      const indexPath = resolve(import.meta.dirname, 'index.html')
+      const transformed = await server.transformIndexHtml(req.url, await readFile(indexPath, 'utf-8'), req.originalUrl)
+      const withNonce = injectNonce(transformed, nonce)        // rewrites Vite HMR <script> tags + injects <meta name="csp-nonce">
+      res.setHeader('Content-Security-Policy', cspHeader({ mode: 'development', nonce }))
+      res.setHeader('Content-Type', 'text/html; charset=utf-8')
+      res.end(withNonce)
+    })
+  }
+}
+```
+
+- Pure helpers: `generateNonce()` and `injectNonce(html, nonce)` are unit-tested for purity in `lib/csp.test.ts`. `injectNonce` rewrites every Vite-emitted inline `<script>` tag (recognized by absence of `src=` and presence of HMR client markers) and adds `<meta name="csp-nonce" content="...">` (debug aid only — React doesn't read it).
+- Smoke test: vitest `cspDevPlugin.test.ts` invokes the middleware twice via stub `req`/`res`/`next` and asserts the `Content-Security-Policy` header's `script-src 'nonce-...'` value differs across requests **and** that the response body's HMR script tags carry the matching nonce.
 
 Prod CSP (Epic 6 nginx) carries no nonce — `script-src 'self'` covers Vite's hashed bundle filenames.
 
@@ -602,7 +619,31 @@ upgrade-insecure-requests
 - Bundle analysis: `npm run analyze` (root) using `rollup-plugin-visualizer`. PR 3.6 lands the script in `warn` mode (logs over-budget, exits 0); Epic 6 follow-up flips to `error`.
 - Visual regression: out of scope (parent spec §6.5 — Epic 6).
 
-### 6.6 Bundle accounting (estimate; verified by `npm run analyze` in PR 3.6)
+### 6.6 BCP 47 language tags from country codes
+
+ISO 3166-1 alpha-2 country codes (`PL`, `CZ`, `AT`, ...) are **not** valid BCP 47 language tags (Czech Republic country `CZ` → Czech language `cs`; Austria country `AT` → German language `de`). For the `lang` attribute on resort-name elements (parent §2.4 + cross-cutting assignments table), use a country → primary-language map.
+
+```ts
+// apps/public/src/lib/lang.ts
+export function countryToPrimaryLang(country: ISOCountryCode): string {
+  return COUNTRY_TO_PRIMARY_LANG[country] ?? 'en'      // safe default; misannouncement < no annouancement
+}
+
+const COUNTRY_TO_PRIMARY_LANG = {
+  PL: 'pl',     // Poland → Polish
+  CZ: 'cs',     // Czech Republic → Czech
+  AT: 'de',     // Austria → German
+  CH: 'de',     // Switzerland → German (primary; FR/IT/RM secondary)
+  FR: 'fr',     // France → French
+  IT: 'it',     // Italy → Italian
+  ES: 'es',     // Spain → Spanish (primary; CA/EU/GL secondary)
+  SE: 'sv',     // Sweden → Swedish
+} as const satisfies Partial<Record<ISOCountryCode, string>>
+```
+
+The map covers parent §2.1's country list. Multi-language countries (CH, ES) take the official primary; secondary-language resorts can override via a future `name_lang` field on `Resort` (Phase 2 schema change). Tests in `lib/lang.test.ts`: every entry yields a valid BCP 47 tag (`/^[a-z]{2,3}(-[A-Z]{2,4})?$/`); unknown countries fall back to `'en'`.
+
+### 6.7 Bundle accounting (estimate; verified by `npm run analyze` in PR 3.6)
 
 | Component | Estimate gzip |
 | --- | --- |
@@ -643,7 +684,7 @@ The review brief per PR includes: (a) load-bearing invariants of the touched pat
 
 | Concern | Lands in | Notes |
 | --- | --- | --- |
-| `lang` attr on resort names | PR 3.2 | `<h2 lang={resort.country.toLowerCase()}>` in ResortCard hero |
+| `lang` attr on resort names | PR 3.2 | `<h2 lang={countryToPrimaryLang(resort.country)}>` in ResortCard hero. Country code → BCP 47 primary language tag via the map in `apps/public/src/lib/lang.ts` (see §6.6) — country code ≠ language tag (e.g. CZ country → `cs` language). |
 | `<link rel="canonical">` | PR 3.1c | Wired by `useDocumentMeta` |
 | Two `<meta name="theme-color">` tags | PR 3.1b | Static in `index.html` |
 | `prefers-reduced-motion` plumbing | PR 3.3 | Drawer `onAnimationEnd` prop + tokens-based motion override |
@@ -735,7 +776,7 @@ CODEOWNER review request order: `3.1a → 3.1b → 3.1c`, then concurrent group,
   - `packages/schema/src/loadResortDataset.test.ts` — slim happy-path Node wrapper test.
   - `packages/design-system/src/components/{Shell,Skeleton,EmptyStateLayout}.test.tsx` — render contract + axe per state.
   - `packages/design-system/src/format.test.ts` — destructured-primitive formatters.
-  - `apps/public/src/lib/{urlState,router,datasetFetch,errors,format,deepLinks}.test.ts` — pure helpers.
+  - `apps/public/src/lib/{urlState,router,datasetFetch,errors,format,deepLinks,lang}.test.ts` — pure helpers (`lang.test.ts` asserts every COUNTRY_TO_PRIMARY_LANG entry yields a valid BCP 47 tag and that unknown countries fall back to `'en'`).
   - `apps/public/src/state/{useURLState,useLocalStorageState,useDataset,useShortlist,useMediaQuery,useDocumentMeta,useScrollReset,useDroppedSlugs}.test.ts` — each hook drives the underlying API directly.
   - `apps/public/src/state/dataset.test.ts` — contamination regression: two consecutive renders, independent fetch counts asserted via MSW request log.
   - `apps/public/src/views/states/{DatasetLoading,DatasetUnavailable,NoResorts}.test.tsx` — render contract; `NoResorts` exercised via a test that filters all resorts out (`country=XX` with no matching resort) so `views.length === 0` is reachable post-validator-min(1).
@@ -749,7 +790,7 @@ CODEOWNER review request order: `3.1a → 3.1b → 3.1c`, then concurrent group,
   - `packages/design-system/src/components/{Shell,Skeleton,EmptyStateLayout}.tsx`.
   - `packages/design-system/src/format.ts`.
   - `packages/design-system/src/index.ts` — re-export new components.
-  - `apps/public/src/lib/{urlState,router,datasetFetch,errors,format,deepLinks}.ts`.
+  - `apps/public/src/lib/{urlState,router,datasetFetch,errors,format,deepLinks,lang}.ts`.
   - `apps/public/src/state/` — all 8 hooks; `useDataset` exports `__resetForTests`.
   - `apps/public/src/views/states/{DatasetLoading,DatasetUnavailable,NoResorts}.tsx`.
   - `apps/public/src/views/cards.tsx` — Landing placeholder rendering `views.length` count.
@@ -769,7 +810,7 @@ CODEOWNER review request order: `3.1a → 3.1b → 3.1c`, then concurrent group,
   - `packages/design-system/src/components/{Button,IconButton,Input,Select,Chip,Pill,Card,SourceBadge,FieldValueRenderer}.test.tsx` — variant matrix + axe per state.
   - `packages/design-system/src/icons/{sources,ui}/*.test.tsx` — `currentColor` assertion + size-prop test.
   - `packages/design-system/src/primitives/Tooltip.test.tsx`.
-  - `apps/public/src/views/{cards,ResortCard,Hero,FilterBar}.test.tsx` — composition + axe; **FilterBar country chip hidden on ≤1 country exercised with an in-test single-country fixture** (the seed dataset has 2 countries; the chip-hidden branch wouldn't otherwise be reachable for 100% coverage); ResortCard CTA carries `rel="noopener noreferrer"` + `referrerpolicy="no-referrer"`; ResortCard's star `<IconButton>` carries `data-detail-trigger="<slug>"` per the §5.5 frozen-interface contract.
+  - `apps/public/src/views/{cards,ResortCard,Hero,FilterBar}.test.tsx` — composition + axe; **FilterBar country chip hidden on ≤1 country exercised with an in-test single-country fixture** (the seed dataset has 2 countries; the chip-hidden branch wouldn't otherwise be reachable for 100% coverage); ResortCard CTA carries `rel="noopener noreferrer"` + `referrerpolicy="no-referrer"`; ResortCard's star `<IconButton>` carries `data-detail-trigger="<slug>"` per the §5.5 frozen-interface contract; ResortCard's resort-name heading carries `lang={countryToPrimaryLang(resort.country)}` (CZ → `cs`, PL → `pl` per §6.6 — assert against both seed resorts).
 - *Implementation:*
   - All design-system components and icons named in tests above.
   - `packages/design-system/src/primitives/Tooltip.tsx`.
