@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  Button,
   EmptyStateLayout,
   formatDateRelative,
   formatMoney,
@@ -25,5 +26,6 @@ describe('package barrel (index.ts)', (): void => {
     expect(Shell).toBeDefined()
     expect(Skeleton).toBeDefined()
     expect(EmptyStateLayout).toBeDefined()
+    expect(Button).toBeDefined()
   })
 })
