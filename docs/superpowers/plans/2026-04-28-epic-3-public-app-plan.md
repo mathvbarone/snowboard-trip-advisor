@@ -18,7 +18,7 @@
 2. The Epic 3 spec (linked above) — §0–§3 in full; §4–§6 skim; §7 PR breakdown to find the PR you're about to execute; §10 operational concerns; §1.1 parent-spec divergences.
 3. The parent spec at `docs/superpowers/specs/2026-04-22-product-pivot-design.md` — only §2 (public app surface) and §6 (design system); the Epic 3 spec is the authoritative deviation source.
 4. `packages/schema/src/loadResortDataset.ts`, `validatePublishedDataset.ts`, `resortView.ts`, `metricFields.ts`, `published.ts`, `primitives.ts`, `branded.ts` — what already exists. Read once.
-5. `packages/design-system/src/tokens.ts` — token shapes you will consume.
+5. `packages/design-system/src/tokens.ts` — token shapes you will consume. Epic 3 reads existing surfaces {color, type, spacing, radius, shadow, breakpoint, fontWeight, fontSize, zIndex, duration} and may extend `duration` (drawer slide, modal fade) and `radius` if a new component shape requires it. Token additions trigger `npm run tokens:generate` + a commit of the regenerated `tokens.css`.
 6. `config/csp.ts` — current shape (single-flat-record exporter). PR 3.1b refactors it.
 7. `apps/public/{vite.config.ts, src/App.tsx, src/main.tsx, src/test-setup.ts}` — placeholder you will replace.
 
@@ -464,7 +464,7 @@ Parallel pairs after 3.1c lands: {3.2, 3.5}; after 3.2: {3.3, 3.5}; after 3.3: {
 
   Create `apps/public/src/lib/injectFontPreloads.test.ts` (in jsdom env):
   - Given two URLs, appends two `<link>` tags to `<head>` with `rel="preload"`, `as="font"`, `type="font/woff2"`, `crossorigin`, and the matching `href`.
-  - Idempotent on re-call (does not duplicate).
+  - Idempotent on re-call (does not duplicate). **Dedup mechanism:** before appending, `document.head.querySelector('link[rel="preload"][href="${url}"]')` short-circuits if a matching link exists.
 
   Run: FAIL. Implement. Run: PASS.
 
@@ -661,6 +661,11 @@ Parallel pairs after 3.1c lands: {3.2, 3.5}; after 3.2: {3.3, 3.5}; after 3.3: {
 - [ ] **Step 3.4: design-system `Shell` + `Skeleton` + `EmptyStateLayout` — TDD-first.**
 
   Each component: write `*.test.tsx` first asserting render contract + `jest-axe` per state (default + focus). Implement. Re-export from `index.ts`. Commit per component.
+
+  **First callers of each (rubric: no abstraction without a caller):**
+  - `Shell` — used by `App.tsx` (Step 3.11) for the outer chrome + skip-link.
+  - `Skeleton` — used by `views/states/DatasetLoading.tsx` (Step 3.9) which composes `<Skeleton variant="card">` ×3 to show the loading grid.
+  - `EmptyStateLayout` — used by `views/states/{DatasetUnavailable,NoResorts}.tsx` (Step 3.9).
 
 - [ ] **Step 3.5: `apps/public/src/lib/lang.ts` — TDD-first.**
 
@@ -1086,11 +1091,11 @@ Parallel pairs after 3.1c lands: {3.2, 3.5}; after 3.2: {3.3, 3.5}; after 3.3: {
 
 - [ ] **Step 8.1: `vitest.workspace.ts` enumerates integration tests.**
 
-  Verify that `vitest.workspace.ts` covers `tests/integration/apps/public/*.test.ts`. If not, add the project entry. Run `npm run --workspace=@snowboard-trip-advisor/tests-integration test` (or the workspace-equivalent) and confirm Vitest discovers the new tests once they're added in Step 8.2. Commit if a config edit was needed.
+  Verify that `vitest.workspace.ts` covers `tests/integration/apps/public/*.test.ts`. If not, add the project entry. Run `npm run --workspace=@snowboard-trip-advisor/tests-integration test` (or the workspace-equivalent) and confirm Vitest discovers the new tests once they're added in Step 8.3. Commit if a config edit was needed.
 
 - [ ] **Step 8.2: Final wiring of DroppedSlugsBanner + useScrollReset — TDD-first.**
 
-  Tests cover: DroppedSlugsBanner renders the dropped-slugs aside when `useDroppedSlugs()` returns a non-empty set (replaces the 3.1c null-render stub); `useScrollReset` fires `window.scrollTo(0, 0)` only on `view` transitions (not sort/filter; assert via `vi.spyOn(window, 'scrollTo')`).
+  Tests cover: DroppedSlugsBanner renders the dropped-slugs aside when `useDroppedSlugs()` returns a non-empty set (replaces the 3.1c null-render stub); `useScrollReset` fires `window.scrollTo(0, 0)` only on `view` transitions (not sort/filter; assert via `vi.spyOn(window, 'scrollTo')`). Run: FAIL. Implement (replace 3.1c stubs in `DroppedSlugsBanner.tsx` + `useScrollReset.ts`). Run: PASS. Commit per file.
 
 - [ ] **Step 8.3: Integration tests.**
 
