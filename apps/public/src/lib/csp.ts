@@ -11,9 +11,17 @@
 // runtime, the HMR preamble) without a `nonce` attribute; without
 // rewriting, the dev CSP would block them.
 //
-// Both helpers are pure and unit-tested directly; the lifecycle
-// adapter that wires them into a `configureServer` middleware lives
-// in vite.config.ts and is coverage-excluded there.
+// `createCspDevMiddleware` composes both into a connect-style
+// middleware that the dev plugin registers via `configureServer`.
+// The factory takes the index-HTML loader and the Vite
+// `transformIndexHtml` callable as injected dependencies so the
+// middleware can be unit-tested without a live Vite server.
+//
+// All four exports are unit-tested directly; the 5-line lifecycle
+// adapter that wires the factory into a Vite plugin lives in
+// vite.config.ts and is coverage-excluded there.
+
+import { cspHeader } from '../../../../config/csp'
 
 const NONCE_BYTES = 16
 
@@ -77,4 +85,67 @@ function rewriteInlineScripts(html: string, nonce: string): string {
 export function injectNonce(html: string, nonce: string): string {
   const withMeta = injectMetaTag(html, nonce)
   return rewriteInlineScripts(withMeta, nonce)
+}
+
+// Connect-style middleware shape (narrowed; mirrors datasetPlugin).
+// We do not import `connect`/`http` types here so the factory stays
+// portable and easy to stub in unit tests. Properties are declared
+// with `?:` (not `: T | undefined`) to remain structurally
+// compatible with Node's `IncomingMessage` under
+// `exactOptionalPropertyTypes`.
+export interface CspMiddlewareReq {
+  readonly url?: string | undefined
+  readonly originalUrl?: string | undefined
+}
+
+export interface CspMiddlewareRes {
+  setHeader: (name: string, value: string) => void
+  end: (chunk?: string) => void
+}
+
+export type CspMiddlewareNext = (err?: unknown) => void
+
+export type CspDevMiddleware = (
+  req: CspMiddlewareReq,
+  res: CspMiddlewareRes,
+  next: CspMiddlewareNext,
+) => void | Promise<void>
+
+export interface CspDevMiddlewareDeps {
+  readonly readIndexHtml: () => Promise<string>
+  readonly transformIndexHtml: (
+    url: string,
+    html: string,
+    originalUrl: string | undefined,
+  ) => Promise<string>
+}
+
+export function createCspDevMiddleware(
+  deps: CspDevMiddlewareDeps,
+): CspDevMiddleware {
+  return async (req, res, next): Promise<void> => {
+    const url = req.url
+    if (url === undefined || (!url.endsWith('.html') && url !== '/')) {
+      next()
+      return
+    }
+    try {
+      const nonce = generateNonce()
+      const raw = await deps.readIndexHtml()
+      const transformed = await deps.transformIndexHtml(
+        url,
+        raw,
+        req.originalUrl,
+      )
+      const withNonce = injectNonce(transformed, nonce)
+      res.setHeader(
+        'Content-Security-Policy',
+        cspHeader({ mode: 'development', nonce }),
+      )
+      res.setHeader('Content-Type', 'text/html; charset=utf-8')
+      res.end(withNonce)
+    } catch (err: unknown) {
+      next(err)
+    }
+  }
 }

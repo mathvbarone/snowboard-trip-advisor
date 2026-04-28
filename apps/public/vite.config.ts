@@ -1,6 +1,15 @@
+import { readFile } from 'node:fs/promises'
+import { resolve } from 'node:path'
+
 import react from '@vitejs/plugin-react'
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import type { InlineConfig } from 'vitest/node'
+
+import { createCspDevMiddleware } from './src/lib/csp'
+import {
+  copyDataset,
+  serveDatasetMiddleware,
+} from './src/lib/datasetPlugin'
 
 declare module 'vite' {
   interface UserConfig {
@@ -8,8 +17,70 @@ declare module 'vite' {
   }
 }
 
+// Resolve once at config load. import.meta.dirname is Node ≥ 20.11
+// (engines pin from PR 3.1a covers this).
+const APP_ROOT = import.meta.dirname
+const REPO_ROOT = resolve(APP_ROOT, '../..')
+const DATASET_SRC = resolve(REPO_ROOT, 'data/published/current.v1.json')
+const DATASET_DEST_RELATIVE = 'data/current.v1.json'
+const INDEX_HTML = resolve(APP_ROOT, 'index.html')
+
+// In dev, serve the published dataset from disk. In build, copy it into
+// the output bundle alongside the hashed asset chunks. The middleware
+// emits the same JSON / no-cache headers the prod nginx edge will
+// emit (spec §10.2). The thin lifecycle adapter is coverage-excluded
+// below; the helpers it calls are unit-tested in src/lib/datasetPlugin.test.ts.
+function datasetPlugin(): Plugin {
+  return {
+    name: 'sta-dataset',
+    configureServer(server): void {
+      server.middlewares.use(
+        `/${DATASET_DEST_RELATIVE}`,
+        serveDatasetMiddleware(DATASET_SRC),
+      )
+    },
+    async writeBundle(opts): Promise<void> {
+      if (opts.dir === undefined) {
+        throw new Error('writeBundle: opts.dir missing')
+      }
+      await copyDataset(DATASET_SRC, resolve(opts.dir, DATASET_DEST_RELATIVE))
+    },
+  }
+}
+
+// In dev, generate a fresh nonce per HTML request, transform the
+// index.html through Vite's pipeline, mirror the nonce onto every
+// HMR-injected inline script, and emit the matching CSP header.
+// `transformIndexHtml` is NOT a viable hook here — its context does
+// not expose `req`, so per-request state cannot be threaded in. We
+// own the HTML response via a `configureServer` middleware instead.
+// The lifecycle adapter is coverage-excluded; the middleware factory
+// it calls is unit-tested in src/lib/csp.test.ts and the smoke test
+// in src/__tests__/cspDevPlugin.test.ts.
+function cspDevPlugin(): Plugin {
+  return {
+    name: 'sta-csp-dev',
+    apply: 'serve',
+    configureServer(server) {
+      const middleware = createCspDevMiddleware({
+        readIndexHtml: (): Promise<string> => readFile(INDEX_HTML, 'utf-8'),
+        transformIndexHtml: (url, html, originalUrl): Promise<string> =>
+          server.transformIndexHtml(url, html, originalUrl),
+      })
+      // Defer to post-internal-middlewares so Vite's own HTML
+      // transforms run before us. (Returning a function from
+      // configureServer is Vite's official "after internal" hook.)
+      return (): void => {
+        server.middlewares.use((req, res, next): void => {
+          void middleware(req, res, next)
+        })
+      }
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), datasetPlugin(), cspDevPlugin()],
   test: {
     environment: 'jsdom',
     globals: true,
@@ -17,8 +88,23 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: ['src/**'],
-      exclude: ['src/main.tsx', 'src/test-setup.ts', '**/*.test.{ts,tsx}', '**/*.d.ts'],
+      exclude: [
+        'src/main.tsx',
+        'src/test-setup.ts',
+        'src/mocks/**',
+        '**/*.test.{ts,tsx}',
+        '**/*.d.ts',
+      ],
       reporter: ['text', 'lcov'],
     },
   },
 })
+
+// Coverage exclusion rationale: the `datasetPlugin` and `cspDevPlugin`
+// functions in this file are 5-line Vite lifecycle adapters
+// (`configureServer` + `writeBundle`) that wire the pure helpers in
+// src/lib/{datasetPlugin,csp}.ts into a running Vite server. They are
+// not exercisable in jsdom unit tests; spinning up Vite from tests
+// would defeat the unit-test isolation. The pure helpers carry the
+// behavior and are unit-tested directly. Exclusion is implicit
+// because vite.config.ts is not under coverage.include ('src/**').

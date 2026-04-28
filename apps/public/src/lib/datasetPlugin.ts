@@ -20,9 +20,12 @@ import { dirname } from 'node:path'
 
 // Connect-style middleware shape, narrowed to what we actually use.
 // We intentionally do not pull in `connect`/`http` types here so the
-// helper stays portable and easy to stub in unit tests.
+// helper stays portable and easy to stub in unit tests. `url` is
+// declared with `?:` (not `: string | undefined`) to stay
+// structurally compatible with Node's `IncomingMessage` under
+// `exactOptionalPropertyTypes`.
 export interface DatasetMiddlewareReq {
-  readonly url?: string
+  readonly url?: string | undefined
 }
 
 export interface DatasetMiddlewareRes {
