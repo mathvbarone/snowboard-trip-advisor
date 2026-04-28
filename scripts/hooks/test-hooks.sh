@@ -119,6 +119,57 @@ run_test "post-edit-lint: exit 0 on .md file"        "$HOOK" '{"tool_input":{"fi
 run_test "post-edit-lint: exit 0 on nonexistent"     "$HOOK" '{"tool_input":{"file_path":"nonexistent.ts"}}'                            0
 run_test "post-edit-lint: exit 0 on malformed JSON"  "$HOOK" 'not json'                                                                 0
 
+# ---------- post-pr-create-reminder.sh ----------
+HOOK="$HOOKS_DIR/post-pr-create-reminder.sh"
+
+# Always exits 0; the discriminator is whether stdout carries the
+# additionalContext payload. run_test only checks exit code, so we add a
+# bespoke run_test_emits / run_test_silent pair to assert on stdout.
+
+# run_test_emits <name> <hook> <input> — exits 0 AND emits non-empty stdout.
+run_test_emits() {
+  name="$1"
+  hook="$2"
+  input="$3"
+  set +e
+  out="$(printf '%s' "$input" | "$hook" 2>/dev/null)"
+  actual=$?
+  set -e
+  if [ "$actual" = "0" ] && [ -n "$out" ]; then
+    PASS=$((PASS + 1))
+  else
+    FAIL=$((FAIL + 1))
+    FAILED_LINES="$FAILED_LINES\n  - $name (expected exit 0 + non-empty stdout; got exit $actual + stdout=[$out])"
+  fi
+}
+
+# run_test_silent <name> <hook> <input> — exits 0 AND emits empty stdout.
+run_test_silent() {
+  name="$1"
+  hook="$2"
+  input="$3"
+  set +e
+  out="$(printf '%s' "$input" | "$hook" 2>/dev/null)"
+  actual=$?
+  set -e
+  if [ "$actual" = "0" ] && [ -z "$out" ]; then
+    PASS=$((PASS + 1))
+  else
+    FAIL=$((FAIL + 1))
+    FAILED_LINES="$FAILED_LINES\n  - $name (expected exit 0 + empty stdout; got exit $actual + stdout=[$out])"
+  fi
+}
+
+run_test_emits  "post-pr-create: emits on \`gh pr create --title ...\`"           "$HOOK" '{"tool_input":{"command":"gh pr create --title foo --body bar"}}'
+run_test_emits  "post-pr-create: emits on bare \`gh pr create\`"                  "$HOOK" '{"tool_input":{"command":"gh pr create"}}'
+run_test_emits  "post-pr-create: emits when chained (cd ... && gh pr create)"     "$HOOK" '{"tool_input":{"command":"cd repo && gh pr create --base main"}}'
+run_test_silent "post-pr-create: silent on \`gh pr created\` (no false positive)" "$HOOK" '{"tool_input":{"command":"gh pr created-at"}}'
+run_test_silent "post-pr-create: silent on \`gh pr list\`"                        "$HOOK" '{"tool_input":{"command":"gh pr list"}}'
+run_test_silent "post-pr-create: silent on \`npm run qa\`"                        "$HOOK" '{"tool_input":{"command":"npm run qa"}}'
+run_test_silent "post-pr-create: silent on \`gh pr comment\`"                     "$HOOK" '{"tool_input":{"command":"gh pr comment 16 --body \"x\""}}'
+run_test_silent "post-pr-create: silent on empty stdin"                           "$HOOK" ''
+run_test_silent "post-pr-create: silent on malformed JSON"                        "$HOOK" 'not json'
+
 # ---------- summary ----------
 printf '\nHook tests: %d passed, %d failed\n' "$PASS" "$FAIL"
 if [ "$FAIL" -gt 0 ]; then
