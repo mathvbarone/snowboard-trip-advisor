@@ -963,21 +963,31 @@ Parallel pairs after 3.1c lands: {3.2, 3.5}; after 3.2: {3.3, 3.5}; after 3.3: {
 
 ### Steps
 
-- [ ] **6.1: `Table` + `ToggleButtonGroup` design-system components.**
+- [ ] **Step 6.1: `Table` — TDD-first.**
 
-- [ ] **6.2: `matrix.tsx` lazy chunk — TDD-first.**
+  Tests: sticky header (`position: sticky` style asserted via inline-style or class); column headers carry `<th scope="col">`; row cells carry `<td>`; axe-clean per state. **No horizontal-scroll affordance** (dropped from contract per spec §5.1). Run: FAIL. Implement. Run: PASS. Commit.
 
-  Tests: empty shortlist → "Add resorts to compare"; non-empty → table with shortlisted resorts × `MetricPath` rows; `&highlight=snow_depth_cm` highlights the column; viewport `<md` → redirect message; lazy chunk fetched only when navigating to matrix (asserted via MSW request log on the chunk URL — Vite dev serves `/src/views/matrix.tsx`).
+- [ ] **Step 6.2: `ToggleButtonGroup` — TDD-first.**
 
-- [ ] **6.3: Update FilterBar.**
+  Tests: `aria-pressed` per option (NOT `role="tab"` per parent §2.4); arrow-key navigation between options; click selects + fires `onChange`; disabled state; axe-clean per state. Run: FAIL. Implement. Run: PASS. Commit.
 
-  Fill the `slot` prop with `<ToggleButtonGroup>`. Test asserts view toggle pushes `&view=` (PUSH transition — back closes).
+- [ ] **Step 6.3: `apps/public/src/views/matrix.tsx` (lazy) — TDD-first.**
 
-- [ ] **6.4: `matrix.module.css`.**
+  Tests: empty shortlist → "Add resorts to compare"; non-empty → table with shortlisted resorts × `MetricPath` rows; `&highlight=snow_depth_cm` highlights the column; viewport `<md` (mocked via `vi.spyOn(window, 'matchMedia')`) → redirect message; lazy chunk fetched only when navigating to matrix (asserted via MSW request log on the chunk URL — Vite dev serves `/src/views/matrix.tsx`); axe-clean per state. Run: FAIL. Implement (lazy `default` export; uses `useShortlist`, `useURLState`, `useMediaQuery`). Run: PASS. Commit.
 
-  Add the `<lg` + `&detail=` downgrade rule. Acceptance gate (per §7.11): `matrix.module.css.test.ts` reads the module text and asserts the `@media` rule string is present (JSDOM does not evaluate `@media`).
+- [ ] **Step 6.4: Update `FilterBar` — TDD-first (test-update precedes impl-fill).**
 
-- [ ] **6.5: README + integration smoke.**
+  **Test first:** add a test in `FilterBar.test.tsx` asserting (a) the view-toggle `<ToggleButtonGroup>` renders inside the previously-empty `slot` prop, (b) clicking the toggle pushes `&view=` to the URL via `setURLState` (PUSH transition; assert via `vi.spyOn(history, 'pushState')` or by reading `window.location.search`), (c) browser back from `?view=matrix` returns to `?view=cards` (asserted via `dispatchEvent(new PopStateEvent('popstate'))`). Run: FAIL — `slot` is still `null`.
+
+  **Impl:** in `FilterBar.tsx`, set `slot` to `<ToggleButtonGroup options={[{value: 'cards'}, {value: 'matrix'}]} selected={url.view} onChange={(v) => setURLState({ view: v })} />`. Run: PASS. Commit.
+
+- [ ] **Step 6.5: `apps/public/src/views/matrix.module.css` — test-first.**
+
+  **Test first:** `matrix.module.css.test.ts` reads the CSS module's source text (`fs.readFileSync`) and asserts the presence of `@media (max-width: 1279.98px)` (i.e., `<lg`) combined with the `[data-detail-open]` selector that downgrades the matrix layout to single-column cards. JSDOM does not evaluate `@media`, so a text-presence assertion is the testable surface (per spec §7.11 acceptance gate). Run: FAIL — file doesn't exist.
+
+  **Impl:** create `matrix.module.css` with the rule. Run: PASS. Commit.
+
+- [ ] **Step 6.6: README + integration smoke.**
 
   Update README.md with matrix view feature mention. PR description records README outcome.
 
@@ -987,15 +997,15 @@ Parallel pairs after 3.1c lands: {3.2, 3.5}; after 3.2: {3.3, 3.5}; after 3.3: {
   # Manual check: cards landing → click "Matrix" toggle → matrix renders; back-button returns to cards.
   ```
 
-- [ ] **6.6: Acceptance gate (lift from spec §7.10).**
+- [ ] **Step 6.7: Acceptance gate (lift from spec §7.10).**
 
   - `npm run qa` green.
   - `matrix.test.tsx` asserts the chunk fetch via MSW request log (lazy chunk loaded only when navigating).
-  - `useURLState.test.ts` asserts back-button navigation (`PopStateEvent`) returns from `?view=matrix` to `?view=cards`.
+  - `useURLState.test.ts` (or `FilterBar.test.tsx` extension) asserts back-button navigation (`PopStateEvent`) returns from `?view=matrix` to `?view=cards`.
   - Bundle visualizer (manual check at this PR; CI integration in PR 3.6) shows matrix in its own chunk.
   - `matrix.module.css.test.ts` reads the module text and asserts the `<lg + &detail` downgrade rule's `@media` rule string is present.
 
-- [ ] **6.7: Subagent review** + open PR.
+- [ ] **Step 6.8: Subagent review** + open PR.
 
 ---
 
@@ -1017,9 +1027,11 @@ Parallel pairs after 3.1c lands: {3.2, 3.5}; after 3.2: {3.3, 3.5}; after 3.3: {
 
 ### Steps
 
-- [ ] **7.1: `deepLinks.ts` builders — TDD-first.**
+- [ ] **Step 7.1: `deepLinks.ts` builders — TDD-first.**
 
-  Tests: round-trip `encodeURIComponent` parity; malicious slug `';drop table--` doesn't escape into URL; both builders return URLs starting with the canonical base.
+  **Test first:** in `deepLinks.test.ts`, replace the 3.1c stub-throw assertions with full happy-path tests: `bookingDeepLink({ slug, name })` returns a URL starting with `https://www.booking.com/...` containing `encodeURIComponent(slug)`; same for Airbnb; malicious slug `';drop table--` is `encodeURIComponent`-encoded (no raw apostrophes / semicolons in the URL); per-resort `booking_ss` / `airbnb_ss` overrides take precedence over the canonical template; `trip` parameter (when supplied) appends date params. Run: FAIL.
+
+  **Impl:** drop the stub throws in `deepLinks.ts`. Implement both builders. Run: PASS. Commit.
 
 - [ ] **7.2: `views/detail.tsx` body — TDD-first (test-update precedes impl-replace).**
 
@@ -1064,16 +1076,23 @@ Parallel pairs after 3.1c lands: {3.2, 3.5}; after 3.2: {3.3, 3.5}; after 3.3: {
 - Modify `apps/public/src/state/useScrollReset.ts` — final wiring.
 - Modify `apps/public/src/views/DroppedSlugsBanner.test.tsx`, `apps/public/src/state/useScrollReset.test.ts` — final scenarios.
 - Create `scripts/check-bundle-budget.ts` + `scripts/check-bundle-budget.test.ts`.
+- Create `scripts/check-preload-hrefs.ts` + `scripts/check-preload-hrefs.test.ts` (per spec §10.7).
+- Create `scripts/check-dist-dataset.ts` + `scripts/check-dist-dataset.test.ts` (per spec §10.2 nginx contract verification).
 - Modify root `package.json` — add `npm run analyze` script.
-- Modify `.github/workflows/quality-gate.yml` — add `npm run analyze` step (warn mode).
+- Modify `vitest.workspace.ts` (root) — enumerate `tests/integration/apps/public/*` if not already covered.
+- Modify `.github/workflows/quality-gate.yml` — add `npm run analyze` step.
 
 ### Steps
 
-- [ ] **8.1: Final wiring of DroppedSlugsBanner + useScrollReset.**
+- [ ] **Step 8.1: `vitest.workspace.ts` enumerates integration tests.**
 
-  Tests cover: DroppedSlugsBanner renders the dropped-slugs aside when `useDroppedSlugs()` returns a non-empty set; `useScrollReset` fires `window.scrollTo(0, 0)` only on `view` transitions (not sort/filter).
+  Verify that `vitest.workspace.ts` covers `tests/integration/apps/public/*.test.ts`. If not, add the project entry. Run `npm run --workspace=@snowboard-trip-advisor/tests-integration test` (or the workspace-equivalent) and confirm Vitest discovers the new tests once they're added in Step 8.2. Commit if a config edit was needed.
 
-- [ ] **8.2: Integration tests.**
+- [ ] **Step 8.2: Final wiring of DroppedSlugsBanner + useScrollReset — TDD-first.**
+
+  Tests cover: DroppedSlugsBanner renders the dropped-slugs aside when `useDroppedSlugs()` returns a non-empty set (replaces the 3.1c null-render stub); `useScrollReset` fires `window.scrollTo(0, 0)` only on `view` transitions (not sort/filter; assert via `vi.spyOn(window, 'scrollTo')`).
+
+- [ ] **Step 8.3: Integration tests.**
 
   Each integration test in `tests/integration/apps/public/`:
   - Sets up MSW with the seed-fixture handler.
@@ -1088,26 +1107,26 @@ Parallel pairs after 3.1c lands: {3.2, 3.5}; after 3.2: {3.3, 3.5}; after 3.3: {
   - `matrix.test.ts`: `?view=matrix&shortlist=kotelnica-bialczanska,spindleruv-mlyn&highlight=snow_depth_cm` → matrix renders with column highlight + axe.
   - `detail-open.test.ts`: `?detail=kotelnica-bialczanska` → drawer renders over cards + close → focus returns to `[data-detail-trigger]` + axe.
 
-- [ ] **8.3: `scripts/check-bundle-budget.ts` — TDD-first.**
+- [ ] **Step 8.4: `scripts/check-bundle-budget.ts` — TDD-first.**
 
   - Test: given a `rollup-plugin-visualizer` JSON output fixture, computes initial-chunk gzip total; over 100 KB → logs `WARN: initial chunk gzip = X KB exceeds 100 KB advisory budget` and exits 0; under → exits 0 silently.
   - Implement. Commit.
 
-- [ ] **8.4: `scripts/check-preload-hrefs.ts` — TDD-first (per spec §10.7).**
+- [ ] **Step 8.5: `scripts/check-preload-hrefs.ts` — TDD-first (per spec §10.7).**
 
   Required by spec §10.7 ("PR 3.6 ships a CI smoke test that asserts each emitted preload href resolves to a real file in `dist/`"). Catches the silent-404 mode where Vite renames the woff2 asset but the import URL doesn't update.
 
   - Test: given a fixture `dist/index.html` and matching/missing files in fixture `dist/`, parses every `<link rel="preload" as="font">` href, resolves against `dist/`, asserts existence; on missing → exits 1 with the offending href; on all-present → exits 0.
   - Implement. Commit.
 
-- [ ] **8.5: `scripts/check-dist-dataset.ts` — TDD-first (per spec §10.2 nginx contract verification).**
+- [ ] **Step 8.6: `scripts/check-dist-dataset.ts` — TDD-first (per spec §10.2 nginx contract verification).**
 
   Required by spec §10.2 ("Verification at Epic 3 close: PR 3.6's CI step asserts `dist/data/current.v1.json` exists post-build").
 
   - Test: given a fixture `dist/`, asserts `dist/data/current.v1.json` exists and parses as valid JSON matching the published-dataset shape (sanity-check the schema's envelope keys, not full validation).
   - Implement. Commit.
 
-- [ ] **8.6: Add `npm run analyze` script + wire all three checks.**
+- [ ] **Step 8.7: Add `npm run analyze` script + wire all three checks.**
 
   Root `package.json` adds:
   ```json
@@ -1124,7 +1143,7 @@ Parallel pairs after 3.1c lands: {3.2, 3.5}; after 3.2: {3.3, 3.5}; after 3.3: {
 
   Commit: `chore: npm run analyze (bundle budget + preload-href + dist-dataset checks)`.
 
-- [ ] **8.7: CI workflow update.**
+- [ ] **Step 8.8: CI workflow update.**
 
   In `.github/workflows/quality-gate.yml`, add a step after `npm run qa`: `npm run analyze`.
 
@@ -1135,7 +1154,7 @@ Parallel pairs after 3.1c lands: {3.2, 3.5}; after 3.2: {3.3, 3.5}; after 3.3: {
 
   Commit.
 
-- [ ] **8.8: Final QA + integration suite + analyze.**
+- [ ] **Step 8.9: Final QA + integration suite + analyze.**
 
   ```bash
   npm run qa
@@ -1145,14 +1164,14 @@ Parallel pairs after 3.1c lands: {3.2, 3.5}; after 3.2: {3.3, 3.5}; after 3.3: {
 
   All green. Attach the `dist/stats.html` visualizer report to PR description.
 
-- [ ] **8.9: Acceptance gate (lift from spec §7.12 + §10.2 + §10.7).**
+- [ ] **Step 8.10: Acceptance gate (lift from spec §7.12 + §10.2 + §10.7).**
 
   - `npm run qa` green.
   - `npm run test:integration` green; axe-clean per route composition.
   - `npm run analyze` green: budget in warn-mode, preload-hrefs + dist-dataset in error-mode.
   - Bundle visualizer report attached.
 
-- [ ] **8.10: Subagent review** (workflow change) + open PR.
+- [ ] **Step 8.11: Subagent review** (workflow change) + open PR.
 
 ---
 

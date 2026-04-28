@@ -370,7 +370,7 @@ Top-level layout:
 </Shell>
 ```
 
-Render-lifecycle order asserted by `Shell.test.tsx`: mount → `use(promise)` throws the *promise* → Suspense catches, shows `<DatasetLoading />` → promise rejects → next render `use` throws the *Error* → ErrorBoundary catches, replaces tree with `<DatasetUnavailable />`.
+Render-lifecycle order asserted by `App.test.tsx`: mount → `use(promise)` throws the *promise* → Suspense catches, shows `<DatasetLoading />` → promise rejects → next render `use` throws the *Error* → ErrorBoundary catches, replaces tree with `<DatasetUnavailable />`. (The composition lives in `App.tsx`, not in a separate `AppShell.tsx` wrapper file — see §2.3.)
 
 ### 4.5 `<DatasetUnavailable />` copy
 
@@ -896,7 +896,9 @@ CODEOWNER review request order: `3.1a → 3.1b → 3.1c`, then concurrent group,
   - `apps/public/src/views/DroppedSlugsBanner.tsx` final wiring (PR 3.1c shipped a stub).
   - `apps/public/src/state/useScrollReset.ts` final wiring.
   - Root `package.json` — `npm run analyze` script using `rollup-plugin-visualizer`.
-  - `scripts/check-bundle-budget.ts` — reads visualizer JSON, computes initial chunk gzip, **warns** (exits 0) on >100 KB. Epic 6 follow-up flips to `error`.
+  - `scripts/check-bundle-budget.ts` (+ `scripts/check-bundle-budget.test.ts`) — reads visualizer JSON, computes initial chunk gzip, **warns** (exits 0) on >100 KB. Epic 6 follow-up flips to `error`.
+  - `scripts/check-preload-hrefs.ts` (+ `scripts/check-preload-hrefs.test.ts`) — parses `dist/index.html`'s `<link rel="preload">` href values and asserts each resolves to a real file in `dist/` (per §10.7). **Error mode** in CI (exits 1 on missing href; blocks merge — this is a deploy-breakage check, not a budget drift).
+  - `scripts/check-dist-dataset.ts` (+ `scripts/check-dist-dataset.test.ts`) — asserts `dist/data/current.v1.json` exists and parses as JSON with the published-dataset envelope shape (per §10.2 nginx-contract verification). **Error mode** in CI.
   - `.github/workflows/quality-gate.yml` — adds `npm run analyze` step (warn mode).
 
 **Acceptance gate:** `npm run qa` + `npm run test:integration` green; axe-clean per route composition; bundle visualizer report attached.
