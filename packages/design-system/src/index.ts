@@ -8,3 +8,8 @@ export { IconButton, type IconButtonProps } from './components/IconButton'
 export { Pill, type PillProps, type PillVariant } from './components/Pill'
 export { Chip, type ChipProps } from './components/Chip'
 export { Card, type CardProps, type CardVariant } from './components/Card'
+export {
+  Select,
+  type SelectProps,
+  type SelectOption,
+} from './components/Select'
