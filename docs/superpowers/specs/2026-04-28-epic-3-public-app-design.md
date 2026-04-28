@@ -97,9 +97,7 @@ apps/public/
 ├── index.html              # <html lang="en">; <meta name="description">; two <meta name="theme-color"> with media; <link rel="canonical">
 ├── src/
 │   ├── main.tsx            # @fontsource CSS imports; injectFontPreloads([dmSans400, jetBrains500]); mount
-│   ├── App.tsx             # <AppShell />
-│   ├── components/
-│   │   └── AppShell.tsx    # <Shell><ShellErrorBoundary><Suspense fallback>...</Suspense></ShellErrorBoundary></Shell>
+│   ├── App.tsx             # <Shell> + <ShellErrorBoundary> + <Suspense fallback> + URL→view dispatch + drawer mounts (composition inlined; ai-clean-code-adherence audit dropped the AppShell wrapper file)
 │   ├── views/              # screens — composite components co-located here
 │   │   ├── cards.tsx       # CardsView (eager)
 │   │   ├── matrix.tsx      # MatrixView (lazy)
@@ -124,7 +122,10 @@ apps/public/
 │   │   ├── injectFontPreloads.ts
 │   │   ├── deepLinks.ts               # builders for booking + airbnb deep-link URLs
 │   │   ├── errors.ts                  # DatasetFetchError, DatasetValidationError, onDatasetError no-op
-│   │   └── format.ts                  # app-specific formatter glue (delegates to design-system format.ts)
+│   │   └── lang.ts                    # countryToPrimaryLang BCP 47 map per §6.6
+│   │                                    # NOTE: NO `apps/public/src/lib/format.ts` — call sites import format helpers from
+│   │                                    # @snowboard-trip-advisor/design-system directly. The wrapper file was dropped per the
+│   │                                    # ai-clean-code-adherence audit (no app-specific glue).
 │   ├── state/                         # 8 hooks — Section 6
 │   │   ├── useURLState.ts
 │   │   ├── useLocalStorageState.ts
@@ -339,7 +340,7 @@ export function __resetForTests(): void { cached = null }   // called in afterEa
 ### 4.4 Error UI & retry
 
 ```tsx
-// AppShell with ShellErrorBoundary (sketch)
+// apps/public/src/App.tsx — Shell + ShellErrorBoundary inlined (no AppShell wrapper file; see §2.3)
 class ShellErrorBoundary extends Component<...> {
   state = { hasError: false, retryKey: 0, error: undefined }
   retry = (): void => {
@@ -494,8 +495,8 @@ export default function DetailDrawer(_: DetailDrawerProps): JSX.Element {
 
 **Lazy-import shape** (PR 3.1c):
 ```ts
-// apps/public/src/components/AppShell.tsx
-const DetailDrawer = lazy(() => import('../views/detail'))
+// apps/public/src/App.tsx
+const DetailDrawer = lazy(() => import('./views/detail'))
 ```
 The `default` re-export from `views/detail.tsx` is what `lazy()` consumes; PR 3.5 does not change this line.
 
@@ -776,13 +777,14 @@ CODEOWNER review request order: `3.1a → 3.1b → 3.1c`, then concurrent group,
   - `packages/schema/src/loadResortDataset.test.ts` — slim happy-path Node wrapper test.
   - `packages/design-system/src/components/{Shell,Skeleton,EmptyStateLayout}.test.tsx` — render contract + axe per state.
   - `packages/design-system/src/format.test.ts` — destructured-primitive formatters.
-  - `apps/public/src/lib/{urlState,router,datasetFetch,errors,format,deepLinks,lang}.test.ts` — pure helpers (`lang.test.ts` asserts every COUNTRY_TO_PRIMARY_LANG entry yields a valid BCP 47 tag and that unknown countries fall back to `'en'`).
+  - `apps/public/src/lib/{urlState,router,datasetFetch,errors,deepLinks,lang}.test.ts` — pure helpers (`lang.test.ts` asserts every COUNTRY_TO_PRIMARY_LANG entry yields a valid BCP 47 tag and that unknown countries fall back to `'en'`).
   - `apps/public/src/state/{useURLState,useLocalStorageState,useDataset,useShortlist,useMediaQuery,useDocumentMeta,useScrollReset,useDroppedSlugs}.test.ts` — each hook drives the underlying API directly.
-  - `apps/public/src/state/dataset.test.ts` — contamination regression: two consecutive renders, independent fetch counts asserted via MSW request log.
+  - `apps/public/src/state/useDataset.test.ts` — contamination regression: two consecutive renders, independent fetch counts asserted via MSW request log (folded into the same hook test file rather than a separate `dataset.test.ts`).
   - `apps/public/src/views/states/{DatasetLoading,DatasetUnavailable,NoResorts}.test.tsx` — render contract; `NoResorts` exercised via a test that filters all resorts out (`country=XX` with no matching resort) so `views.length === 0` is reachable post-validator-min(1).
   - `apps/public/src/views/cards.test.tsx` (PR 3.1c placeholder) — asserts the dataset count renders; replaced wholesale in PR 3.2.
   - `apps/public/src/views/detail.test.tsx` (PR 3.1c stub) — `expect(() => render(<DetailDrawer slug={someResortSlug} />)).toThrow('detail route stub — lands in PR 3.5')`; covers the throw line at 100% per §5.5.
-  - `apps/public/src/components/AppShell.test.tsx` — render lifecycle order (fallback → content; fallback → error UI); both `ShellErrorBoundary` lifecycle methods tested (`static getDerivedStateFromError` returns updated state; `componentDidCatch` invokes `onDatasetError(err)` no-op once); retry via `startTransition`; skip-link focus assertion.
+  - `apps/public/src/views/ShortlistDrawer.test.tsx` (PR 3.1c stub) — minimal render assertion; full implementation in PR 3.3.
+  - `apps/public/src/App.test.tsx` — render lifecycle order (fallback → content; fallback → error UI); both `ShellErrorBoundary` lifecycle methods tested (`static getDerivedStateFromError` returns updated state; `componentDidCatch` invokes `onDatasetError(err)` no-op once); retry via `startTransition`; skip-link focus assertion.
 - *Implementation:*
   - `packages/schema/src/loadResortDatasetFromObject.ts` (NEW, pure).
   - `packages/schema/src/loadResortDataset.ts` (refactored Node wrapper; existing tests stay green by virtue of the wrapper).
@@ -790,13 +792,14 @@ CODEOWNER review request order: `3.1a → 3.1b → 3.1c`, then concurrent group,
   - `packages/design-system/src/components/{Shell,Skeleton,EmptyStateLayout}.tsx`.
   - `packages/design-system/src/format.ts`.
   - `packages/design-system/src/index.ts` — re-export new components.
-  - `apps/public/src/lib/{urlState,router,datasetFetch,errors,format,deepLinks,lang}.ts`.
+  - `apps/public/src/lib/{urlState,router,datasetFetch,errors,deepLinks,lang}.ts`. (Note: NO `lib/format.ts` — call sites import from design-system directly per §2.3.)
   - `apps/public/src/state/` — all 8 hooks; `useDataset` exports `__resetForTests`.
   - `apps/public/src/views/states/{DatasetLoading,DatasetUnavailable,NoResorts}.tsx`.
   - `apps/public/src/views/cards.tsx` — Landing placeholder rendering `views.length` count.
   - `apps/public/src/views/detail.tsx` — frozen interface; body throws `'detail route stub — lands in PR 3.5'`.
-  - `apps/public/src/components/AppShell.tsx` — composes `<Shell><ShellErrorBoundary><Suspense>...</Suspense></ShellErrorBoundary></Shell>`.
-  - `apps/public/src/App.tsx` — replaces 3.1b stub with `<AppShell />`.
+  - `apps/public/src/views/ShortlistDrawer.tsx` (stub returning `null`) — full implementation in PR 3.3; stub here so `App.tsx`'s import resolves.
+  - `apps/public/src/views/DroppedSlugsBanner.tsx` (stub returning `null`) — final wiring in PR 3.6.
+  - `apps/public/src/App.tsx` — replaces 3.1b stub with the full composition: `<Shell><ShellErrorBoundary><Suspense fallback>...</Suspense></ShellErrorBoundary></Shell>` plus URL→view dispatch + lazy DetailDrawer mount + ShortlistDrawer + DroppedSlugsBanner. (No separate `components/AppShell.tsx` wrapper file per §2.3.)
 
 **Acceptance gate:** `npm run qa` green; foundation states render; nav-to-detail throws (gated by URL state, untriggered by tests); contamination regression passes.
 

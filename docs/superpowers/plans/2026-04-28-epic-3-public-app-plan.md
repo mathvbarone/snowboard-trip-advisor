@@ -120,8 +120,14 @@ packages/schema/src/index.ts            [PR 3.1c — export both]
 docs/adr/0004 / 0005 / 0006 / 0007       [PR 3.1a — 4 ADRs]
 tests/integration/apps/public/{cards-empty,cards-loaded,matrix,detail-open}.test.ts   [PR 3.6]
 scripts/check-bundle-budget.ts          [PR 3.6]
+scripts/check-preload-hrefs.ts          [PR 3.6 — spec §10.7]
+scripts/check-dist-dataset.ts           [PR 3.6 — spec §10.2 nginx contract verification]
 .github/workflows/quality-gate.yml      [PR 3.6 — bundle-analyze step in warn mode]
+vitest.workspace.ts                     [PR 3.6 — adds tests/integration/apps/public/* projects if not already enumerated]
+packages/design-system/tokens.css       [REGENERATED any time tokens.ts changes — pre-commit hook + tokens:check enforce]
 ```
+
+**Token-regeneration note:** `tokens.css` is generated from `tokens.ts` by `scripts/generate-tokens.ts`. Whenever a Task adds new entries to `tokens.ts` (new colors, motion tokens, etc.), run `npm run tokens:generate` and commit `tokens.css` alongside the `tokens.ts` change. The pre-commit hook + CI's `tokens:check` step (`npm run tokens:generate && git diff --exit-code packages/design-system/tokens.css`) will fail the PR otherwise.
 
 ---
 
@@ -149,6 +155,15 @@ Calling out tempting abstractions we deliberately skipped, per the ai-clean-code
 - **No "reusable" component patterns** (`Foo` + `PageFoo`). One component per concern; reuse if a second caller emerges.
 
 ---
+
+## Pre-flight per Task (apply at the start of every Task)
+
+Before executing any Task below:
+
+1. **Verify dependencies merged.** Each Task lists "Depends on: Task N merged." Confirm those PRs are in `main` (`git fetch && git log origin/main --oneline -10`) before branching.
+2. **Sync local main.** `git checkout main && git pull --ff-only`.
+3. **Create the branch off the synced main.** Branch name pattern: `epic-3/pr-3.<X>-<short-slug>`.
+4. **Re-read the relevant spec sections** named in the Task header (e.g., spec §7.5 for Task 1). The plan deliberately avoids duplicating the spec — read it for the per-PR contract, gates, and edge cases.
 
 ## Cross-cutting reminders (every Task)
 
@@ -319,13 +334,21 @@ Parallel pairs after 3.1c lands: {3.2, 3.5}; after 3.2: {3.3, 3.5}; after 3.3: {
   git commit -s -m "chore: pin engines.node ≥ 20.11 (required by import.meta.dirname in PR 3.1b plugins)"
   ```
 
-- [ ] **Step 1.8: Subagent review.**
+- [ ] **Step 1.8: Acceptance gate (lift from spec §7.5).**
+
+  - `npm run qa` green.
+  - `npm run --workspace=@snowboard-trip-advisor/schema test` shows `dataset_empty` issue code asserted in `validatePublishedDataset.test.ts`.
+  - ADR index reflects 0004–0007.
+  - `eslint.config.js` rule fires on the fixture import in `tests/integration/eslintConfig.test.ts`.
+  - Root `package.json` has `engines.node ≥ 20.11`.
+
+- [ ] **Step 1.9: Subagent review.**
 
   Dispatch a `general-purpose` subagent. Brief: "Review epic-3/pr-3.1a-config-ci-adrs. Triggers: packages/schema/**, eslint.config.js, docs/adr/**. Verify the 4 ADRs are MADR-shaped, the validator's `dataset_empty` issue code is named (not opaque), the ESLint rule's message is actionable, and the engines pin is justified. Be critical, not validating."
 
   Fold findings into the same branch.
 
-- [ ] **Step 1.9: Open the PR and request maintainer review.**
+- [ ] **Step 1.10: Open the PR and request maintainer review.**
 
   ```bash
   git push -u origin epic-3/pr-3.1a-config-ci-adrs
@@ -555,13 +578,21 @@ Parallel pairs after 3.1c lands: {3.2, 3.5}; after 3.2: {3.3, 3.5}; after 3.3: {
 
   Expected: green qa; build emits `dist/data/current.v1.json`; two `curl -I` calls return distinct `'nonce-...'` values in the CSP header.
 
-- [ ] **Step 2.13: Subagent review.**
+- [ ] **Step 2.13: Acceptance gate (lift from spec §7.6).**
+
+  - `npm run qa` green.
+  - `npm run --workspace=@snowboard-trip-advisor/public-app dev` boots without errors.
+  - `cspDevPlugin.test.ts` asserts the nonce differs across two middleware invocations (P0 #4 from spec round 1).
+  - `npm run --workspace=@snowboard-trip-advisor/public-app build` emits `dist/data/current.v1.json` (verified by Step 2.12 manual smoke).
+  - Font preloads in `index.html` use `-latin-ext-` paths (not `-latin-`) — verified by `injectFontPreloads.test.ts` and inspection of `dist/index.html`.
+
+- [ ] **Step 2.14: Subagent review.**
 
   Dispatch `general-purpose` reviewer. Brief: "Review epic-3/pr-3.1b-vite-plugins. Triggers: apps/public/vite.config.ts, config/csp.ts. Verify the cspDevPlugin uses the middleware-only pattern (no `transformIndexHtml` hook), `serveDatasetMiddleware` sets `Content-Type: application/json; charset=utf-8` (matches §10.2 nginx contract), the dev CSP includes `wss://localhost:*`, font preload paths use `latin-ext` (not `latin`), and MSW lifecycle includes `server.events.removeAllListeners()`. Be critical, not validating."
 
   Fold findings.
 
-- [ ] **Step 2.14: Open PR.**
+- [ ] **Step 2.15: Open PR.**
 
   ```bash
   git push -u origin epic-3/pr-3.1b-vite-plugins
@@ -604,17 +635,21 @@ Parallel pairs after 3.1c lands: {3.2, 3.5}; after 3.2: {3.3, 3.5}; after 3.3: {
 
 - [ ] **Step 3.1: Branch off main.** Same pattern.
 
-- [ ] **Step 3.2: Schema split — TDD-first.**
+- [ ] **Step 3.2: Schema split — TDD-first (procedural detail).**
 
-  - **Test:** Create `packages/schema/src/loadResortDatasetFromObject.test.ts` mirroring the existing `loadResortDataset.test.ts`'s projection-branch coverage but invoking `loadResortDatasetFromObject(JSON.parse(rawString))` instead of taking a path. Run: FAIL.
-  - **Impl:** Create `loadResortDatasetFromObject.ts` with the projection logic (copy from `loadResortDataset.ts`'s body except the `JSON.parse(await readFile(...))` head). Run: PASS.
-  - **Refactor:** Make `loadResortDataset.ts` a 4-line Node wrapper that parses JSON then calls `loadResortDatasetFromObject`. Update `index.ts` to re-export both. Update `loadResortDataset.test.ts` to keep one slim happy-path test (the projection-branch coverage now lives in the new file).
-  - Run: `npm run --workspace=@snowboard-trip-advisor/schema test` — PASS.
-  - Commit:
-    ```bash
-    git add packages/schema/src/{loadResortDatasetFromObject,loadResortDataset}.{ts,test.ts} packages/schema/src/index.ts
-    git commit -s -m "refactor(schema): split loadResortDataset into pure (FromObject) + Node wrapper"
-    ```
+  Procedure (`git mv`-style migration, no duplicate test bodies in intermediate commits):
+
+  1. **Test (NEW file):** Create `packages/schema/src/loadResortDatasetFromObject.test.ts` covering all projection branches by invoking `loadResortDatasetFromObject(jsonObject, opts)` directly (no path). Tests cover: durable-fresh field, live-fresh, live-stale, live-never_fetched, validator-failure path returns `{ ok: false, issues }`. Run: FAIL — file not found.
+  2. **Impl (NEW file):** Create `loadResortDatasetFromObject.ts` with the projection logic (copy from `loadResortDataset.ts`'s body except the `JSON.parse(await readFile(...))` head). Run: PASS.
+  3. **Refactor (existing file):** Replace `loadResortDataset.ts`'s body with the 4-line Node wrapper: `const raw: unknown = JSON.parse(await readFile(path, 'utf8')); return loadResortDatasetFromObject(raw, opts)`.
+  4. **Trim (existing test):** In `loadResortDataset.test.ts`, **keep only** the one happy-path test that asserts the wrapper round-trip works against the live `data/published/current.v1.json` (i.e., `await loadResortDataset(FIXTURE_PATH) === ok: true with views.length === 2`). **Delete** the projection-branch tests that moved to `loadResortDatasetFromObject.test.ts` (no duplication; coverage stays at 100%). **Add one Node-wrapper-specific test:** `await expect(loadResortDataset('/nonexistent/path.json')).rejects.toThrow()` — covers the `readFile` ENOENT path that the pure function doesn't.
+  5. **Re-export:** `index.ts` adds `loadResortDatasetFromObject` named export.
+  6. Run: `npm run --workspace=@snowboard-trip-advisor/schema test` — PASS at 100% coverage.
+  7. Commit:
+     ```bash
+     git add packages/schema/src/{loadResortDatasetFromObject,loadResortDataset}.{ts,test.ts} packages/schema/src/index.ts
+     git commit -s -m "refactor(schema): split loadResortDataset into pure (FromObject) + Node wrapper"
+     ```
 
 - [ ] **Step 3.3: design-system `format.ts` — TDD-first.**
 
@@ -666,11 +701,12 @@ Parallel pairs after 3.1c lands: {3.2, 3.5}; after 3.2: {3.3, 3.5}; after 3.3: {
 
   Commit each.
 
-- [ ] **Step 3.10: `apps/public/src/views/cards.tsx` (placeholder) + `detail.tsx` (frozen stub) + `DroppedSlugsBanner.tsx` (stub).**
+- [ ] **Step 3.10: `apps/public/src/views/{cards,detail,DroppedSlugsBanner,ShortlistDrawer}.tsx` — TDD-first per file.**
 
-  - `cards.tsx`: renders `views.length` count from `useDataset()`; `cards.test.tsx` asserts the count for the seed dataset (2 resorts).
+  - `cards.tsx`: renders `views.length` count from `useDataset()`; `cards.test.tsx` asserts the count for the seed dataset (2 resorts). PR 3.2 replaces.
   - `detail.tsx`: spec §5.5 frozen interface; body throws. `detail.test.tsx` asserts `expect(() => render(<DetailDrawer slug={someSlug as ResortSlug} />)).toThrow('detail route stub — lands in PR 3.5')`.
-  - `DroppedSlugsBanner.tsx`: returns `null` in 3.1c (stub); `DroppedSlugsBanner.test.tsx` asserts the null render. Real wiring in PR 3.6.
+  - `DroppedSlugsBanner.tsx`: stub returns `null`; `DroppedSlugsBanner.test.tsx` asserts the null render. Real wiring in PR 3.6.
+  - **`ShortlistDrawer.tsx`** (stub returns `null`): exists so `App.tsx`'s import resolves at this PR. `ShortlistDrawer.test.tsx` asserts the null render. Full implementation lands in PR 3.3 Step 5.5.
 
   Commit each.
 
@@ -695,9 +731,17 @@ Parallel pairs after 3.1c lands: {3.2, 3.5}; after 3.2: {3.3, 3.5}; after 3.3: {
 
   Manually probe error path: temporarily break the dataset path, reload — `<DatasetUnavailable>` renders with Retry. Restore, retry — content reappears. Document in PR description.
 
-- [ ] **Step 3.13: Subagent review.** Brief covers `packages/schema/**` (split + min(1) ripple verified), `packages/design-system/**` (Shell/Skeleton/EmptyStateLayout/format.ts), and the frozen interface contract preserved (§5.5). Fold findings.
+- [ ] **Step 3.13: Acceptance gate (lift from spec §7.7).**
 
-- [ ] **Step 3.14: Open PR.**
+  - `npm run qa` green.
+  - Foundation states (`<DatasetLoading>`, `<DatasetUnavailable>`, `<NoResorts>`) render as expected (asserted in their respective test files).
+  - Nav-to-detail in App.tsx is gated by URL state; `views/detail.test.tsx` asserts the throw line.
+  - `useDataset` contamination regression passes (independent fetch counts asserted via MSW request log).
+  - `App.tsx` lazy-imports `views/detail` at the path the frozen interface promises (`./views/detail`).
+
+- [ ] **Step 3.14: Subagent review.** Brief covers `packages/schema/**` (split + min(1) ripple verified), `packages/design-system/**` (Shell/Skeleton/EmptyStateLayout/format.ts), and the frozen interface contract preserved (§5.5). Fold findings.
+
+- [ ] **Step 3.15: Open PR.**
 
 ---
 
@@ -724,29 +768,85 @@ Parallel pairs after 3.1c lands: {3.2, 3.5}; after 3.2: {3.3, 3.5}; after 3.3: {
 
 ### Steps
 
-- [ ] **Step 4.1–4.10: design-system components, TDD-first per file.**
+- [ ] **Step 4.1: Add design-system Radix dependency.**
 
-  Order: `Button` → `IconButton` → `Pill` → `Chip` → `Card` → `Select` → `Input` → icons (sources × 6, ui × 4) → `primitives/Tooltip` → `SourceBadge` → `FieldValueRenderer` → `HeaderBar`.
+  In `packages/design-system/package.json`, add to `dependencies`: `@radix-ui/react-tooltip`. (Modal + Drawer's Radix deps land in Task 5; isolated here to keep Task 4's tooltip self-contained.)
 
-  Per component: `*.test.tsx` (variant matrix + `toHaveNoViolations` per state) → impl → re-export → commit. Icons use `currentColor` + size-prop pattern (no `fill="#..."` literals). `SourceBadge` uses `satisfies Record<SourceKey, IconComponent>`.
+  ```bash
+  npm install --workspace=@snowboard-trip-advisor/design-system
+  ```
 
-- [ ] **Step 4.11: `apps/public/src/views/Hero.tsx`.**
+  Commit: `chore(design-system): add @radix-ui/react-tooltip`.
 
-  Test asserts heading semantic (`<h1>`); bg-image is decorative (CSS background, not `<img alt>`). Hero image at `apps/public/public/hero.jpg` (self-hosted, ≤200 KB).
+- [ ] **Step 4.2: `Button` — TDD-first.**
 
-- [ ] **Step 4.12: `apps/public/src/views/FilterBar.tsx`.**
+  Test variants: `primary | secondary | ghost`; `disabled` state; `aria-pressed` if used as toggle; axe-clean per state. Impl. Re-export from `index.ts`. Commit: `feat(design-system): Button (primary/secondary/ghost)`.
 
-  TDD: country chip group hidden when `new Set(views.map((v) => v.country)).size <= 1` — exercised with an in-test single-country fixture (the seed dataset has 2 countries; the chip-hidden branch is unreachable without the fixture). Sort `<Select>` drives `&sort=` URL via `setURLState`. Bucketed price `<Select>` drives an internal `priceBucket` state (not URL-shared per §3.1; private filter UX). `slot?: ReactNode` prop reserved for the view toggle (PR 3.4).
+- [ ] **Step 4.3: `IconButton` — TDD-first.**
 
-- [ ] **Step 4.13: `apps/public/src/views/ResortCard.tsx`.**
+  Test: `aria-label` required; square hit-area; passes through `data-*` attributes (needed for §5.5 `data-detail-trigger`). Impl. Re-export. Commit.
 
-  Composition: `<Card>` wrapping the resort hero photo, `<h2 lang={countryToPrimaryLang(resort.country)}>`, four `<FieldValueRenderer>` (durable: altitude_m, slopes_km; live: snow_depth_cm, lift_pass_day), `<Pill>` for snow conditions, `<IconButton data-detail-trigger={resort.slug} aria-pressed={isShortlisted}>` for the star, "Browse lodging near X" `<Button>` with `rel="noopener noreferrer"` + `referrerpolicy="no-referrer"`. Uses `useShortlist` for star state.
+- [ ] **Step 4.4: `Pill` — TDD-first.**
 
-- [ ] **Step 4.14: Replace `apps/public/src/views/cards.tsx` placeholder with the real CardsView.**
+  Test: variant `stale` adds the stale indicator; default and `stale` axe-clean. Impl. Commit.
 
-  Renders `<Hero>` + `<FilterBar>` + the cards grid (`views.map((v) => <ResortCard view={v} />)`). Sort applied via the URL state read from `useURLState`. Country filter applied as `views.filter((v) => countries.length === 0 || countries.includes(v.country))`.
+- [ ] **Step 4.5: `Chip` — TDD-first.**
 
-- [ ] **Step 4.15: README + integration smoke.**
+  Test: `aria-pressed` on toggle; click-to-toggle; disabled. Impl. Commit.
+
+- [ ] **Step 4.6: `Card` — TDD-first.**
+
+  Test: variants (`elevated | flat`); composition (header / body / footer slots if used). Impl. Commit.
+
+- [ ] **Step 4.7: `Select` (native) — TDD-first.**
+
+  Test: native `<select>` rendered; `value` / `onChange` propagation; `disabled`; axe per state. Per ADR-0004 the native control's a11y trade-off is documented in JSDoc. Impl. Commit.
+
+- [ ] **Step 4.8: `Input` (native) — TDD-first.**
+
+  Test: text and date variants; `disabled`; `aria-invalid`; axe per state. JSDoc references ADR-0004 for native-date-input quirks. Impl. Commit.
+
+- [ ] **Step 4.9: Source glyphs — `icons/sources/{opensnow,snowforecast,resort-feed,booking,airbnb,manual}.tsx`.**
+
+  One commit per source glyph file. Test per file: `currentColor` for stroke/fill; size token prop accepted; no hex literals (lint rule will catch). Impl. After all six land, re-export the const map `SOURCE_GLYPHS satisfies Record<SourceKey, IconComponent>` from a barrel `icons/sources/index.ts`. Commit: `feat(design-system): bundled source glyphs (6) with currentColor + size prop`.
+
+- [ ] **Step 4.10: UI glyphs — `icons/ui/{star,close,info,chevron-down}.tsx`.**
+
+  One commit covering all four (small files; not user-facing nuance). Same `currentColor` + size-prop pattern. Commit.
+
+- [ ] **Step 4.11: `primitives/Tooltip.tsx` — TDD-first.**
+
+  Test: focus shows tooltip; Escape dismisses; `role="tooltip"`; axe-clean. Wrap `@radix-ui/react-tooltip`. Commit.
+
+- [ ] **Step 4.12: `SourceBadge` — TDD-first.**
+
+  Test: each `SourceKey` renders the matching glyph + display name; the const map satisfies `Record<SourceKey, IconComponent>` (asserted by TypeScript at compile-time, NOT a runtime test); never fetches favicons (CSP + zero-tracking — assert via `vi.spyOn(global, 'fetch')` not called). Impl. Commit.
+
+- [ ] **Step 4.13: `FieldValueRenderer<T>` — TDD-first.**
+
+  Test the three states from `FieldValue<T>`: `fresh` → value + SourceBadge + observed_at tooltip; `stale` → same + `<Pill variant="stale">` + age-days tooltip; `never_fetched` → `missingLabel` + `missingTooltip`. `formatter` typed-key dispatch into design-system `format.ts` (not a function prop). Impl. Commit.
+
+- [ ] **Step 4.14: `HeaderBar` — TDD-first.**
+
+  Test: brand link + Shortlist link slot + view-toggle slot (PR 3.4 fills it). Impl. Commit.
+
+- [ ] **Step 4.15: `apps/public/src/views/Hero.tsx` — TDD-first.**
+
+  Test asserts heading semantic (`<h1>`); bg-image is decorative (CSS background, not `<img alt>`); axe-clean. Implement (commit hero photo at `apps/public/public/hero.jpg`, ≤200 KB, self-hosted). Commit.
+
+- [ ] **Step 4.16: `apps/public/src/views/FilterBar.tsx` — TDD-first.**
+
+  Tests: country chip group hidden when `new Set(views.map((v) => v.country)).size <= 1` — exercised with an in-test single-country fixture (the seed dataset has 2 countries; chip-hidden branch unreachable without the fixture); sort `<Select>` drives `&sort=` URL via `setURLState`; bucketed price `<Select>` drives an internal `priceBucket` state (not URL-shared per §3.1; private filter UX); `slot?: ReactNode` prop renders `null` until PR 3.4 fills it. Run: FAIL. Implement. Run: PASS. Commit.
+
+- [ ] **Step 4.17: `apps/public/src/views/ResortCard.tsx` — TDD-first.**
+
+  Tests: composition (`<Card>` wraps hero photo + heading); `<h2 lang={countryToPrimaryLang(resort.country)}>` (CZ → `cs`, PL → `pl` per §6.6 — assert against both seed resorts); four `<FieldValueRenderer>` (durable: altitude_m, slopes_km; live: snow_depth_cm, lift_pass_day); `<Pill>` for snow conditions when present; star `<IconButton data-detail-trigger={resort.slug} aria-pressed={isShortlisted}>` for shortlist toggle; "Browse lodging near X" `<Button>` with `rel="noopener noreferrer"` + `referrerpolicy="no-referrer"`; axe-clean. Run: FAIL. Implement (uses `useShortlist` for star state). Run: PASS. Commit.
+
+- [ ] **Step 4.18: Replace `apps/public/src/views/cards.tsx` placeholder with the real CardsView — TDD-first.**
+
+  Test: renders `<Hero>` + `<FilterBar>` + cards grid; sort applied from URL state (`useURLState`); country filter applied as `views.filter((v) => countries.length === 0 || countries.includes(v.country))`; axe-clean. Run: FAIL (current cards.tsx is the 3.1c placeholder). Replace impl. Run: PASS. Commit.
+
+- [ ] **Step 4.19: README + integration smoke.**
 
   Update `README.md` to mention the cards landing route under product overview (one paragraph). Update PR description with README evaluation outcome.
 
@@ -757,7 +857,14 @@ Parallel pairs after 3.1c lands: {3.2, 3.5}; after 3.2: {3.3, 3.5}; after 3.3: {
   # Both seed resorts render with FieldValueRenderer + SourceBadge + observed_at tooltip.
   ```
 
-- [ ] **Step 4.16: Subagent review** + open PR.
+- [ ] **Step 4.20: Acceptance gate (lift from spec §7.8).**
+
+  - `npm run qa` green.
+  - `cards.test.tsx` asserts cards re-sort live on `&sort=` change.
+  - `ResortCard.test.tsx` asserts star toggles `aria-pressed`.
+  - `ResortCard.test.tsx` asserts both seed slugs render with the four named live + durable fields each.
+
+- [ ] **Step 4.21: Subagent review** + open PR.
 
 ---
 
@@ -782,22 +889,58 @@ Parallel pairs after 3.1c lands: {3.2, 3.5}; after 3.2: {3.3, 3.5}; after 3.3: {
 
 ### Steps
 
-- [ ] **5.1–5.2: `Modal` and `Drawer` primitives — TDD-first.**
+- [ ] **Step 5.1: Add design-system Radix dependencies.**
 
-  Modal tests assert focus-trap (Tab loops within), scroll-lock (`document.body.style.overflow`), Escape dismisses, focus returns to trigger.
+  In `packages/design-system/package.json`, add to `dependencies`: `@radix-ui/react-dialog`, `@radix-ui/react-focus-scope`, `@radix-ui/react-dismissable-layer`.
 
-  Drawer tests assert non-modal behavior (mouse-clickable behind), keyboard focus inside when keyboard-active, Escape, outside-click, focus-return-to-trigger; full prop superset exercised (`defaultOpen`, `initialFocus`, `onAnimationEnd`); `<Drawer>` renders at every named breakpoint (xs/sm/md/lg) via `vi.spyOn(window, 'matchMedia')`.
+  ```bash
+  npm install --workspace=@snowboard-trip-advisor/design-system
+  ```
 
-- [ ] **5.3: Harden `useShortlist`.**
+  Commit: `chore(design-system): add Radix Dialog + FocusScope + DismissableLayer`.
 
-  - Test: hydration only when URL has no `&shortlist=` (mirror read on first mount only); collision detection via `setEqual([a,b,c],[c,b,a]) === true` ⇒ silent URL-order adopt; `[a,b]` vs `[b,c]` ⇒ dialog trigger.
-  - Implement.
+- [ ] **Step 5.2: `primitives/Modal.tsx` — TDD-first.**
 
-- [ ] **5.4: `ShortlistDrawer` + `MergeReplaceDialog` + `ShareUrlDialog`.**
+  Tests: focus trap (`Tab` cycles within); scroll lock (`document.body.style.overflow === 'hidden'` while open); Escape dismisses; focus returns to trigger; axe-clean in open + closed states. Run: FAIL. Implement (Radix `Dialog` wrapper). Run: PASS. Commit.
 
-  TDD per file. ShareUrl test mocks `navigator.clipboard` for both happy and undefined paths.
+- [ ] **Step 5.3: `primitives/Drawer.tsx` — TDD-first.**
 
-- [ ] **5.5: README + smoke + subagent review + PR open.**
+  Tests: non-modal (cards behind clickable via mouse; assert pointer-events propagate); keyboard focus inside when keyboard-active (FocusScope `trapped` only when `data-keyboard-nav`); Escape dismisses; outside-click dismisses; focus return to trigger; full prop superset exercised (`defaultOpen` opens on mount; `initialFocus` ref receives focus on open; `onAnimationEnd` fires after slide); `<Drawer>` mounts at xs/sm/md/lg via `vi.spyOn(window, 'matchMedia')` per breakpoint (per spec §7.9 acceptance gate); `prefers-reduced-motion` collapses slide via the design-token CSS-var override (assert via `vi.spyOn(window, 'matchMedia')` returning `matches: true` for `(prefers-reduced-motion: reduce)`); axe-clean per state. Run: FAIL. Implement (Radix `FocusScope` + `DismissableLayer`). Run: PASS. Commit.
+
+- [ ] **Step 5.4: Harden `useShortlist` — TDD-first.**
+
+  Tests: hydration only when URL has no `&shortlist=` (mirror read on first mount only); `setEqual([a,b,c],[c,b,a]) === true` ⇒ no dialog trigger (URL-order silently adopted); `[a,b]` vs `[b,c]` ⇒ dialog trigger; mirror writes on URL change; `sta-shortlist-last-known` localStorage key (not `sta-shortlist-mirror` — see spec §6.1). Run: FAIL (3.1c shipped a skeleton). Implement. Run: PASS. Commit.
+
+- [ ] **Step 5.5: `views/ShortlistDrawer.tsx` — TDD-first.**
+
+  Tests: drawer opens via Shortlist link in HeaderBar; per-row remove via `<IconButton>`; "Open Matrix" CTA hidden `<md` (`vi.spyOn(matchMedia)` returning `matches: false` for `(min-width: 900px)`) — and removed from tab order, not just disabled (assert via `tabIndex` or `display: none`); axe-clean in open state. Run: FAIL. Implement (replaces 3.1c stub). Run: PASS. Commit.
+
+- [ ] **Step 5.6: `views/MergeReplaceDialog.tsx` — TDD-first.**
+
+  Tests: opens when `useShortlist` collision-detection fires; `<form onSubmit>` wraps controls (Enter submits); preview of merged shortlist rendered with the `setEqual`-tested order; "Merge" / "Replace" / "Keep mine" buttons work as specced (§3.5); axe-clean. Run: FAIL. Implement (uses `<Modal>`). Run: PASS. Commit.
+
+- [ ] **Step 5.7: `views/ShareUrlDialog.tsx` — TDD-first.**
+
+  Tests: clipboard happy path mocked via `vi.spyOn(navigator.clipboard, 'writeText')`; fallback `<input>` rendered when `navigator.clipboard` is undefined (`vi.stubGlobal('navigator', { ...navigator, clipboard: undefined })`); copy-success feedback (toast or transient message); axe-clean. Run: FAIL. Implement (uses `<Modal>`). Run: PASS. Commit.
+
+- [ ] **Step 5.8: README + integration smoke.**
+
+  Update README.md with shortlist + share URL feature mention (product-facing, one paragraph). Document README outcome in PR description.
+
+  ```bash
+  npm run qa
+  npm run --workspace=@snowboard-trip-advisor/public-app dev
+  # Manual check: star-toggle a card → drawer opens → close → URL retains &shortlist=<slug>; share link → MergeReplaceDialog on paste in fresh tab.
+  ```
+
+- [ ] **Step 5.9: Acceptance gate (lift from spec §7.9).**
+
+  - `npm run qa` green.
+  - star → drawer ↔ URL ↔ localStorage three-way coherence asserted in tests.
+  - share-URL paste in fresh session triggers MergeReplaceDialog when local exists; same-set/different-order does NOT trigger.
+  - Drawer renders at every named breakpoint (xs/sm/md/lg).
+
+- [ ] **Step 5.10: Subagent review** + open PR.
 
 ---
 
@@ -834,7 +977,25 @@ Parallel pairs after 3.1c lands: {3.2, 3.5}; after 3.2: {3.3, 3.5}; after 3.3: {
 
   Add the `<lg` + `&detail=` downgrade rule. Acceptance gate (per §7.11): `matrix.module.css.test.ts` reads the module text and asserts the `@media` rule string is present (JSDOM does not evaluate `@media`).
 
-- [ ] **6.5: README + smoke + subagent review + PR open.**
+- [ ] **6.5: README + integration smoke.**
+
+  Update README.md with matrix view feature mention. PR description records README outcome.
+
+  ```bash
+  npm run qa
+  npm run --workspace=@snowboard-trip-advisor/public-app dev
+  # Manual check: cards landing → click "Matrix" toggle → matrix renders; back-button returns to cards.
+  ```
+
+- [ ] **6.6: Acceptance gate (lift from spec §7.10).**
+
+  - `npm run qa` green.
+  - `matrix.test.tsx` asserts the chunk fetch via MSW request log (lazy chunk loaded only when navigating).
+  - `useURLState.test.ts` asserts back-button navigation (`PopStateEvent`) returns from `?view=matrix` to `?view=cards`.
+  - Bundle visualizer (manual check at this PR; CI integration in PR 3.6) shows matrix in its own chunk.
+  - `matrix.module.css.test.ts` reads the module text and asserts the `<lg + &detail` downgrade rule's `@media` rule string is present.
+
+- [ ] **6.7: Subagent review** + open PR.
 
 ---
 
@@ -860,13 +1021,35 @@ Parallel pairs after 3.1c lands: {3.2, 3.5}; after 3.2: {3.3, 3.5}; after 3.3: {
 
   Tests: round-trip `encodeURIComponent` parity; malicious slug `';drop table--` doesn't escape into URL; both builders return URLs starting with the canonical base.
 
-- [ ] **7.2: `views/detail.tsx` body — TDD-first.**
+- [ ] **7.2: `views/detail.tsx` body — TDD-first (test-update precedes impl-replace).**
 
-  Drop the throw. Implement the drawer composition per §2.2 + §7.11: `<Drawer position="right" open onOpenChange={close}>` containing hero photo, name (`lang={countryToPrimaryLang(resort.country)}`), country, "Snow conditions" section (live `<FieldValueRenderer>` rows), "Terrain stats" (durable rows), "Trip note" (analyst-note text — plain text Phase 1), "Browse lodging near X" CTA (`<Button>` with `rel="noopener noreferrer"` + `referrerpolicy="no-referrer"`; `href` from `bookingDeepLink(...)`), honesty micro-copy below.
+  **Test first:** in `views/detail.test.tsx`, replace the existing 3.1c stub-throw assertion with the full happy-path tests: drawer mounts when slug exists; close → URL clears (`&detail=` removed via `pushState`); focus returns to `[data-detail-trigger="<slug>"]`; axe-clean in drawer-open state; deep-link href includes the slug `encodeURIComponent`-encoded; honesty micro-copy text present; security attrs (`rel="noopener noreferrer"` + `referrerpolicy="no-referrer"`) present on every external `<a>`.
 
-  Update test to assert: drawer mounts when slug exists; close → URL clears (`&detail=` removed via pushState); focus returns to `[data-detail-trigger="<slug>"]`; axe-clean in drawer-open state; deep-link href includes the slug `encodeURIComponent`-encoded.
+  Run: FAIL — body still throws.
 
-- [ ] **7.3: README + smoke (open detail in browser, verify drawer + deep-link CTA) + PR open.** Attach `npm run analyze` advisory output to PR description.
+  **Impl second:** drop the throw in `views/detail.tsx`. Implement the drawer composition per §2.2 + §7.11: `<Drawer position="right" open onOpenChange={close}>` containing hero photo, name (`lang={countryToPrimaryLang(resort.country)}`), country, "Snow conditions" section (live `<FieldValueRenderer>` rows), "Terrain stats" (durable rows), "Trip note" (analyst-note text — plain text Phase 1), "Browse lodging near X" CTA (`<Button>` with `rel="noopener noreferrer"` + `referrerpolicy="no-referrer"`; `href` from `bookingDeepLink(...)`), honesty micro-copy below. **Do NOT modify `App.tsx`** — the frozen interface (§5.5) means the lazy-import line stays untouched.
+
+  Run: PASS. Commit.
+
+- [ ] **7.3: README + integration smoke + bundle advisory.**
+
+  Update README.md with detail view feature mention. Open detail drawer in dev browser; verify slide animation, focus trap behavior, deep-link CTA opens new tab with the right URL.
+
+  ```bash
+  npm run --workspace=@snowboard-trip-advisor/public-app build
+  # Inspect dist/ — detail chunk should be its own file separate from initial chunk.
+  ```
+
+  Attach `npm run analyze` advisory output to PR description (warn-mode CI gate lands in PR 3.6).
+
+- [ ] **7.4: Acceptance gate (lift from spec §7.11).**
+
+  - `npm run qa` green.
+  - Opening detail produces a lazy chunk fetch (asserted via MSW request log in `detail.test.tsx`).
+  - Bundle visualizer shows detail in its own chunk.
+  - `App.tsx` is byte-identical to its post-PR-3.1c state (`git diff main -- apps/public/src/App.tsx` returns nothing).
+
+- [ ] **7.5: PR open** (subagent review optional — apps-only, no §7.2 trigger).
 
 ---
 
@@ -905,27 +1088,54 @@ Parallel pairs after 3.1c lands: {3.2, 3.5}; after 3.2: {3.3, 3.5}; after 3.3: {
   - `matrix.test.ts`: `?view=matrix&shortlist=kotelnica-bialczanska,spindleruv-mlyn&highlight=snow_depth_cm` → matrix renders with column highlight + axe.
   - `detail-open.test.ts`: `?detail=kotelnica-bialczanska` → drawer renders over cards + close → focus returns to `[data-detail-trigger]` + axe.
 
-- [ ] **8.3: `scripts/check-bundle-budget.ts`.**
+- [ ] **8.3: `scripts/check-bundle-budget.ts` — TDD-first.**
 
-  - Test: given a `rollup-plugin-visualizer` JSON output, computes initial-chunk gzip total; over 100 KB → log `WARN` and exit 0; under → exit 0 silently.
-  - Implement.
+  - Test: given a `rollup-plugin-visualizer` JSON output fixture, computes initial-chunk gzip total; over 100 KB → logs `WARN: initial chunk gzip = X KB exceeds 100 KB advisory budget` and exits 0; under → exits 0 silently.
+  - Implement. Commit.
 
-- [ ] **8.4: Add `npm run analyze` script.**
+- [ ] **8.4: `scripts/check-preload-hrefs.ts` — TDD-first (per spec §10.7).**
 
-  Root `package.json`:
+  Required by spec §10.7 ("PR 3.6 ships a CI smoke test that asserts each emitted preload href resolves to a real file in `dist/`"). Catches the silent-404 mode where Vite renames the woff2 asset but the import URL doesn't update.
+
+  - Test: given a fixture `dist/index.html` and matching/missing files in fixture `dist/`, parses every `<link rel="preload" as="font">` href, resolves against `dist/`, asserts existence; on missing → exits 1 with the offending href; on all-present → exits 0.
+  - Implement. Commit.
+
+- [ ] **8.5: `scripts/check-dist-dataset.ts` — TDD-first (per spec §10.2 nginx contract verification).**
+
+  Required by spec §10.2 ("Verification at Epic 3 close: PR 3.6's CI step asserts `dist/data/current.v1.json` exists post-build").
+
+  - Test: given a fixture `dist/`, asserts `dist/data/current.v1.json` exists and parses as valid JSON matching the published-dataset shape (sanity-check the schema's envelope keys, not full validation).
+  - Implement. Commit.
+
+- [ ] **8.6: Add `npm run analyze` script + wire all three checks.**
+
+  Root `package.json` adds:
   ```json
-  "analyze": "npm run --workspace=@snowboard-trip-advisor/public-app build -- --plugin-visualizer && tsx scripts/check-bundle-budget.ts apps/public/dist/stats.json"
+  "analyze": "npm run --workspace=@snowboard-trip-advisor/public-app build && tsx scripts/check-bundle-budget.ts apps/public/dist/stats.json && tsx scripts/check-preload-hrefs.ts apps/public/dist && tsx scripts/check-dist-dataset.ts apps/public/dist"
   ```
 
-  (Adjust to actual `rollup-plugin-visualizer` invocation.)
+  (Adjust the `rollup-plugin-visualizer` invocation in `apps/public/vite.config.ts` to emit `stats.json` at build time when `process.env.ANALYZE === '1'` or always, depending on plugin config.)
 
-- [ ] **8.5: CI workflow update.**
+  Run:
+  ```bash
+  npm run analyze
+  ```
+  Expected: all three checks exit 0 (one warns if over budget).
 
-  In `.github/workflows/quality-gate.yml`, add a step after `npm run qa`: `npm run analyze` (warn mode).
+  Commit: `chore: npm run analyze (bundle budget + preload-href + dist-dataset checks)`.
 
-  Subagent review at this Step 8.5: focus on workflow YAML correctness, `warn` semantics (exit 0 on over-budget), and that the step doesn't gate merging.
+- [ ] **8.7: CI workflow update.**
 
-- [ ] **8.6: Final QA + open PR.**
+  In `.github/workflows/quality-gate.yml`, add a step after `npm run qa`: `npm run analyze`.
+
+  - `check-bundle-budget` runs in `warn` mode (logs over-budget; exits 0 — never blocks merge in Phase 1; Epic 6 follow-up flips to error).
+  - `check-preload-hrefs` and `check-dist-dataset` run in `error` mode (exits 1 on failure — these catch deploy-breakage, not budget drift, so they should block).
+
+  Subagent review trigger fires here (`.github/workflows/**` per spec §7.2).
+
+  Commit.
+
+- [ ] **8.8: Final QA + integration suite + analyze.**
 
   ```bash
   npm run qa
@@ -933,7 +1143,16 @@ Parallel pairs after 3.1c lands: {3.2, 3.5}; after 3.2: {3.3, 3.5}; after 3.3: {
   npm run analyze
   ```
 
-  All green. Bundle visualizer attached to PR. PR-level subagent review for the workflow change. Open PR.
+  All green. Attach the `dist/stats.html` visualizer report to PR description.
+
+- [ ] **8.9: Acceptance gate (lift from spec §7.12 + §10.2 + §10.7).**
+
+  - `npm run qa` green.
+  - `npm run test:integration` green; axe-clean per route composition.
+  - `npm run analyze` green: budget in warn-mode, preload-hrefs + dist-dataset in error-mode.
+  - Bundle visualizer report attached.
+
+- [ ] **8.10: Subagent review** (workflow change) + open PR.
 
 ---
 
