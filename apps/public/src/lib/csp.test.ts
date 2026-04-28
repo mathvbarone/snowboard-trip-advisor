@@ -75,6 +75,26 @@ describe('injectNonce', (): void => {
     expect(out).toMatch(/<script[^>]*nonce="ddd"[^>]*>/)
   })
 
+  it('rewrites Vite HMR inline scripts (react-refresh injectIntoGlobalHook marker)', (): void => {
+    const html =
+      '<html><head></head><body>' +
+      '<script type="module">' +
+      'import { injectIntoGlobalHook } from "/@react-refresh";' +
+      'injectIntoGlobalHook(window);' +
+      '</script></body></html>'
+    const out = injectNonce(html, 'rrr')
+    expect(out).toMatch(/<script[^>]*nonce="rrr"[^>]*>/)
+  })
+
+  it('rewrites Vite HMR inline scripts (RefreshReg marker)', (): void => {
+    const html =
+      '<html><head></head><body>' +
+      '<script type="module">window.$RefreshReg$ = () => {};</script>' +
+      '</body></html>'
+    const out = injectNonce(html, 'sss')
+    expect(out).toMatch(/<script[^>]*nonce="sss"[^>]*>/)
+  })
+
   it('does NOT rewrite scripts with src= (external scripts)', (): void => {
     const html =
       '<html><head></head><body>' +

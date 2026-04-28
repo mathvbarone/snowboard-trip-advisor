@@ -38,9 +38,16 @@ export function generateNonce(): string {
 }
 
 const NONCE_META_RE = /<meta\s+name="csp-nonce"/i
+// Substrings that uniquely identify a Vite-injected inline script.
+// We tolerate over-matching here (false positives only attach a nonce
+// that the browser would already accept under `'self'`); under-matching
+// is the dangerous direction — it would block HMR runtime scripts.
 const HMR_MARKERS = [
   'import.meta.url',
   '__vite_plugin_react_preamble_installed__',
+  '/@react-refresh',
+  '$RefreshReg$',
+  'injectIntoGlobalHook',
 ]
 
 function injectMetaTag(html: string, nonce: string): string {
