@@ -23,12 +23,12 @@ The rules in this file are not suggestions. They are backed by mechanical gates 
 - **Claude Code `PreToolUse:Bash` hook** — blocks `--no-verify` anywhere and `git push --force` (or `--force-with-lease` / `-f`) to `main`/`master` (`scripts/hooks/deny-dangerous-git.sh`). A blocked call surfaces the reason to the agent; adjust, don't retry.
 - **Claude Code `PostToolUse:Edit|Write` hook** — runs targeted ESLint on the file just edited; violations surface while the agent is still in the loop.
 - **Claude Code `SessionStart` hook** — auto-loads this enforcement summary and current branch state at the start of every session.
-- **CODEOWNERS** — `.github/CODEOWNERS` lists ownership for every load-bearing path. In Phase 1 (single-maintainer) it is **advisory** — it auto-requests review and signals which paths trigger the Subagent Review Discipline below. The hard *required-review-before-merge* gate on `main` is **deferred until a second maintainer joins** the project (re-enable by flipping `required_pull_request_reviews.required_approving_review_count >= 1` and `require_code_owner_reviews: true` on the `main` branch protection — see §11.2 of the spec for the Phase 2 hand-off).
-- **Branch protection** — `main` requires passing status checks (`quality-gate / qa`, `dco`), signed/DCO-trailed commits, linear history, no force-push, no deletion, and conversation resolution; `enforce_admins: true` so admin status confers no bypass. Required-review is *off* in Phase 1 per the bullet above. The `pivot/data-transparency` branch retains its own protection per spec §10.4. (The original `scripts/apply-branch-protection.sh` was lost in the pre-Epic-1 cleanup; re-applying protection by script is a follow-up Epic 6 task.)
+- **CODEOWNERS** — `.github/CODEOWNERS` lists ownership for every load-bearing path. In Phase 1 (single-maintainer) it is **advisory** — it auto-requests review and signals which paths trigger the Subagent Review Discipline below. The hard *required-review-before-merge* gate on `main` is **deferred until a second maintainer joins** the project. To re-enable: one `gh api -X PUT repos/{owner}/{repo}/branches/main/protection ...` call setting `required_pull_request_reviews.required_approving_review_count >= 1` and `require_code_owner_reviews: true`; the original `main` protection JSON is preserved at `/tmp/main-protection-pre-relax.json` for reference.
+- **Branch protection** — `main` requires passing status checks (`quality-gate / qa`, `dco`), signed/DCO-trailed commits, linear history, no force-push, no deletion, and conversation resolution; `enforce_admins: true` so admin status confers no bypass. Required-review is *off* in Phase 1 per the bullet above. (Re-applying branch protection by script is a follow-up Epic 6 task; the original `scripts/apply-branch-protection.sh` was lost in pre-Epic-1 cleanup.)
 
 **Rule violations are reverted, not retroactively approved.** The agent that broke a rule writes a follow-up PR explaining the failure mode.
 
-**Known gap (non-blocking):** Epic 1 PR 1.6 closes most of spec §6.3, including package-DAG bans, branded-type cast bans, color-literal bans, raw-HTML-element bans, deep-import bans, and the standard TS-strict ruleset. The remaining spec §6.3 line 491 px-literal selector (banning literal `px` values inside `style={{ }}` objects + CSS-in-JS template literals) is **deferred to Epic 3 PR 3.1**, when `apps/public` first uses inline styles and the rule has actual violations to validate against. Until then, the in-loop hook runs the currently configured ruleset.
+**Known gap (non-blocking):** the px-literal ESLint selector (banning literal `px` values inside `style={{ }}` objects + CSS-in-JS template literals; full rule catalog in spec §6.3) is **deferred to Epic 3 PR 3.1**, when `apps/public` first uses inline styles and the rule has actual violations to validate against.
 
 ## Subagent Review Discipline
 
@@ -43,7 +43,7 @@ Load-bearing changes require an independent general-purpose subagent review befo
 - `scripts/hooks/**`
 - `scripts/apply-branch-protection.sh`
 - `eslint.config.js`
-- `packages/schema/**` (once it exists)
+- `packages/schema/**`
 - `packages/schema/api/**` contract schemas (once they exist)
 
 The review brief must include: context, the load-bearing invariants to verify, specific things to grep for, and an explicit instruction to be critical (not validating). Fold findings into a follow-up commit on the same PR branch before requesting maintainer review.
@@ -71,6 +71,7 @@ Full product spec: [`docs/superpowers/specs/2026-04-22-product-pivot-design.md`]
 - Any PR that introduces meaningful product-facing functionality must evaluate whether `README.md` needs an update.
 - Treat README drift as a documentation bug, not optional cleanup.
 - Decisions with architectural consequence get an ADR in `docs/adr/` (MADR-style, numbered).
+- **After an epic / milestone PR merges to `main`**, run the post-epic doc-prune playbook at [`docs/superpowers/skills/pruning-done-work-references.md`](docs/superpowers/skills/pruning-done-work-references.md) before starting the next epic. The playbook trims done-work descriptions in the spec / agent-rules, deletes stale untracked plan/handoff scratchpads, and writes a fresh tracked post-milestone handoff. Don't let detailed PR-by-PR instructions for completed work accumulate in agent context.
 
 ## Quality Gate
 
@@ -138,7 +139,7 @@ React:
 
 ## Research Pipeline Rules
 
-- **Schema first:** update `packages/schema/` before any adapter, selector, or publisher when the data model changes. Every metric field must be listed in `METRIC_FIELDS`. (Pre-pivot: the same rule applies to `research/schema.ts` until `packages/schema/` exists.)
+- **Schema first:** update `packages/schema/` before any adapter, selector, or publisher when the data model changes. Every metric field must be listed in `METRIC_FIELDS`.
 - **Never bypass validation:** published data must pass `validatePublishedDataset` before `publishDataset`.
 - **Provenance always:** every `METRIC_FIELDS` entry must have a matching `field_sources` entry with `source`, `observed_at`, `fetched_at`, `upstream_hash`, and `attribution_block`. `validatePublishedDataset` enforces coverage.
 
@@ -161,49 +162,43 @@ React:
 - Treat the workspace's `vite.config.ts` as the source of truth for coverage exclusions; do not mirror the exact exclusion list here.
 - If coverage exclusions change, update the config and keep this note aligned at a high level only.
 
-## Post-Pivot Rules (activate per-PR on `pivot/data-transparency`)
+## Workspace & Architecture Rules
 
-Each sub-rule below names the PR that activates it. Until that PR lands, the rule does not apply. On `main` (pre-pivot), none of these rules apply. PR numbers reference spec §9.
+- Package dependency graph: `schema` (leaf; carries `loadResortDataset` + `ResortView` projection) ← `design-system`; `schema` ← `integrations`; `apps/*` consume all packages.
+- Cross-layer imports are blocked by standard ESLint `no-restricted-imports` in `eslint.config.js`.
+- `packages/design-system/tokens.css` is generated from `tokens.ts`; hand edits fail the pre-commit hook (drift check via `npm run tokens:check`).
 
-### Workspace Rules (active from PR 1.1)
-
-- Package dependency graph: `schema` (leaf, includes `loadResortDataset` + `ResortView` projection) ← `design-system`; `schema` ← `integrations`; `apps/*` consume all packages.
-- Cross-layer imports are blocked by standard ESLint `no-restricted-imports` configured in `eslint.config.js`.
-- `tokens.css` is generated from `tokens.ts` (PR 1.4); hand edits fail the pre-commit hook.
-
-### UI Code Rules (active from PR 1.4 for tokens; from PR 3.1 for `apps/public` paths)
+## UI Code Rules
 
 - UI code imports styling only from `packages/design-system`.
 - No raw CSS color values in `.tsx` files — use tokens.
 - No inline style values that should be tokens.
 - No raw HTML element imports where a design-system component exists.
 - No deep imports into design-system internals — import only from the package root.
-- No literal z-index or breakpoint px values — use tokens.
+- No literal z-index or breakpoint px values — use tokens. (The px-literal selector itself lands with Epic 3 PR 3.1 — see "Known gap" above.)
 
-### Admin App Rules
+## Admin App Rules (lands with Epic 4)
 
-Active from PR 4.1:
 - `apps/admin` is loopback-only; binds `127.0.0.1:5174` with `strictPort: true`.
 - Never build `apps/admin` into a production container image.
-
-Active from PR 4.6:
 - Admin UI is read-only below the `md` breakpoint; edit controls are removed from the tab order, not merely disabled.
 
-### Integration Adapter Rules (active from PR 1.3 for the contract; from PR 5.1 for the dispatcher baseline, PR 5.2 for dispatcher hardening)
+## Integration Adapter Rules
 
-- All external HTTP goes through `packages/integrations/http/constrainedDispatcher.ts` (Stage 1 baseline from PR 5.1; Stage 2 hardening — DNS pin, canonicalization, redirect re-check — lands with the first real adapter in PR 5.2).
-- Adapters never throw; they return `AdapterResult` (tagged union) — contract active from PR 1.3.
-- `upstream_hash` is computed from raw bytes **before** parse.
+- The adapter contract (`Adapter<S>`, `AdapterResult`) lives in `packages/integrations/contract.ts`. Adapters never throw; they return `AdapterResult` (tagged union).
+- `upstream_hash` is computed from raw response bytes **before** parse.
 - `RECORD_ALLOWED=true` gates fixture recording at process boot AND at the adapter level; mocks in `*.test.ts` are unconditionally allowed.
 - Fixture PII redaction is a hard test requirement; redaction rules live alongside each adapter.
+- All external HTTP must go through `packages/integrations/http/constrainedDispatcher.ts` once it lands (Epic 5 PR 5.1 baseline; PR 5.2 adds DNS pin / canonicalization / redirect re-check alongside the first real HTTP-issuing adapter).
 
-### Visual-Diff Workflow (active from PR 6.3 when visual regression wires up)
+## Visual-Diff Workflow (lands with Epic 6 PR 6.3)
 
 - PRs touching `apps/public/**` or `packages/design-system/tokens.ts` require a `visual:approve` label applied by a CODEOWNER before merge.
 - Agents attach screenshots and request the label; do not self-approve.
 
-### Migration / Hotfix Branch Rules (active from the merge of this spec into `pivot/data-transparency`)
+## Migration / Hotfix Branch Rules
 
 - Schema-version bumps land on a `schema/vN-to-vN+1` branch with migration CLI + golden-fixture conversion; maintainer review required.
-- Security hotfixes branch from the latest release tag, land on `main`, and propagate into `pivot/data-transparency` via the weekly `git merge main` (never rebase — branch protection requires non-fast-forward merges).
-- Do not open a hotfix PR against `main` without explicit user authorization for the specific incident. Hotfixes bypass the `pivot/data-transparency` queue and have a wider blast radius than normal PRs.
+- Security hotfixes branch from the latest release tag and land on `main` via PR. Never rebase `main`; branch protection requires non-fast-forward merges.
+- Do not open a hotfix PR against `main` without explicit user authorization for the specific incident — hotfixes bypass the normal review cadence and have a wider blast radius than feature PRs.
+- (Spec §10.4 originally described a long-lived `pivot/data-transparency` integration branch with weekly `git merge main` propagation. That strategy was never enacted; Phase 1 ships feature branches directly to `main`. If a future epic reintroduces a long-lived branch, update both this section and §10.4 in the same PR.)

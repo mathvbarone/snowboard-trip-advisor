@@ -798,31 +798,11 @@ Six epics, ~30 PRs. Each epic completes independently; the quality gate stays gr
 
 ### Epic 1 — Workspace + schema + adapter contract + design-system + CSP + harness + ESLint
 
-**PR 1.1** — npm workspaces layout; root `tsconfig.base.json` + `tsconfig.references.json` + per-package `tsconfig.json`; `vitest.workspace.ts`. Strict flags: `strict: true`, `noUncheckedIndexedAccess`, `noImplicitOverride`, `noFallthroughCasesInSwitch`, **`exactOptionalPropertyTypes: true`** (flipped on Day 1 per §12 decision 4 — concentrates Zod-`.optional()` cleanup cost alongside the v0→v1 schema migration rather than deferring it to an end-of-project diff).
-
-**PR 1.2** — `packages/schema/` with Zod definitions, branded types, `Money`, `LocalizedString`, `PublishState`, `FieldSource` (including `attribution_block`), `METRIC_FIELDS`, `SourceKey` union. TDD-first; round-trip tests + schema-version-drift guard.
-
-**PR 1.3** — `packages/integrations/contract.ts` (`Adapter<S>`, `AdapterResult`, `AdapterError`, `AdapterContext`, `RECORD_ALLOWED` gate) + `packages/integrations/registry.ts` (mapped-type exhaustiveness) + stubs for all 5 adapters returning `manual`-status frozen values.
-
-**PR 1.4** — `packages/design-system/tokens.ts` (source of truth) + `scripts/generate-tokens.ts` + generated `tokens.css` + header comment + CI drift check + pre-commit integration.
-
-**PR 1.5** — `config/csp.ts` (shared dev + prod CSP source) + `tests/integration/harness.ts` (shared Vitest + MSW + Testing Library + axe-core setup, default viewport 360×780) + axe-core-per-route wiring. `loadResortDataset` lives in `packages/schema` (§5.2), not a separate selectors package. (Size-limit, Lighthouse CI, and Storybook move to Epic 6 per §6.5.)
-
-**PR 1.6** — `eslint.config.js` flat config rewrite with `no-restricted-imports` patterns enforcing the package DAG (§5.3). Standard ESLint only; no custom plugin. Any additional targeted rules (`no-restricted-syntax` for raw HTML elements, etc.) are added in the same PR if the tree has existing violations, or later when a violation actually appears.
+**Status: DONE — merged in PR #6 (commit `2fbf087`).** Delivered: npm workspaces layout, `tsconfig.base.json` with `exactOptionalPropertyTypes: true`, `vitest.workspace.ts`; `packages/schema/` (Zod schemas, branded types, `METRIC_FIELDS`); `packages/integrations/` (adapter contract + mapped-type registry + 5 stubs); `packages/design-system/tokens.ts` + generated `tokens.css` + drift check; `config/csp.ts`; `tests/integration/harness.ts`; ESLint flat config enforcing the package DAG (§5.3). The canonical reference for what shipped is the merged commit and `packages/*/src/`; agents should not reconstruct the PR-by-PR breakdown from this spec.
 
 ### Epic 2 — Data migration
 
-**PR 2.1** — `research/migrate/v0-to-v1.ts` reading old `current.json`, emitting new `current.v1.json` alongside. CI runs both validators.
-
-**PR 2.2** — `research/validate/validatePublishedDataset.ts` rewritten: imports from `packages/schema`, asserts `METRIC_FIELDS` coverage, https-only, slug regex, `schema_version === 1`, `attribution_block` presence on every source.
-
-**PR 2.3** — `research/publish/publishDataset.ts` REWRITE: atomic rename-based writes (staged tmp → fsync → rename → fsync parent dir). Archive filename `{monotonic-counter}-{iso-ms}.json` with counter at `data/published/.archive-counter` under `flock()`. Unit test for clock regression.
-
-**PR 2.4a** — Flip consumers: `packages/schema/loadResortDataset.ts` reads `current.v1.json` exclusively. `apps/public` + `apps/admin` wire to the new reader. Legacy reader and `current.json` retained but unused; added to the workspace's `vite.config.ts` `coverage.exclude` list with a dated rationale comment (`// retained until PR 2.4b demolition, 2026-0X-XX`). One-week soak starts here.
-
-**PR 2.4b** — Demolition (after soak): delete legacy `current.json`, `research/schema.ts`, `config/scoring.ts`, legacy reader. Coverage-exclusion entries removed in the same PR.
-
-*(Fixture re-recording previously tracked here as PR 2.4 moves to Epic 5; it's adapter-integration infrastructure, not data migration.)*
+**Status: DONE — merged in PR #9 (commit `1aca19e`).** Delivered: spec amendment (seed list + FX-provenance shape) + ADR-0003 (FX conversion at adapter boundary); `data/published/current.v1.json` for the two seed resorts (`kotelnica-bialczanska`, `spindleruv-mlyn`); `validatePublishedDataset` (FX math sanity + METRIC_FIELDS coverage + envelope-instant ordering); `publishDataset` (atomic writes + monotonic counter under O_EXCL lock wrapping the entire publish lifecycle); `loadResortDataset` + `ResortView` + `FieldValue<T>`; per-app smoke tests in `apps/{public,admin}/src/App.test.tsx`. **Deviation from §9 PR 2.1 (recorded for traceability):** there was no v0 fixture to migrate, so PR 2.1 authored `current.v1.json` from scratch; `research/migrate/v0-to-v1.ts` is deferred until either a recovered v0 dataset surfaces or `research/cli.ts` returns in Epic 5 PR 5.1. **Deferred per ai-clean-code-adherence audit:** `KNOWN_NON_EUR_SOURCES` table + `fx_provenance_required` enforcement (Epic 5 PR 5.x); `FieldStateFor<T>` + `toFieldValue<T>` (Epic 4 PR 4.4).
 
 ### Epic 3 — Public app
 
@@ -857,7 +837,7 @@ Formerly split into two epics (cards+detail, then matrix+shortlist); collapsed b
 **PR 6.1** — `pino` structured logging + error boundary instrumentation in both apps.
 **PR 6.2** — `.size-limit.json` + CI `npm run size` step + Lighthouse CI smoke + performance/a11y audit rollup.
 **PR 6.3** — Storybook (`.storybook/` + `@storybook/test-runner` + `@storybook/addon-a11y`) + Playwright visual regression at 360/900/1280 + `visual:approve` label workflow (§6.5).
-**PR 6.4** — ADR backfill (0003–0007; 0001 and 0002 already shipped with the pivot PR) + DX polish (commit hooks, codemod utilities). `docs/release-policy.md` is deferred to Phase 2 per §11.3.
+**PR 6.4** — ADR backfill (0004–0007; 0001/0002/0003 already shipped) + DX polish (commit hooks, codemod utilities). `docs/release-policy.md` is deferred to Phase 2 per §11.2.
 
 ### CI/CD
 
@@ -865,104 +845,19 @@ Merge gate on every PR: `qa` + `test:integration` + `test:a11y`. Visual-regressi
 
 ---
 
-## 10. Existing Code Disposition
+## 10. Code Disposition & Git Workflow
 
-### 10.1 Disposition legend
+The original (pre-pivot) file-by-file disposition table and the new-directory bootstrap list have been removed — Epic 1 + Epic 2 executed those changes; the repository tree is now the canonical reference. What remains in this section is the **forward-looking** policy: git migration strategy, preserved invariants, and explicitly-removed rules.
 
-- **DELETE** — removed entirely; no trace in target state.
-- **REWRITE** — logical function survives; file rewritten at new path with new contract.
-- **PRESERVE** — kept in place.
-- **MIGRATE** — content transformed (one-shot script); original deleted.
-- **AMEND** — kept but modified in place.
-- **CREATE** — does not exist on disk today; introduced by the pivot.
+### 10.4 Git workflow (current)
 
-### 10.2 File-by-file disposition
+The original spec proposed a long-lived `pivot/data-transparency` integration branch. **In practice Epics 1 + 2 shipped feature branch → PR → `main` directly**, and the integration branch was never enacted. The rules below describe the workflow as it actually works today; if a future epic decides to reintroduce a long-lived branch, this section gets rewritten in the same PR that introduces it.
 
-| Path | Disposition | Target / notes |
-|---|---|---|
-| `config/scoring.ts` | **DELETE** | scoring removed |
-| `research/schema.ts` | **REWRITE** | → `packages/schema/index.ts` + `packages/schema/api/*.ts` |
-| `research/schema.test.ts` | **REWRITE** | → `packages/schema/index.test.ts` |
-| `research/scoring/*` | **DELETE** | scoring removed |
-| `research/normalize/*` | **REWRITE** | → `packages/integrations/adapters/*/normalize.ts` |
-| `research/publish/publishDataset.ts` | **REWRITE** | atomic rename-based writes (staged tmp → fsync → rename → fsync parent); archive filename `{monotonic-counter}-{iso-ms}.json` under `flock()`; current impl is NOT atomic (three separate writeFile calls) — corrected here |
-| `research/publish/publishDataset.test.ts` | **REWRITE** | concurrency test (two publishes → two archives, no interleaved current.v1.json); clock regression test |
-| `research/validate/validatePublishedDataset.ts` | **REWRITE** | imports from `packages/schema`; `METRIC_FIELDS` coverage; https-only; slug regex; `attribution_block` required |
-| `research/validate/validatePublishedDataset.test.ts` | **REWRITE** | new invariants |
-| `research/reports/buildChangeReport.*` | **REWRITE** | per-field `{before, after, source_before, source_after}` diff; no score delta |
-| `research/sources/fetchText.ts` | **DELETE** | → `packages/integrations/http/constrainedDispatcher.ts` |
-| `research/sources/sourceRegistry.ts` | **REWRITE** | → `packages/integrations/registry.ts` with mapped-type exhaustiveness |
-| `research/targets.ts` | **REWRITE** | shape flips from "scoring target" to "research target" |
-| `research/cli.ts` | **REWRITE** | new subcommands; only approved `console` site |
-| `research/cli.test.ts` | **REWRITE** | coverage for new subcommands |
-| `research/__fixtures__/*` | **MIGRATE + RE-RECORD** | durable content migrates; scoring fixtures deleted; NEW per-adapter fixtures recorded via `test:adapter --record` (Epic 5 PR 5.1) |
-| `data/published/current.json` | **MIGRATE** | one-shot → `current.v1.json`; legacy file deleted after 1-week soak (PR 2.4b) |
-| `data/published/manifest.json` | **DELETE** | absorbed into the `manifest` sub-object of the new `current.v1.json` envelope per §4.5.1; removed with the legacy `current.json` in PR 2.4b |
-
-*Editor's note (2026-04-27, plan-writing pass for Epic 2): both files were already absent at Epic-2 plan-write time, so PR 2.1 authors `current.v1.json` from scratch and PR 2.4b is a no-op accounting record. The table rows are preserved for spec traceability.*
-
-| `data/published/history/` | **CREATE** | does not exist on disk today; new directory holds the `{monotonic-counter}-{iso-ms}.json` archives written by the rewritten `publishDataset.ts` (PR 2.3). Future archives live here; the directory is immutable once populated |
-| `src/App.tsx` + `src/App.test.tsx` + `src/main.tsx` | **REWRITE** | → `apps/public/src/{App,App.test,main}.tsx` |
-| `src/components/Hero.*` | **REWRITE** | → `apps/public/src/routes/Landing.tsx` |
-| `src/components/ResortCard.*` | **REWRITE** | → `apps/public/src/features/card-view/ResortCard.tsx` |
-| `src/components/ResortGrid.*` | **REWRITE** | → `apps/public/src/features/card-view/CardView.tsx` |
-| `src/components/FilterBar.*` | **REWRITE** | → `apps/public/src/features/card-view/FilterBar.tsx` |
-| `src/components/ComparePanel.*` | **REWRITE** | → `apps/public/src/features/matrix/MatrixView.tsx` + `ShortlistDrawer.tsx` |
-| `src/components/ResortDetailDrawer.*` | **REWRITE** | → `apps/public/src/features/detail/ResortDetail.tsx` |
-| `src/data/loadPublishedDataset.*` | **REWRITE** | → `packages/schema/loadResortDataset.ts` (selectors collapsed into schema per §5) |
-| `src/lib/format.*` | **REWRITE** | → `packages/design-system/format.ts` |
-| `src/lib/queryState.*` | **REWRITE** | → `apps/public/src/lib/urlState.ts` |
-| `src/styles/global.css` | **REWRITE** | → `packages/design-system/global.css` |
-| `src/styles/tokens.css` | **DELETE (regenerated)** | → `packages/design-system/tokens.css` (generated) |
-| `src/test/*` | **REWRITE** | → `tests/integration/harness.ts` (shared) + per-route tests |
-| `index.html` | **REWRITE** | → `apps/public/index.html` + `apps/admin/index.html` |
-| `vite.config.ts` | **REWRITE** | → per-app + per-package configs + `vitest.workspace.ts` at root |
-| `tsconfig.json` | **REWRITE** | → `tsconfig.base.json` + per-package + `tsconfig.references.json` |
-| `package.json` | **AMEND** | workspaces + new scripts |
-| `package-lock.json` | **AMEND** | regenerated |
-| `eslint.config.js` | **REWRITE** | flat config with standard ESLint `no-restricted-imports` + `no-restricted-syntax` patterns; no custom plugin |
-| `Dockerfile` | **AMEND** | multi-stage public-only |
-| `nginx.conf` | **AMEND** | add CSP + Referrer-Policy + Permissions-Policy + HSTS + X-Content-Type-Options |
-| `Makefile` | **DELETE** | targets migrate to `npm run *` scripts (single source of truth) |
-| `.github/workflows/ci.yml` | **AMEND** | add integration + visual + a11y + size steps |
-| `.github/workflows/image.yml` | **AMEND** | trigger on `release: published` |
-| `.github/workflows/quality-gate.yml` | **AMEND** | absorb into `ci.yml` or keep as alias |
-| `scripts/pre-commit` | **AMEND** | runs `qa` + `tokens:generate` from PR 1.4; gains the `size` step when size-limit lands in Epic 6 PR 6.2 |
-| `scripts/bootstrap-host.sh`, `check-prereqs.sh`, `verify-tools.sh` | **PRESERVE** | unchanged |
-| `.gitignore` | **AMEND** | add `apps/*/dist/`, `packages/*/dist/`, per-workspace `coverage/` |
-| `docs/delivery-model.md`, `deployment-contract.md`, `testing-strategy.md`, `workstation-setup.md` | **AMEND** | see Section 11.4 |
-| `CLAUDE.md` | **AMEND** | see Section 11.2 |
-| `README.md` | **REWRITE** | see Section 11.1 |
-
-### 10.3 New directories (Epic 1 or 2)
-
-```
-apps/public/                    Vite: landing + card view + matrix + detail
-apps/admin/                     Vite: loopback-only editor (Phase 1)
-packages/schema/                Zod + branded types + API contract
-packages/design-system/         Tokens (TS + generated CSS) + components
-packages/integrations/          Adapter contract + HTTP + rate limit + audit + registry
-tests/integration/              Shared harness + per-app route tests
-tests/visual/                   Playwright visual regression (360/900/1280)
-tests/a11y/                     axe-core-per-route + Lighthouse smoke
-config/freshness.ts             Per-field TTL
-config/schedules.ts             Cron schedules (Phase 2)
-config/csp.ts                   Shared CSP source
-scripts/generate-tokens.ts      TS → CSS token generator
-```
-
-`services/admin-api/` and `services/admin-workers/` are NOT created in Phase 1 (they would be empty `.gitkeep`s; adds noise). They appear when Phase 2 starts.
-
-### 10.4 Git migration strategy
-
-- **Feature branch:** `pivot/data-transparency` cut from `main`.
-- **Branch protection:** force-push **OFF**, up-to-date-with-base **OFF**, required checks **ON**. Avoids 36-PR stale-base rebase loops.
-- **PR cadence:** ~30 PRs target `pivot/data-transparency`, not `main`. Main stays deployable.
-- **Merge to main:** after Epic 6 completes, `pivot/data-transparency` merges to `main` preserving commit graph (no squash). Individual PRs within the branch can be merge-commit or squash per-PR — maintainer call.
-- **Sync cadence:** weekly `git merge main` into `pivot/data-transparency` (never rebase; rebase would force-push the protected branch).
-- **Hotfix policy:** security hotfixes branch from latest release tag, land directly on `main`, next weekly merge brings them into the pivot branch.
+- **Feature branches** cut from `main`; one PR per logical milestone. Squash-merge on merge to `main` (the `(#N)` suffix style is the convention; see existing merge commits).
+- **Branch protection on `main`:** force-push OFF, deletion OFF, linear history ON, conversation resolution ON, required status checks (`quality-gate / qa`, `dco`) ON, signed/DCO-trailed commits required, `enforce_admins: true`. Required-CODEOWNER-review is OFF in Phase 1 (single-maintainer).
+- **Hotfix policy:** security hotfixes branch from the latest release tag and land on `main` via the same PR flow. Do not open a hotfix PR against `main` without explicit user authorization for the specific incident.
 - **Deletion ordering inside each PR:** demolition commits come after the new path is green; avoids mid-PR CI red.
-- **Rollback boundary:** PR 2.4b (legacy demolition) is the last-chance rollback. Before then, reverting PR 2.4a is a one-PR rollback.
+- **Rollback boundary per epic:** the last PR that demolishes legacy paths is the rollback boundary. Reverting a single PR before that point is a one-PR rollback.
 
 ### 10.5 Preserved invariants
 
@@ -974,7 +869,7 @@ From current `CLAUDE.md`, unchanged:
 5. No `/* istanbul ignore */`.
 6. TDD order.
 7. No `any`, no non-null assertions, explicit return types, `import type`, `const` default, `??` over `||`.
-8. No `console` outside `research/cli.ts` (exception list expanded — see Section 11.2).
+8. No `console` outside `research/cli.ts`, `research/migrate/*.ts`, and scripts under `scripts/` (canonical exception list lives in CLAUDE.md → Code Rules → Style; ESLint enforces via `overrides`).
 9. Pre-commit hook runs `qa`; `--no-verify` forbidden.
 
 ### 10.6 Removed rules
@@ -984,183 +879,33 @@ From current `CLAUDE.md`, unchanged:
 
 ---
 
-## 11. README & Docs Update Plan
+## 11. Documentation Policy
 
-### 11.1 README.md full rewrite
+The README + CLAUDE.md rewrite plans, license boundary table, ADR numbering table, GitHub meta-file inventory, and per-doc update lists were executed across Epic 1 + Epic 2 (PRs #5, #6, #9). The current state of those files in `main` is the canonical reference; agents should not reconstruct the historical edit lists from this spec. What remains in §11 is the **forward-looking** policy: what's deferred until later phases, and the README-drift enforcement rule.
 
-Replaces the 294-line scoring-product README. Top-level sections:
+### 11.1 ADR cadence (forward-looking)
 
-1. What this is (3 sentences — data-transparency tool, EU-only Phase 1, no ranking).
-2. What this is NOT (not a ranker, not a booking engine, not a review aggregator).
-3. Who it's for.
-4. Product direction (Phase 1, Phase 2, long-term durable+live separation).
-5. How it's built (the inspectability rule; `FieldSource` everywhere; `validatePublishedDataset` gate; scoring removed April 2026).
-6. Getting started (`npm install && npm run setup`; `dev`; `dev:admin`; `qa`).
-7. Using the public app (URL state shape; shortlist cap 6; matrix hidden below md).
-8. Using the admin app (loopback-only; never-in-production; test-before-publish; all-or-nothing Phase 1).
-9. The research CLI (`test:adapter`, `migrate:v0-to-v1`, `publish`; bulk refresh is deferred to Phase 2).
-10. Data model at a glance (Resort + ResortLiveSignal; METRIC_FIELDS; schema_version 1; Money EUR; LocalizedString en).
-11. Project layout (after April 2026 pivot).
-12. Quality gate (100% coverage; pre-commit; `--no-verify` forbidden).
-13. Data & trust posture ("zero tracking" = no analytics, no third-party beacons, no cross-site identifiers, no server-side fingerprinting; **`localStorage` IS used** under key `sta-v1` for trip inputs (dates, party size, traveller names), the `prefers-color-scheme` override, and a prior-session shortlist fallback used only by the merge/replace modal (§2.1) — the primary shortlist representation is URL-based; all stored values are same-origin, user-controlled, and never transmitted — documented here so "zero tracking" is not confused with "zero storage"; self-hosted fonts; CSP at build time; `rel="noopener noreferrer" referrerpolicy="no-referrer"`; affiliate default-off).
-14. Supply chain posture (cosign + SLSA v1 + SBOM + Trivy + digest-pinned bases).
-15. Licensing & contributing (see license boundary table 11.1.1 below).
-16. Status & roadmap (Phase 1 current, Phase 2 target, Phase 3+ requires Discussion + ADR before PRs).
-17. Links (spec, ADRs, schema versioning).
+ADR-0001, 0002, 0003 have shipped (`docs/adr/`). The remaining backfill set targets Epic 6 PR 6.4: **0004** URL-state-first + merge/replace on collision; **0005** Design-system tokens as TypeScript; **0006** Apache-2.0 + DCO + zero-tracking; **0007** ADR process itself. Additional ADRs are expected mid-stream during Epic 5 (real-adapter integration raises new decisions — upstream TOS, rate-limit tuning, redaction corpus). Any architectural decision flagged by a reviewer as "needs a writeup" becomes an ADR PR before the epic closes.
 
-*(Operator obligations and trademark policy sections are deferred — see §11.3 deferred-docs table.)*
+### 11.2 Deferred docs (write only when needed)
 
-#### 11.1.1 License boundary table (new; placed in README + NOTICE)
+These were intentionally deferred until a real consumer exists. Open one when the listed trigger fires; not before.
 
-| Category | License | Paths |
-|---|---|---|
-| Code | Apache-2.0 | all `.ts`, `.tsx`, `.js`, `.css`, `.html`, `nginx.conf`, `Dockerfile`, `scripts/**`, `packages/schema/**`, fixture harness wrappers `__fixtures__/**/*.ts` |
-| Config & tooling | Apache-2.0 | all `.yml` / `.yaml` (incl. `.github/workflows/**`, `.github/dependabot.yml`, `.github/labels.yml`, `.github/ISSUE_TEMPLATE/**`), `.github/CODEOWNERS`, `.github/PULL_REQUEST_TEMPLATE*`, `.editorconfig`, `.gitignore`, `.gitattributes`, `.nvmrc`, `.mise.toml`, `package.json`, `package-lock.json`, `tsconfig*.json`, `vite.config.ts`, `vitest.workspace.ts`, `eslint.config.js`, `.prettierrc*` |
-| Prose & docs | Apache-2.0 (with explicit "also available under CC BY 4.0 at author's discretion" notice in NOTICE) | `docs/**/*.md`, `README.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` (Contributor Covenant upstream is CC BY 4.0 — preserved), `SECURITY.md`, `CLAUDE.md`, ADRs under `docs/adr/**` |
-| Data snapshots | CC BY 4.0 | `data/published/**/*.json`, captured upstream payloads `__fixtures__/**/*.json`, per-resort snapshots, `docs/**/*.csv` |
-| Out of scope | — | upstream third-party marks (NOTICE attributions only); Contributor Covenant itself (CC BY 4.0 upstream); vendored dependencies under `node_modules/` (each package's own license) |
-
-### 11.2 CLAUDE.md amendments (precise edits)
-
-1. **Remove** the rule `Config, not code: scoring thresholds and weights belong in config/scoring.ts`.
-2. **Replace** `Schema first: update research/schema.ts before any normalizer, scorer, or publisher` with: `Schema first: update packages/schema/ before any adapter, selector, or publisher. Every metric field must be listed in METRIC_FIELDS.`
-3. **Replace** `Provenance always: every published metric field must have a matching field_sources entry` with: `Provenance always: every METRIC_FIELDS entry must have a matching field_sources entry with source + observed_at + fetched_at + upstream_hash + attribution_block. validatePublishedDataset enforces coverage.`
-4. **Add** new section **UI Code Rules**:
-   - UI code imports styling only from `packages/design-system`.
-   - No raw CSS color values in `.tsx` files — use tokens.
-   - No inline style values that should be tokens.
-   - No raw HTML element imports where a design-system component exists.
-   - No deep imports into design-system internals — import only from the package root.
-   - No literal z-index or breakpoint px values — use tokens.
-5. **Add** new section **Workspace Rules**:
-   - Package dependency graph: `schema (leaf, includes loadResortDataset + ResortView) ← design-system; schema ← integrations; apps/* consume all packages.`
-   - Cross-layer imports blocked by standard ESLint `no-restricted-imports` configured in `eslint.config.js`.
-   - `tokens.css` is generated from `tokens.ts`; hand edits fail the pre-commit hook.
-6. **Add** new section **Admin App Rules**:
-   - `apps/admin` is loopback-only; binds `127.0.0.1:5174`.
-   - Never build `apps/admin` into the production container.
-   - Admin is read-only below the `md` breakpoint.
-7. **Add** new section **Integration Adapter Rules**:
-   - All external HTTP goes through `packages/integrations/http/constrainedDispatcher.ts`.
-   - Adapters never throw; they return `AdapterResult`.
-   - `upstream_hash` is computed from raw bytes before parse.
-   - `RECORD_ALLOWED` gates fixture recording at process boot and adapter level; mocks unconditionally allowed in tests.
-   - Fixture PII redaction is a hard test requirement.
-8. **Update** **Coverage Rules** section:
-   - Per-workspace `vite.config.ts` is the source of truth for coverage exclusions.
-   - When deleting a file, remove its entry from the workspace's coverage.exclude list in the same PR.
-9. **Update** **Excluded From Coverage** to reference `apps/*/vite.config.ts` + `packages/*/vite.config.ts`.
-10. **Add** setup note: `npm run setup` also runs `scripts/generate-tokens.ts` once to materialize `packages/design-system/tokens.css`.
-11. **Add** new section **DCO Rule**: all commits signed off (`git commit -s`); agents configure `user.email` before first commit; `--no-verify` forbidden.
-12. **Add** new section **Visual-diff Workflow**: changes touching `apps/public/**` or `packages/design-system/tokens.ts` require a `visual:approve` label before merge; agents attach screenshots and request the label; do not self-approve.
-13. **Add** new section **Hotfix / Backport Cadence**: security hotfixes branch from latest release tag, land on `main`; weekly `git merge main` into `pivot/data-transparency`; never rebase `main`.
-14. **Add** new section **Migration Branch Rule**: schema-version bumps land on `schema/vN-to-vN+1` branch with migration CLI + golden-fixture conversion + maintainer review required.
-15. **Update** **no-console exception list** to include `research/cli.ts`, `research/migrate/*.ts`, `scripts/generate-tokens.ts`, `scripts/*.ts` via ESLint `overrides`.
-16. **Add** new section **Agent Hotfix Policy** (rule 13):
-    - Agents **must not** open a hotfix PR against `main` without explicit user authorization for the specific incident.
-    - Hotfixes bypass the `pivot/data-transparency` queue and land directly on the latest release tag → `main`, so the blast radius is larger than a normal PR.
-    - When an agent believes a hotfix is warranted, it opens a Discussion (or asks in-session) describing the incident, the proposed patch scope, and the rollback plan. The user confirms before the agent branches from the release tag.
-    - This rule is separate from the general "operate more autonomously" preference; hotfixes are the exception because they touch the stable branch.
-
-### 11.3 New documentation files
-
-**ADRs (MADR format — pinned to latest stable (currently MADR 3.0 as of 2026-04), numbered `NNNN-slug.md`, indexed at `docs/adr/README.md`):**
-
-| ADR | Title | Lands |
-|---|---|---|
-| 0001 | Pivot to data-transparency (scoring removed) | this PR |
-| 0002 | Split durable resort from live signals | this PR |
-| 0003 | FX conversion at adapter boundary | Epic 2 PR 2.0b |
-| 0004 | URL-state-first + merge/replace on collision | Epic 6 PR 6.4 backfill |
-| 0005 | Design-system tokens as TypeScript (generated CSS) | Epic 6 PR 6.4 backfill |
-| 0006 | Apache-2.0 + DCO + zero-tracking | Epic 6 PR 6.4 backfill |
-| 0007 | ADR process itself | Epic 6 PR 6.4 backfill |
-
-**ADR cadence note:** ADR-0001 and ADR-0002 land with this spec (same PR) — 0001 records the pivot rationale and 0002 records the durable-vs-live split, both of which are load-bearing from day one. ADRs 0003-0007 are backfilled at Epic 6 PR 6.4. Additional ADRs are expected to land during Epic 5 (real-adapter integration raises new decisions — upstream TOS negotiation, rate-limit tuning, redaction corpus maintenance). The ADR process (0007) describes how to propose new ones mid-stream; any architectural decision reached during Epic 5 that a reviewer flagged as "needs a writeup" becomes an ADR PR before the epic closes. ADR-0003 (FX conversion at adapter boundary; option 1 of three) is promoted from the Epic 6 backfill set into Epic 2 PR 2.0b because it is load-bearing for the v1 seed fixture (kotelnica-bialczanska + spindleruv-mlyn are non-Eurozone). The remaining 0004–0007 retain their Epic 6 backfill cadence.
-
-**i18n scope (Phase 1 explicit):** `LocalizedString` stores `{ en: string, [lang: string]: string | undefined }`; Phase 1 ships English-only surface copy. Any non-English content in `LocalizedString` (resort regional names, attribution blocks) is operator-curated translation — never machine-translated server-side, and never rendered without a `lang="xx"` attribute. Missing translations surface a visible indicator rather than silently falling back to `en`. A dedicated `docs/i18n-policy.md` is deferred until a second locale actually ships (§11.3 deferred-docs table).
-
-**Release policy — internal packages:** In Phase 1, all `packages/*` move in lockstep with the repo tag. They are NOT published to npm and are consumed via workspace protocol. Each tag on `main` is the version; `packages/schema/package.json` carries the `schema_version` integer (separate from semver), and a schema-version bump is itself a breaking repo-level change per ADR-0001. Phase 2 may publish `packages/schema` to npm independently (operators embedding the schema in their own services); that decision is deferred to a Phase 2 ADR.
-
-**Other new docs:**
-
-**Phase 1 (shipped alongside the code epics that need them):**
-
-| Path | Purpose | Lands in |
-|---|---|---|
-| `LICENSE` | Apache-2.0 | Epic 1 PR 1.1 |
-| `NOTICE` | Project trademarks; CC BY 4.0 notice on data; upstream third-party mark attributions | Epic 1 PR 1.1 |
-| `CONTRIBUTING.md` | Onboarding + DCO sign-off + TDD + PR template pointer | Epic 1 PR 1.1 |
-| `CODE_OF_CONDUCT.md` | Contributor Covenant v2.1 | Epic 1 PR 1.1 |
-| `SECURITY.md` | Minimal GitHub Security Advisories disclosure policy (see 11.3.1) | Epic 1 PR 1.1 |
-| `docs/data-schema-versioning.md` | `schema_version` semantics; when to bump; migration CLI contract | Epic 2 PR 2.1 |
-| `docs/local-dev.md` | Loopback admin; font setup; Playwright install; MSW | Epic 5 PR 5.1 |
-| *(admin usage)* | Covered in README §"Using the admin app" and README §"The research CLI" — no separate doc file. Promotes to `docs/admin.md` only if the README section grows past ~150 lines. | — |
-
-Rationale: one admin doc, one dev-setup doc, one schema-versioning doc — not three admin docs plus separate ethics/trademark/i18n/release policies. Those split off only when one of them is big enough to need its own file.
-
-**Deferred until Phase 2 (or until there's a second maintainer / operator):**
-
-| Path | Why deferred |
+| Path | Trigger to write |
 |---|---|
-| `GOVERNANCE.md` | Single maintainer; no governance surface to describe. Revisit when a second regular contributor joins. |
-| `docs/operator-obligations.md` | Single operator (the maintainer) in Phase 1. Operator-specific legal obligations belong with the multi-operator Phase 2 rollout, not now. |
-| `docs/trademark-policy.md` | No inbound trademark questions yet. When the first one arrives, that issue is the seed for this doc. |
-| `docs/i18n-policy.md` | `LocalizedString` ships `{ en: string }` in Phase 1. When a second locale is actually added, write this doc alongside it. |
-| `docs/release-policy.md` | Phase 2 concern (no packages published to npm in Phase 1; container tagging is in CI config). |
-| `docs/data-ethics.md` | Attribution + affiliate disclosure are covered in README `Data & trust posture` for now. Promotes to its own file only if the surface grows. |
-| `SUPPORT.md` | Default GitHub Issues / Discussions routing is fine until the repo has inbound traffic that needs triage rules. |
+| `GOVERNANCE.md` | A second regular contributor joins. |
+| `docs/operator-obligations.md` | A multi-operator Phase 2 rollout begins. |
+| `docs/trademark-policy.md` | First inbound trademark question lands. |
+| `docs/i18n-policy.md` | A second locale is actually added to `LocalizedString`. |
+| `docs/release-policy.md` | Phase 2 publishing of `packages/schema` to npm. |
+| `docs/data-ethics.md` | The README "Data & trust posture" section grows past ~150 lines. |
+| `SUPPORT.md` | Inbound issue/discussion volume needs triage rules. |
+| `docs/local-dev.md` | Epic 5 PR 5.1 — loopback admin / font / Playwright / MSW setup. |
+| `docs/admin.md` | The README "Using the admin app" section grows past ~150 lines. |
 
-#### 11.3.1 SECURITY.md scope
+### 11.3 README-drift enforcement
 
-Minimal vulnerability-disclosure doc. The scope for an MVP is "vulnerabilities in this repo's code and default configurations." Operator-deployment legal frameworks (GDPR, DSA, DMA, NetzDG, LCEN, national trademark/defamation law) are the deploying operator's responsibility; the upstream project does not provide legal guidance and `SECURITY.md` should say so in one line without enumerating every jurisdiction.
-
-**Report via:** GitHub Security Advisories (private). Public disclosure only after a fix is available.
-
-**In scope:** vulnerabilities in published artifacts (source, container image, CLI).
-
-**Out of scope:** bespoke operator deployments, third-party upstream data sources, legal-compliance questions (operators must seek their own counsel).
-
-#### 11.3.2 Takedown handling
-
-For Phase 1 (operator count = 1, resort count ≈ 5), takedown handling is not a standing SLA commitment — it is an issue-template-driven best-effort process. A proper SLA becomes relevant when the project gains operators other than the maintainer; at that point, it lands alongside the deferred `docs/operator-obligations.md` (§11.3 deferred-docs table).
-
-Baseline best-effort process:
-- Receive via `.github/ISSUE_TEMPLATE/takedown.yml` (documented in §11.5).
-- Public-interest carve-out: sourced factual claims (piste_km, lift_count, snowfall) are not removable on trademark-holder request alone; route to a factual-correction issue.
-- Accepted takedowns flow into the next published dataset.
-
-### 11.4 Existing docs updates
-
-| Path | Change |
-|---|---|
-| `docs/delivery-model.md` | Reference 6-epic plan, PR cadence, branch protection rules |
-| `docs/deployment-contract.md` | Two-app layout; production builds `apps/public` only; admin is dev-only loopback; CSP baked at build time |
-| `docs/testing-strategy.md` | Add visual regression (Playwright 360/900/1280 with `visual:approve` label), axe-core-per-route, size-limit, integration harness, mobile-first default viewport. Note (Epic 2): every adapter test MUST assert `FieldSourceMap[<path>].fx` is present for non-EUR upstream prices. The shared assertion helper lives in `packages/schema/src/fx.ts` (introduced in Epic 5 PR 5.x alongside the first non-EUR adapter; deferred from Epic 2 per ai-clean-code-adherence audit). |
-| `docs/workstation-setup.md` | Add `npm run storybook`, `npm run dev:admin`, font setup, MSW+Playwright install, mise tool list update |
-
-### 11.5 GitHub meta files
-
-| Path | Content |
-|---|---|
-| `.github/ISSUE_TEMPLATE/bug.yml` | structured bug report |
-| `.github/ISSUE_TEMPLATE/feature.yml` | feature request |
-| `.github/ISSUE_TEMPLATE/data-quality.yml` | "a displayed value looks wrong" — resort + field + source + observed vs expected |
-| `.github/ISSUE_TEMPLATE/source-integration.yml` | new source proposal: upstream TOS, rate limit, adapter checklist (`upstream_hash`, rate limit, size cap, redaction, fixture), DCO confirmation |
-| `.github/ISSUE_TEMPLATE/takedown.yml` | rights holder takedown path; references 11.3.2 SLA |
-| `.github/ISSUE_TEMPLATE/scope-question.yml` | "is this in scope?" — points to README roadmap section |
-| `.github/PULL_REQUEST_TEMPLATE.md` | summary + testing + DCO reminder + screenshots (UI) + README-drift check |
-| `.github/PULL_REQUEST_TEMPLATE/source-integration.md` | adapter-specific: upstream TOS confirmed, redaction added + tested, `upstream_hash` pre-parse, rate limit respected, fixture recorded with `RECORD_ALLOWED`, size budget ok |
-| `.github/CODEOWNERS` | `/packages/schema/`, `/packages/integrations/`, `/config/csp.ts`, `/nginx.conf`, `/.github/workflows/` require maintainer review; `visual:approve` label required on visual baseline changes |
-| `.github/dependabot.yml` | npm weekly (`cooldown: 7d`), github-actions weekly, docker monthly; grouped |
-| `.github/labels.yml` | `good-first-issue`, `help-wanted`, `visual:approve`, `schema-change`, `security`, `takedown`, `data-quality`, `not-planned`, `phase-1`, `phase-2` |
-
-### 11.6 README-drift enforcement
-
-1. PR template checkbox: "README.md updated (if this PR changes product scope, workflow, or system boundary) — link the section OR attest not applicable."
-2. CLAUDE.md rule (preserved): treat README drift as a documentation bug; PRs that change product scope must update `README.md` in the same branch.
-
-A CI job that diffs README section hashes against product-scope path changes is a plausible future addition if the checkbox-plus-discipline approach stops working. Not needed at current scale.
+Treat README drift as a documentation bug, not optional cleanup (rule preserved in `CLAUDE.md`). The PR template carries a "README updated if product scope/workflow/boundary changed — link section or attest N/A" checkbox; the CLAUDE.md "Documentation Discipline" rule is the load-bearing version of the same discipline. A future CI job that diffs README section hashes against product-scope path changes is a plausible addition if checkbox-plus-discipline stops working — not needed at current scale.
 
 ---
 
@@ -1210,61 +955,9 @@ All seven decisions flagged in the drafting pass have been resolved with the use
 
 ---
 
-## 13. Reviewer Lineage
+## 13. Open Implementation Questions (forward-looking)
 
-Specialist reviewers consulted during drafting (each section marked with which reviewers signed off):
+These are deliberately unresolved — implementation choices that should be made alongside the code that uses them, not prescribed in advance. Plan-writing for Epic 3+ should re-evaluate each.
 
-| Section | Reviewers |
-|---|---|
-| 2 — Public app surface | architecture, UX/a11y, security |
-| 3 — Admin app (loopback) | frontend (2), security, UI/mobile design system |
-| 4 — Schema | CMS reviewer |
-| 5 — Selectors | (rolled into Section 4 review) |
-| 6 — Design system | UI expert, OSS governance |
-| 7 — Integration adapters | backend, security |
-| 8 — Phase 2 target state | backend |
-| 9 — Phase 1 epics | TypeScript/delivery, frontend delivery |
-| 10 — Code disposition | senior staff engineer |
-| 11 — Docs & governance | technical writer / OSS governance |
-
-All fold-ins from each review are reflected in the section text above.
-
----
-
-## 14. Next Steps — ready for implementation planning
-
-All seven open decisions from the drafting pass are resolved (§12). ADR-0001 (the "why" for the pivot) lands in the same PR as this spec. `README.md` and `CLAUDE.md` are updated in the same PR to keep the repo's product framing consistent with the pivot.
-
-The expected next artifact is a detailed implementation plan at `docs/superpowers/plans/2026-04-22-product-pivot.md` enumerating Epic 1 PR 1.1 down to step-by-step tasks with acceptance criteria.
-
-### 14.1 What this PR ships
-
-1. `docs/superpowers/specs/2026-04-22-product-pivot-design.md` — this spec, with all §12 resolutions folded in.
-2. `docs/adr/0001-pivot-to-data-transparency.md` — the decision record for the pivot itself.
-3. `docs/adr/0002-durable-vs-live-split.md` — promotes the durable-vs-live principle to an architectural invariant.
-4. `README.md` — rewritten per §11.1 so the repo's public framing matches the pivot.
-5. `CLAUDE.md` — amended per §11.2 so agent instructions reflect the new product direction and code rules.
-6. `docs/superpowers/specs/2026-04-03-snowboard-trip-advisor-design.md` — renamed with an `ARCHIVED-` prefix so future readers don't confuse the superseded spec with this one.
-
-### 14.2 What happens next
-
-1. Human review of this PR.
-2. Merge to `pivot/data-transparency`; `main` stays on the pre-pivot state until Epic 6 closes and the branch is merged back (per §10.4).
-3. Dispatch `writing-plans` against this spec to produce the epic-by-epic implementation plan.
-4. Execute Epic 1 PR 1.1 first (npm workspaces layout; `exactOptionalPropertyTypes: true` on Day 1 per §12.4).
-
-### 14.3 Ground rules carried forward
-
-- Branch protection on `pivot/data-transparency`: force-push OFF, up-to-date-with-base OFF, required checks ON. Do not rebase; `git merge main` weekly (§10.4).
-- `npm run qa` (lint → typecheck → coverage) is the hard gate on every PR. This spec is prose only and does not trip the gate; any code PR must.
-- ADRs 0003–0007 backfill at Epic 6 PR 6.4. Additional ADRs are expected mid-stream during Epic 5 (real-adapter integration surfaces new decisions).
-
-### 14.4 Revisit during plan-writing
-
-The following are implementation-level questions that don't belong in this spec but should be re-evaluated when `writing-plans` produces the detailed plan. Flagging them here so the plan-writing agent sees them:
-
-- **Per-workspace `vite.config.ts` coverage exclusions.** The 100% coverage gate applied to every package means config files, generator scripts, and re-export barrels may need exclusion entries. Revisit the `coverage.exclude` shape at plan-writing time with a concrete list of what's worth excluding vs. what should be tested.
-- **Contract snapshot test mechanism (§8.4.1 invariant 3).** Currently specified as "serialize schema set to JSON and diff against `contract.snap`." The plan should choose a specific serializer (JSON.stringify ordering, toJSONSchema, etc.) and whether it's a Vitest `toMatchSnapshot` or a separate CI step.
-- **Font self-hosting scope (§2.7).** Three families (DM Serif Display, DM Sans, JetBrains Mono) is more than an MVP needs. Consider starting with one family that covers body + UI + numeric (JetBrains Mono alone, or DM Sans alone) and adding the others if a typography pass actually needs them.
-
-These are intentionally NOT resolved here — they're implementation choices that benefit from being made alongside the code that uses them, not prescribed in advance.
+- **Contract snapshot test mechanism (§8.4.1 invariant 3).** Currently specified as "serialize schema set to JSON and diff against `contract.snap`." Epic 4 (admin app) chooses a specific serializer (JSON.stringify ordering, toJSONSchema, etc.) and whether it's a Vitest `toMatchSnapshot` or a separate CI step.
+- **Font self-hosting scope (§2.7).** Three families (DM Serif Display, DM Sans, JetBrains Mono) is more than an MVP needs. Consider starting with one family that covers body + UI + numeric (JetBrains Mono alone, or DM Sans alone) and add the others only if a typography pass actually needs them. Epic 3 PR 3.1 makes the call.
