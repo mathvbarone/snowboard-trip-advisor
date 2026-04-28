@@ -71,29 +71,35 @@ export async function publishDataset(
   const historyDir = join(rootDir, HISTORY_DIR_NAME)
   await mkdir(historyDir, { recursive: true })
 
-  // Acquire the counter under O_EXCL lock; increment; release.
-  const counter = await withCounterLock(rootDir, (current): Promise<number> => Promise.resolve(current + 1))
-
-  // Write the archive: history/{counter}-{iso-ms}.json
-  const isoMs = sanitizeIsoForPath(new Date().toISOString())
-  const archivePath = join(historyDir, `${String(counter)}-${isoMs}.json`)
-  await atomicWriteText(archivePath, JSON.stringify(dataset, null, 2))
-
-  // Atomically replace current.v1.json
-  const currentPath = join(rootDir, CURRENT_FILE_NAME)
-  await atomicWriteText(currentPath, JSON.stringify(dataset, null, 2))
-
-  return { ok: true, current_path: currentPath, archive_path: archivePath, counter }
+  // Hold the lock for the entire publish — counter allocation + archive write + current
+  // replacement — so concurrent publishes can't write current.v1.json out of counter order.
+  // (The earlier design released the lock after counter allocation, which left a window where
+  // a slow publish with a lower counter could overwrite a faster publish's current.v1.json
+  // and regress the published snapshot relative to archive order. Codex P2 finding on PR #9.)
+  return withPublishLock(rootDir, async (counter): Promise<PublishResult> => {
+    const isoMs = sanitizeIsoForPath(new Date().toISOString())
+    const archivePath = join(historyDir, `${String(counter)}-${isoMs}.json`)
+    const currentPath = join(rootDir, CURRENT_FILE_NAME)
+    const body = JSON.stringify(dataset, null, 2)
+    await atomicWriteText(archivePath, body)
+    await atomicWriteText(currentPath, body)
+    return { ok: true, current_path: currentPath, archive_path: archivePath, counter }
+  })
 }
 
 // ---------------------------------------------------------------------------
-// Counter lock — O_EXCL spin lock
+// Publish lock — O_EXCL spin lock that wraps the entire publish lifecycle.
+//
+// Acquires the lock, reads + increments + persists the counter, then runs `body(counter)`
+// while still holding the lock. The lock is released only after `body` resolves (or throws).
+// This serializes both counter allocation AND the archive/current writes, preventing the
+// out-of-counter-order overwrite race a counter-only lock would permit.
 // ---------------------------------------------------------------------------
 
-async function withCounterLock(
+async function withPublishLock<T>(
   rootDir: string,
-  update: (current: number) => Promise<number>,
-): Promise<number> {
+  body: (counter: number) => Promise<T>,
+): Promise<T> {
   const counterPath = join(rootDir, COUNTER_FILE_NAME)
   const lockPath = join(rootDir, COUNTER_LOCK_NAME)
 
@@ -117,9 +123,10 @@ async function withCounterLock(
             throw e
           }
         }
-        const next = await update(current)
+        const next = current + 1
         await atomicWriteText(counterPath, String(next))
-        return next
+        // Run the publish body while still holding the lock.
+        return await body(next)
       } finally {
         await lockFh.close()
         // Best-effort cleanup: if unlink fails, the next caller times out cleanly.

@@ -63,8 +63,14 @@ export function validatePublishedDataset(input: unknown): ValidationResult {
   }
 
   // Envelope ordering: every signal's observed_at must be ≤ published_at.
+  // ISODateTimeString allows offset suffixes (Z, +02:00, etc.) per Zod's
+  // .datetime({ offset: true }), and ISO strings with different offsets are NOT
+  // chronologically sortable lexicographically (e.g. '2026-04-26T19:00:00+02:00' is
+  // 17:00 UTC and string-compares > '2026-04-26T18:00:00Z' which is 18:00 UTC, even
+  // though the signal is actually earlier than published_at). Compare numeric instants.
+  const publishedAtMs = new Date(dataset.published_at).getTime()
   for (const live of dataset.live_signals) {
-    if (live.observed_at > dataset.published_at) {
+    if (new Date(live.observed_at).getTime() > publishedAtMs) {
       issues.push({
         code: 'envelope_published_at_before_signal',
         published_at: dataset.published_at,

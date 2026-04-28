@@ -88,6 +88,26 @@ describe('publishDataset (Epic 2 PR 2.3)', (): void => {
     }
   })
 
+  it('current.v1.json reflects the highest-counter dataset under concurrent publishes (Codex P2 #9)', async (): Promise<void> => {
+    // Regression: with the lock holding only counter allocation, two concurrent publishes
+    // with DIFFERENT datasets could end with current.v1.json carrying the LOWER counter's
+    // payload (slow process overwrites fast). After the fix, the lock wraps the entire
+    // publish, so current.v1.json always matches the highest counter's dataset.
+    const datasetA = { ...validDataset, published_at: '2026-04-26T08:00:00Z' }
+    const datasetB = { ...validDataset, published_at: '2026-04-26T09:00:00Z' }
+    const [r1, r2] = await Promise.all([
+      publishDataset(datasetA, { rootDir: root }),
+      publishDataset(datasetB, { rootDir: root }),
+    ])
+    if (!r1.ok || !r2.ok) {
+      expect.fail('both publishes must succeed')
+      return
+    }
+    const winnerPayload = r1.counter > r2.counter ? datasetA : datasetB
+    const written = JSON.parse(await readFile(join(root, 'current.v1.json'), 'utf8')) as { published_at: string }
+    expect(written.published_at).toBe(winnerPayload.published_at)
+  })
+
   it('cleans up the lock file even when validation fails (lock is never created)', async (): Promise<void> => {
     // Validation runs before any filesystem write; the lock file must NOT be created at all.
     await publishDataset({ schema_version: 99 }, { rootDir: root })

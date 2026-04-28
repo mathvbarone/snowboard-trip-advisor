@@ -170,6 +170,23 @@ describe('validatePublishedDataset (Epic 2 PR 2.2)', (): void => {
     }
   })
 
+  it('compares envelope timestamps as instants, not lexicographic strings (Codex P1 #9)', (): void => {
+    // Regression: ISODateTimeString allows offsets per Zod's .datetime({ offset: true }).
+    // String comparison fails for cross-offset timestamps. This signal is at 17:00 UTC,
+    // genuinely BEFORE published_at at 18:00 UTC, but lexicographically '19:...+02:00' > '18:...Z'.
+    // Pre-fix: the validator flagged this (wrong). Post-fix: no issue raised.
+    const mutated = structuredClone(fixture) as {
+      published_at: string
+      live_signals: Array<{ resort_slug: string; observed_at: string }>
+    }
+    mutated.published_at = '2026-04-26T18:00:00Z'                  // 18:00 UTC
+    const firstSignal = mutated.live_signals[0]
+    if (!firstSignal) { throw new Error('fixture invariant: must have at least one live signal') }
+    firstSignal.observed_at = '2026-04-26T19:00:00+02:00'           // 17:00 UTC (earlier than published)
+    const result = validatePublishedDataset(mutated)
+    expect(result.ok).toBe(true)
+  })
+
   // Note: a `fx_provenance_required` test does NOT exist in Phase 1. Per ai-clean-code-adherence
   // audit, KNOWN_NON_EUR_SOURCES + the enforcement branch are deferred to Epic 5 PR 5.x. Epic 5
   // adds the test alongside the first non-EUR adapter.
