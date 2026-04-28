@@ -38,3 +38,8 @@ export {
   type FieldValueRendererProps,
 } from './components/FieldValueRenderer'
 export { HeaderBar, type HeaderBarProps } from './components/HeaderBar'
+export {
+  ExternalLink,
+  type ExternalLinkProps,
+  type ExternalLinkVariant,
+} from './components/ExternalLink'
