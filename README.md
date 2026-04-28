@@ -49,6 +49,10 @@ Every metric field has a matching `field_sources` entry carrying `source`, `sour
 
 The Phase 1 seed dataset ships two resorts: **Kotelnica Białczańska** (`kotelnica-bialczanska`, Poland, prices natively in PLN) and **Špindlerův Mlýn** (`spindleruv-mlyn`, Czech Republic, prices natively in CZK). Because both resorts are EU but neither uses the euro, every Money-typed field carries an additional `fx` sub-object on its `FieldSource` recording the ECB reference rate used to convert into EUR — see [ADR-0003](docs/adr/0003-fx-conversion-at-adapter-boundary.md) for rationale and the validator-enforced shape.
 
+## Cards landing (`/`)
+
+The default route of the public app (`/`) is the **cards landing**: a hero header, a filter bar (country chips, sort, bucketed price), and one card per resort. Each card surfaces four metric fields side-by-side — durable (altitude range, slopes_km) and live (snow_depth_cm, lift_pass_day) — with the source glyph + observed_at tooltip from `field_sources`. A star toggles the resort into a URL-shared shortlist; "Browse lodging near …" routes outbound with `rel="noopener noreferrer"` + `referrerpolicy="no-referrer"`. Sort and country filter are URL-shared (`?sort=`, `?country=`) so links round-trip; the price bucket is a private filter and is not serialized. The matrix view (PR 3.4) and detail drawer (PR 3.5) compose against the same dataset projection.
+
 ## Current state today
 
 **The pivot is documented but not executed.** The codebase on `main` is still the pre-pivot scoring pipeline. Migration happens on the `pivot/data-transparency` branch across six epics (spec §9); `main` stays deployable until Epic 6 closes.
