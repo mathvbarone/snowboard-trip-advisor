@@ -43,6 +43,13 @@ export default defineConfig({
         // or `packages/*/src/**`, but `tests/integration/**` is broader
         // (no `src/` subdir) so we exclude its config file explicitly.
         'tests/integration/vite.config.ts',
+        // `apps/public/src/mocks/server.ts` is the MSW request handler bag for
+        // the public app's test setup. It is loaded from `test-setup.ts` (also
+        // excluded) and only fires from Vitest's lifecycle hooks; its handler
+        // bodies will be exercised once tests start hitting `fetch` paths in
+        // PR 3.1c. Excluding it keeps coverage honest while the SPA still has
+        // no fetch call site.
+        'apps/public/src/mocks/**',
         // `scripts/hooks/**` are shell scripts (test-hooks.sh, deny-dangerous-git.sh).
         'scripts/hooks/**',
         // `scripts/pre-commit` is a shell script installed into the worktree
