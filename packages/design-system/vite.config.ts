@@ -25,6 +25,13 @@ export default defineConfig({
         // It runs at vitest setup time, has no production caller, and
         // contains no testable conditional logic.
         'src/test-setup.ts',
+        // PR 3.2: src/icons/types.ts is a type-only module (interface +
+        // type alias for the IconComponent / IconProps shape shared by all
+        // glyphs). v8 reports 0% on type-only files even though there is
+        // no runtime code to cover; the alternative — adding a sentinel
+        // runtime export just to lift the metric — would pollute the
+        // surface for no value.
+        'src/icons/types.ts',
       ],
       reporter: ['text', 'lcov'],
     },

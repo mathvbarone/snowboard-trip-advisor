@@ -33,3 +33,7 @@ export {
   SourceBadge,
   type SourceBadgeProps,
 } from './components/SourceBadge'
+export {
+  FieldValueRenderer,
+  type FieldValueRendererProps,
+} from './components/FieldValueRenderer'
