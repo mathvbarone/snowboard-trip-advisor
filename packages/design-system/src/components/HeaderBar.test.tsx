@@ -5,15 +5,22 @@ import { describe, expect, it } from 'vitest'
 import { HeaderBar } from './HeaderBar'
 
 describe('HeaderBar', (): void => {
-  it('renders inside a banner landmark', (): void => {
-    render(
+  it('renders a semantic <header> element (landmark role decided by context)', (): void => {
+    // Don't hardcode `role="banner"` on a reusable design-system
+    // component. The `banner` landmark is meant to be the single
+    // top-level site header — fine when the app shell renders this
+    // at the document root, broken when nested inside <main> or when
+    // multiple instances exist. By using a plain semantic <header>,
+    // the browser/AT assigns the implicit banner role only in the
+    // correct context; nested <header>s get a generic role.
+    const { container } = render(
       <HeaderBar
         brandLabel="Snowboard Trip Advisor"
         brandHref="/"
         shortlistSlot={null}
       />,
     )
-    expect(screen.getByRole('banner')).toBeInTheDocument()
+    expect(container.querySelector('header')).not.toBeNull()
   })
 
   it('renders the brand link with the given label and href', (): void => {
