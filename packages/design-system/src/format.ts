@@ -1,8 +1,10 @@
+import type { Money } from '@snowboard-trip-advisor/schema'
+
 // Design-system formatters. All signatures take destructured primitives —
 // never schema branded types, never the FieldValue<T> envelope. Renderers
 // like FieldValueRenderer (PR 3.2) extract primitives from FieldValue and
-// dispatch into a typed-key formatter map; this file owns that map's
-// implementations.
+// dispatch into FORMATTERS (below); this file owns the formatter
+// implementations and the typed-key dispatch map.
 
 const LOCALE = 'en-GB'
 
@@ -97,3 +99,23 @@ export function formatDateRelative({
   const past = -diffDays
   return past === 1 ? '1 day ago' : `${String(past)} days ago`
 }
+
+// Typed-key formatter dispatch consumed by FieldValueRenderer<K>. Each
+// entry takes a destructured primitive (or a small object derived from
+// FieldValue<T>'s `value`) and returns the display string. Adding a new
+// metric shape adds an entry; the renderer's K-generic narrows the
+// expected `field.value` shape from `Parameters<typeof FORMATTERS[K]>[0]`.
+export const FORMATTERS = {
+  number: (v: number): string => formatNumber({ value: v }),
+  money: (v: Money): string => formatMoney(v),
+  months: (v: { start_month: number; end_month: number }): string =>
+    formatMonths({ start: v.start_month, end: v.end_month }),
+  altitude: (v: { min: number; max: number }): string =>
+    `${formatNumber({ value: v.min })}–${formatNumber({ value: v.max })}`,
+  liftsOpen: (v: { count: number; total: number }): string =>
+    `${String(v.count)}/${String(v.total)}`,
+  lodging: (v: { amount: Money; sample_size: number }): string =>
+    `${formatMoney(v.amount)} (n=${String(v.sample_size)})`,
+} as const
+
+export type FormatterKey = keyof typeof FORMATTERS

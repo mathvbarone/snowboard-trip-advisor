@@ -28,12 +28,16 @@ afterEach((): void => {
 })
 
 describe('App', (): void => {
-  it('renders DatasetLoading then resolves to CardsView placeholder', async (): Promise<void> => {
+  it('renders DatasetLoading then resolves to CardsView (Hero h1)', async (): Promise<void> => {
     const view = await renderAsync(<App />)
-    // After the act-wrapped initial render, the dataset has resolved.
-    expect(await screen.findByTestId('cards-placeholder')).toHaveTextContent(
-      'Resort count: 2',
-    )
+    // After the act-wrapped initial render, the dataset has resolved and
+    // CardsView's Hero <h1> is in the document.
+    expect(
+      await screen.findByRole('heading', {
+        level: 1,
+        name: /compare european ski resorts/i,
+      }),
+    ).toBeInTheDocument()
     view.unmount()
   })
 
@@ -61,14 +65,20 @@ describe('App', (): void => {
         await Promise.resolve()
       }
     })
-    expect(await screen.findByTestId('cards-placeholder')).toHaveTextContent(
-      'Resort count: 2',
-    )
+    expect(
+      await screen.findByRole('heading', {
+        level: 1,
+        name: /compare european ski resorts/i,
+      }),
+    ).toBeInTheDocument()
   })
 
   it('skip-link click moves focus to <main id="main">', async (): Promise<void> => {
     await renderAsync(<App />)
-    await screen.findByTestId('cards-placeholder')
+    await screen.findByRole('heading', {
+      level: 1,
+      name: /compare european ski resorts/i,
+    })
     const skipLink = screen.getByText('Skip to main content')
     const user = userEvent.setup()
     await user.click(skipLink)
@@ -96,7 +106,10 @@ describe('App', (): void => {
     document.querySelector('link[rel="canonical"]')?.remove()
     window.history.replaceState({}, '', '/?view=cards')
     const view = await renderAsync(<App />)
-    await screen.findByTestId('cards-placeholder')
+    await screen.findByRole('heading', {
+      level: 1,
+      name: /compare european ski resorts/i,
+    })
     expect(document.title).toBe('Snowboard Trip Advisor')
     const canonical = document.querySelector('link[rel="canonical"]')
     expect(canonical).not.toBeNull()
@@ -113,11 +126,14 @@ describe('App', (): void => {
     await renderAsync(<App />)
     await waitFor(
       (): void => {
-        // Either the cards placeholder shows (detail not yet mounted) or the
-        // boundary alert fires (detail stub threw). Either way, the find()
-        // projection has executed.
+        // Either CardsView mounts (detail boundary swallowed the stub throw)
+        // or the boundary alert fires. Either way, the find() projection
+        // has executed.
         const alert = screen.queryByRole('alert')
-        const cards = screen.queryByTestId('cards-placeholder')
+        const cards = screen.queryByRole('heading', {
+          level: 1,
+          name: /compare european ski resorts/i,
+        })
         expect(alert ?? cards).not.toBeNull()
       },
       { timeout: 2000 },

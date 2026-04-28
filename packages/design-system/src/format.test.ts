@@ -6,6 +6,7 @@ import {
   formatMonths,
   formatNumber,
   formatPercent,
+  FORMATTERS,
 } from './format'
 
 describe('formatNumber', (): void => {
@@ -95,5 +96,36 @@ describe('formatDateRelative', (): void => {
 
   it('renders >7 days as "Apr 12, 2026" (absolute fallback)', (): void => {
     expect(formatDateRelative({ iso: '2026-04-12T08:00:00Z', now: NOW })).toMatch(/Apr.*2026/)
+  })
+})
+
+describe('FORMATTERS dispatch', (): void => {
+  it('dispatches "number" to formatNumber', (): void => {
+    expect(FORMATTERS.number(27)).toBe('27')
+  })
+
+  it('dispatches "money" to formatMoney', (): void => {
+    expect(FORMATTERS.money({ amount: 51, currency: 'EUR' })).toBe('€51')
+  })
+
+  it('dispatches "months" to formatMonths via {start_month, end_month}', (): void => {
+    expect(FORMATTERS.months({ start_month: 12, end_month: 4 })).toBe('Dec–Apr')
+  })
+
+  it('dispatches "altitude" to a min–max range string', (): void => {
+    expect(FORMATTERS.altitude({ min: 715, max: 1310 })).toBe('715–1,310')
+  })
+
+  it('dispatches "liftsOpen" to "count/total"', (): void => {
+    expect(FORMATTERS.liftsOpen({ count: 7, total: 7 })).toBe('7/7')
+  })
+
+  it('dispatches "lodging" to a money + sample-size string', (): void => {
+    expect(
+      FORMATTERS.lodging({
+        amount: { amount: 120, currency: 'EUR' },
+        sample_size: 12,
+      }),
+    ).toBe('€120 (n=12)')
   })
 })
