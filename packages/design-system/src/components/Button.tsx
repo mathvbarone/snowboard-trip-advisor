@@ -4,18 +4,28 @@ import type { JSX, ReactNode } from 'react'
 // CLAUDE.md "UI Code Rules"); this is the design-system entry point so call
 // sites stay token-driven and consistent.
 //
-// Phase 1 needs only the affordances DatasetUnavailable's Retry surface
-// requires: `onClick`, `type` (defaulting to 'button' so we don't submit an
-// ambient form), `disabled`, `children`, plus `aria-label` for icon-only
-// variants. More props (variant tokens, loading state, icon slots) ship as
-// real call sites land downstream.
+// PR 3.1c shipped the minimal prop surface (children/onClick/type/disabled/
+// aria-label) for DatasetUnavailable's Retry CTA. PR 3.2 extends it with
+// `variant: 'primary' | 'secondary' | 'ghost'` (default `'primary'`) for the
+// cards-path call sites — primary for "Browse lodging near X", secondary for
+// other inline CTAs, ghost for low-emphasis actions. Variants are surfaced via
+// `data-variant` so CSS can style with a single token-driven attribute selector
+// (no per-variant className branching).
+//
+// `aria-pressed` is exposed for toggle-style usage (e.g. consumers that want a
+// rectangular pressable surface; IconButton remains the icon-only toggle
+// surface for the star button per spec §5.5).
+
+export type ButtonVariant = 'primary' | 'secondary' | 'ghost'
 
 export interface ButtonProps {
   children: ReactNode
   onClick: () => void
   type?: 'button' | 'submit' | 'reset'
   disabled?: boolean
+  variant?: ButtonVariant
   'aria-label'?: string
+  'aria-pressed'?: boolean
 }
 
 export function Button({
@@ -23,7 +33,9 @@ export function Button({
   onClick,
   type = 'button',
   disabled,
+  variant = 'primary',
   'aria-label': ariaLabel,
+  'aria-pressed': ariaPressed,
 }: ButtonProps): JSX.Element {
   // The raw-<button> ban fires in apps/**, not in packages/design-system —
   // this is the canonical wrapper that the apps/** call sites import.
@@ -33,6 +45,8 @@ export function Button({
       onClick={onClick}
       disabled={disabled}
       aria-label={ariaLabel}
+      aria-pressed={ariaPressed}
+      data-variant={variant}
       className="sta-button"
     >
       {children}

@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { axe } from 'jest-axe'
 import { describe, expect, it, vi } from 'vitest'
 
 import { Button } from './Button'
@@ -48,5 +49,74 @@ describe('Button', (): void => {
       </Button>,
     )
     expect(screen.getByRole('button', { name: 'Disabled' })).toBeDisabled()
+  })
+
+  it('defaults variant to "primary"', (): void => {
+    render(<Button onClick={(): void => undefined}>Default</Button>)
+    expect(screen.getByRole('button', { name: 'Default' })).toHaveAttribute(
+      'data-variant',
+      'primary',
+    )
+  })
+
+  it('renders the secondary variant when variant="secondary"', (): void => {
+    render(
+      <Button onClick={(): void => undefined} variant="secondary">
+        Secondary
+      </Button>,
+    )
+    expect(screen.getByRole('button', { name: 'Secondary' })).toHaveAttribute(
+      'data-variant',
+      'secondary',
+    )
+  })
+
+  it('renders the ghost variant when variant="ghost"', (): void => {
+    render(
+      <Button onClick={(): void => undefined} variant="ghost">
+        Ghost
+      </Button>,
+    )
+    expect(screen.getByRole('button', { name: 'Ghost' })).toHaveAttribute(
+      'data-variant',
+      'ghost',
+    )
+  })
+
+  it('forwards aria-pressed to the underlying element when used as a toggle', (): void => {
+    render(
+      <Button onClick={(): void => undefined} aria-pressed>
+        Toggle
+      </Button>,
+    )
+    expect(screen.getByRole('button', { name: 'Toggle' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+  })
+
+  it('is axe-clean across primary / secondary / ghost / disabled', async (): Promise<void> => {
+    const { container, rerender } = render(
+      <Button onClick={(): void => undefined}>Primary</Button>,
+    )
+    expect(await axe(container)).toHaveNoViolations()
+    rerender(
+      <Button onClick={(): void => undefined} variant="secondary">
+        Secondary
+      </Button>,
+    )
+    expect(await axe(container)).toHaveNoViolations()
+    rerender(
+      <Button onClick={(): void => undefined} variant="ghost">
+        Ghost
+      </Button>,
+    )
+    expect(await axe(container)).toHaveNoViolations()
+    rerender(
+      <Button onClick={(): void => undefined} disabled>
+        Disabled
+      </Button>,
+    )
+    expect(await axe(container)).toHaveNoViolations()
   })
 })
