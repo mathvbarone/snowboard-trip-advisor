@@ -50,6 +50,16 @@ export default defineConfig({
         // PR 3.1c. Excluding it keeps coverage honest while the SPA still has
         // no fetch call site.
         'apps/public/src/mocks/**',
+        // `apps/public/src/state/useDataset.hmr.ts` — HMR-only safety net.
+        // `import.meta.hot` is undefined in vitest (the entire module body
+        // is dead code), so coverage measurement against it is structurally
+        // impossible. The whole-file glob exclusion is the project's
+        // standard pattern. CLAUDE.md "Coverage Rules" bans inline
+        // coverage-suppression comments; the HMR block was extracted into
+        // its own file specifically so the exclusion can be expressed as a
+        // glob both here and in apps/public/vite.config.ts. See
+        // useDataset.ts header for the cache-discipline rationale.
+        'apps/public/src/state/useDataset.hmr.ts',
         // `scripts/hooks/**` are shell scripts (test-hooks.sh, deny-dangerous-git.sh).
         'scripts/hooks/**',
         // `scripts/pre-commit` is a shell script installed into the worktree

@@ -4,6 +4,8 @@ import { use } from 'react'
 import { fetchDataset } from '../lib/datasetFetch'
 import { DatasetValidationError } from '../lib/errors'
 
+import './useDataset.hmr'
+
 // React 19 `use(loadOnce())` cache pattern (spec §4.3).
 //
 // `cached` is module-scoped so every render shares one in-flight promise; the
@@ -68,15 +70,3 @@ export function invalidateDataset(): void {
 export function __resetForTests(): void {
   cached = null
 }
-
-// HMR-only safety net: in dev, accept module updates by clearing the cache.
-// `import.meta.hot` is undefined in vitest, so this branch is never executed
-// in tests. The v8-ignore comment scopes the exclusion to this 3-line block
-// (rationale: vite.config.ts comment).
-/* v8 ignore start */
-if (import.meta.hot) {
-  import.meta.hot.accept((): void => {
-    cached = null
-  })
-}
-/* v8 ignore stop */
