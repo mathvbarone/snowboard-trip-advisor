@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
+import { loadResortDataset, publishDataset } from './node'
+
 import {
   ResortSlug,
   UpstreamHash,
@@ -17,13 +19,11 @@ import {
   ResortLiveSignal,
   PublishedDataset,
   validatePublishedDataset,
-  publishDataset,
-  loadResortDataset,
   loadResortDatasetFromObject,
   FRESHNESS_TTL_DAYS,
 } from './index'
 
-describe('package barrel (index.ts)', (): void => {
+describe('package barrel (index.ts + node.ts)', (): void => {
   it('re-exports every Zod schema and constant the public API needs', (): void => {
     // Smoke check: each export resolves to a defined value at runtime.
     // Catches accidental mis-spellings or dropped exports in the barrel.
@@ -43,9 +43,10 @@ describe('package barrel (index.ts)', (): void => {
     expect(PublishedDataset).toBeDefined()
     expect(FxProvenance).toBeDefined()
     expect(validatePublishedDataset).toBeDefined()
-    expect(publishDataset).toBeDefined()
-    expect(loadResortDataset).toBeDefined()
     expect(loadResortDatasetFromObject).toBeDefined()
     expect(FRESHNESS_TTL_DAYS).toBeDefined()
+    // Node-only — exported from the ./node subpath.
+    expect(publishDataset).toBeDefined()
+    expect(loadResortDataset).toBeDefined()
   })
 })

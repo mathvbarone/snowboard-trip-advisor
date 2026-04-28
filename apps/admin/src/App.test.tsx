@@ -1,6 +1,6 @@
 import { resolve } from 'node:path'
 
-import { loadResortDataset } from '@snowboard-trip-advisor/schema'
+import { loadResortDataset } from '@snowboard-trip-advisor/schema/node'
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
