@@ -118,4 +118,15 @@ describe('eslint apps/public bundle-safety discipline (PR 3.1a)', (): void => {
     const ids = await violations('apps/public/src/__eslint_fixture__.test.ts', src)
     expect(ids).not.toContain('no-restricted-imports')
   })
+
+  it('blocks dynamic `import("@snowboard-trip-advisor/schema")` from apps/public (no-restricted-imports does not match dynamic imports)', async (): Promise<void> => {
+    // ESLint's `no-restricted-imports` only matches static `import` declarations,
+    // so without a companion `no-restricted-syntax` selector on `ImportExpression`,
+    // `await import('@snowboard-trip-advisor/schema').loadResortDataset(...)`
+    // would silently bypass the bundle-safety ban and reintroduce node:fs/promises
+    // into the browser bundle. This fixture pins the dynamic-import block.
+    const src = "export const load = async (): Promise<unknown> => (await import('@snowboard-trip-advisor/schema'))\n"
+    const ids = await violations('apps/public/src/__eslint_fixture__.ts', src)
+    expect(ids).toContain('no-restricted-syntax')
+  })
 })

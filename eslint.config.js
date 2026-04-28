@@ -228,6 +228,38 @@ export default tseslint.config(
     },
   },
 
+  // Design-system discipline applied to apps and admin (§6.3).
+  // Re-list the brand-cast selector here because flat-config rule arrays
+  // overwrite rather than merge — without re-listing, the apps block would
+  // disable brand-cast enforcement for apps/**.
+  {
+    files: ['apps/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: BRAND_CAST_SELECTOR,
+          message: 'Brand types via Schema.parse only.',
+        },
+        {
+          selector: `Literal[value=/${COLOR_HEX_LITERAL}/]`,
+          message:
+            'Raw hex color literals are forbidden in apps/**. Use design-system tokens (var(--color-...)).',
+        },
+        {
+          selector: `Literal[value=/${COLOR_FN_LITERAL}/]`,
+          message:
+            'Raw rgb/hsl/oklch color literals are forbidden in apps/**. Use design-system tokens.',
+        },
+        {
+          selector: `JSXOpeningElement[name.name=/${RAW_HTML_ELS}/]`,
+          message:
+            'Use design-system wrappers (Button, Input, …) instead of raw HTML elements.',
+        },
+      ],
+    },
+  },
+
   // apps/public-only ban: the path-taking `loadResortDataset` reaches for
   // node:fs/promises and must never end up in the browser bundle. The
   // browser-safe `loadResortDatasetFromObject` (lands in PR 3.1c) is the
@@ -239,9 +271,14 @@ export default tseslint.config(
   // call site to loadResortDatasetFromObject; until then this exemption is the
   // narrowest way to land the rule alongside the existing test.
   //
-  // Flat-config rule arrays overwrite rather than merge, so the deep-import
-  // patterns from the apps/** block above are re-listed here — without that,
-  // apps/public/** would silently lose the deep-import ban.
+  // Flat-config rule arrays overwrite rather than merge, so:
+  //   - the deep-import patterns from the apps/** block above are re-listed
+  //     under `no-restricted-imports` (without that, apps/public/** would
+  //     silently lose the deep-import ban);
+  //   - the brand-cast / color-literal / raw-HTML selectors from the apps/**
+  //     block above are re-listed under `no-restricted-syntax` for the same
+  //     reason — and this block is placed AFTER the apps/** block so the
+  //     dynamic-import selector below survives the merge for apps/public/**.
   {
     files: ['apps/public/**/*.{ts,tsx}'],
     ignores: ['apps/public/**/*.test.{ts,tsx}'],
@@ -269,18 +306,26 @@ export default tseslint.config(
           ],
         },
       ],
-    },
-  },
-
-  // Design-system discipline applied to apps and admin (§6.3).
-  // Re-list the brand-cast selector here because flat-config rule arrays
-  // overwrite rather than merge — without re-listing, the apps block would
-  // disable brand-cast enforcement for apps/**.
-  {
-    files: ['apps/**/*.{ts,tsx}'],
-    rules: {
+      // Companion to the `no-restricted-imports` rule above: ESLint's
+      // `no-restricted-imports` only matches static `import` declarations, so
+      // `await import('@snowboard-trip-advisor/schema')` would silently bypass
+      // the bundle-safety ban and reintroduce node:fs/promises into the
+      // browser bundle. Block ALL dynamic imports of the schema package from
+      // apps/public — code-split chunks (matrix view, detail drawer) are
+      // SPA-internal and have no legitimate need to dynamic-import the schema
+      // package, so the broader ban closes the bypass with one selector.
+      //
+      // The four selectors after it are re-listed verbatim from the apps/**
+      // block above; flat-config rule arrays overwrite rather than merge, so
+      // dropping them here would silently disable brand-cast / color-literal
+      // / raw-HTML enforcement for apps/public/**.
       'no-restricted-syntax': [
         'error',
+        {
+          selector: "ImportExpression[source.value='@snowboard-trip-advisor/schema']",
+          message:
+            'Use a static import in apps/public to keep node:fs/promises out of the browser bundle. Dynamic imports bypass the bundle-safety check on loadResortDataset (see eslint.config.js no-restricted-imports above and spec §2.2).',
+        },
         {
           selector: BRAND_CAST_SELECTOR,
           message: 'Brand types via Schema.parse only.',
