@@ -39,9 +39,13 @@ describe('useURLState', (): void => {
 
   it('uses pushState when a PUSH_KEYS field changes', (): void => {
     setLocation('view=cards')
+    // Render the hook first so subscribe-time normalization (which strips
+    // the default `view=cards` from the address bar) finishes before we
+    // start counting history writes. The spies below only see the writes
+    // driven by setURLState.
+    const { result } = renderHook(() => useURLState())
     const pushSpy = vi.spyOn(window.history, 'pushState')
     const replaceSpy = vi.spyOn(window.history, 'replaceState')
-    const { result } = renderHook(() => useURLState())
     act((): void => {
       setURLState({ view: 'matrix' })
     })
@@ -52,9 +56,9 @@ describe('useURLState', (): void => {
 
   it('uses replaceState when only non-PUSH fields change', (): void => {
     setLocation('view=cards&sort=name')
+    const { result } = renderHook(() => useURLState())
     const pushSpy = vi.spyOn(window.history, 'pushState')
     const replaceSpy = vi.spyOn(window.history, 'replaceState')
-    const { result } = renderHook(() => useURLState())
     act((): void => {
       setURLState({ sort: 'price_asc' })
     })
@@ -100,6 +104,57 @@ describe('useURLState', (): void => {
       setURLState({ sort: 'name' })
     })
     expect(window.location.search).toBe('')
+  })
+
+  it('normalizes invalid URL params back into the address bar on mount (spec §3.2)', (): void => {
+    // parseURL drops invalid values silently. Spec §3.2 also requires the
+    // URL to be rewritten to its valid subset on the same render commit,
+    // otherwise copied/shared links keep the bad query string and every
+    // popstate re-parses junk.
+    setLocation('view=garbage&sort=alsogarbage')
+    const replaceSpy = vi.spyOn(window.history, 'replaceState')
+    const { result } = renderHook(() => useURLState())
+    // Both view and sort were invalid → defaults → serializeURL returns ''.
+    expect(window.location.search).toBe('')
+    expect(result.current.view).toBe('cards')
+    expect(result.current.sort).toBe('name')
+    expect(replaceSpy).toHaveBeenCalled()
+  })
+
+  it('preserves valid params while stripping invalid ones (canonical subset rewrite)', (): void => {
+    // Mixed case: `view=matrix` is valid; `sort=garbage` is invalid. The
+    // canonical serialization is `view=matrix` only, and the address bar
+    // should be rewritten to that subset (covering the non-empty-canonical
+    // branch of normalizeIfNeeded).
+    setLocation('view=matrix&sort=garbage')
+    const { result } = renderHook(() => useURLState())
+    expect(window.location.search).toBe('?view=matrix')
+    expect(result.current.view).toBe('matrix')
+    expect(result.current.sort).toBe('name')
+  })
+
+  it('does not call replaceState when the URL is already canonical', (): void => {
+    setLocation('view=matrix')
+    const replaceSpy = vi.spyOn(window.history, 'replaceState')
+    renderHook(() => useURLState())
+    // The URL was already in canonical form — no extra history write.
+    expect(replaceSpy).not.toHaveBeenCalled()
+    expect(window.location.search).toBe('?view=matrix')
+  })
+
+  it('re-normalizes after popstate restores a malformed share URL', (): void => {
+    setLocation('view=cards')
+    const { result } = renderHook(() => useURLState())
+    expect(result.current.view).toBe('cards')
+    act((): void => {
+      // Simulate browser back/forward landing on a malformed URL — the
+      // popstate handler must normalize before notifying subscribers.
+      window.history.replaceState({}, '', '/?view=garbage&sort=alsogarbage')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    })
+    expect(window.location.search).toBe('')
+    expect(result.current.view).toBe('cards')
+    expect(result.current.sort).toBe('name')
   })
 
   it('carries the @warning JSDoc forbidding setURLState inside startTransition', (): void => {
