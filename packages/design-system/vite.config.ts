@@ -13,11 +13,19 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
-    setupFiles: [],
+    setupFiles: ['./src/test-setup.ts'],
     coverage: {
       provider: 'v8',
       include: ['src/**'],
-      exclude: ['**/*.test.{ts,tsx}', '**/*.d.ts'],
+      exclude: [
+        '**/*.test.{ts,tsx}',
+        '**/*.d.ts',
+        // PR 3.1c: test-setup.ts wires '@testing-library/jest-dom/vitest'
+        // and jest-axe's `toHaveNoViolations` matcher into vitest's expect.
+        // It runs at vitest setup time, has no production caller, and
+        // contains no testable conditional logic.
+        'src/test-setup.ts',
+      ],
       reporter: ['text', 'lcov'],
     },
   },
