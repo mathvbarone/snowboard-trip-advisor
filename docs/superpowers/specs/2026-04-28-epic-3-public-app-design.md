@@ -31,19 +31,33 @@ The product principle is **no scoring, no ranking** — the user does the rankin
 
 Resolved during the brainstorm with the user. Each is load-bearing — do not re-litigate without an explicit user request.
 
-| # | Decision | Brainstorm option |
+| # | Decision | Why (decoded from brainstorm) |
 | --- | --- | --- |
-| 1 | **Detail = right-side overlay drawer** (not a separate route) | A |
-| 2 | **Lodging-near-resort grid** is Phase 2 only; Epic 3 ships only the deep-link CTA | B |
-| 3 | **Sort options:** `name | price_asc | price_desc | snow_depth_desc`; default `name` A→Z; missing values sink | B |
-| 4 | **No `#N` ranking badge on cards** — alphabetical / sort-positional indices removed | B |
-| 5 | **Loading model:** runtime `fetch('/data/current.v1.json')` → Zod validate → project. Build-time bundle rejected | B |
-| 6 | **Three font families** self-hosted via `@fontsource/*` (DM Serif Display 400, DM Sans 400 + 600, JetBrains Mono 500). Preload DM Sans 400 + JetBrains Mono 500 only | A |
-| 7 | **Theme:** CSS-only via `prefers-color-scheme`, default dark; no JS theme branching; tokens semantic so a Phase 2 manual toggle is purely additive | B |
-| 8 | **Implementation approach:** spec-faithful, minimal libraries; no Zustand, no router | Approach 1 |
-| 9 | **Design system:** hand-built; no Pico / Tailwind / Radix Themes (ADR-0006 captures the rationale) | A |
+| 1 | **Detail = right-side overlay drawer** (not a separate route) | Visual `02.png` shows it; preserves user's scroll position in cards/matrix; "compare without losing context" matches the data-transparency comparison-tool premise |
+| 2 | **Lodging-near-resort grid** is Phase 2 only; Epic 3 ships only the deep-link CTA | An in-app listings grid would require a Booking/Airbnb listings adapter (massive Epic 5 scope-up) and conflicts with the data-transparency premise — `03.png` represents the destination after deep-link, not a screen we build |
+| 3 | **Sort options:** `name | price_asc | price_desc | snow_depth_desc`; default `name` A→Z; missing values sink | `snow_depth_desc` adds high product fit (trip-planning) at near-zero code cost; `name` default avoids missing-data bias on landing; geolocation-based "Nearest" deferred to Phase 2 |
+| 4 | **No `#N` ranking badge on cards** | "No scoring, no ranking" is load-bearing in the spec; positional indices in the visual mock are removed in favor of cleaner default UX |
+| 5 | **Loading model:** runtime `fetch('/data/current.v1.json')` → Zod validate → project | Survives Phase 2 unchanged (`/data/...` becomes an `/api/dataset` Hono handler; only the URL changes); build-time bundle would lock us into rebuild-on-publish once admin app exists in Epic 4 |
+| 6 | **Three font families** self-hosted via `@fontsource/*` (DM Serif Display 400, DM Sans 400 + 600, JetBrains Mono 500); preload `latin-ext` for DM Sans 400 + JetBrains Mono 500 | Matches `tokens.ts` declarations + visual references; bundle math fits the budget; `latin-ext` covers Polish + Czech seed-resort characters (see §6.3 unicode-range note) |
+| 7 | **Theme:** CSS-only via `prefers-color-scheme`, default dark; no JS branching; tokens semantic so a future manual toggle is purely additive | Avoids first-paint flash; tokens.ts already declares both scales; CSP `script-src 'self'` blocks the inline-script alternative anyway |
+| 8 | **Implementation approach:** spec-faithful, minimal libraries; no Zustand, no router | 5-route ~15-component app; library tax doesn't earn its keep at this scale; URL-as-source-of-truth invariant is clearer with hand-rolled hooks |
+| 9 | **Design system:** hand-built; no Pico / Tailwind / Radix Themes (ADR-0006) | `tokens.ts` is already shipped + tested; framework override cost ≥ savings; visual references are distinctly custom; agent-collaboration favors explicit hand-written components over framework-cascade behavior |
 
-Brainstorm trail records 14+ reviewer findings folded across Sections 1-6 (P0-P2 punch lists from a senior frontend reviewer per section; full punch lists are not reproduced here, but their resolutions appear inline below).
+Brainstorm trail folded ~80 reviewer findings across six rounds of severity-tagged punch lists (one round per section from a senior frontend reviewer; roughly 20+ P0s, 30+ P1s, 30+ P2s; full punch lists not reproduced here, but their resolutions appear inline below). A seventh round on the assembled spec doc itself contributed an additional 16 findings (2 P0s + 11 P1s + 3 P2s) folded in this commit.
+
+### 1.1 Parent-spec divergences
+
+Where this spec deviates from `2026-04-22-product-pivot-design.md`, the divergence is named explicitly here. Implementer agents should not silently revert to parent-spec wording.
+
+| Parent §  | Parent text | Epic-3 deviation | Rationale |
+| --- | --- | --- | --- |
+| §2.1 `view=cards|matrix|detail` | three views | `view=cards|matrix` only; detail is overlay (`&detail=<slug>`) | Detail-as-drawer per locked decision #1; matches visual reference `02.png`; preserves user's place in the cards/matrix viewport |
+| §2.1 `&resort=<slug>` | resort key gates detail view | `&detail=<slug>` replaces `&resort=`; orthogonal to `view` | Same as above; key now overlay-only |
+| §2.1 `&sort=price_asc|price_desc|name` | three sort keys | adds `snow_depth_desc` (4 keys) | Locked decision #3; trip-planning-fit sort is high-value at near-zero implementation cost |
+| §2.4 "drawer and modal overlays use `inert` on background content" | `inert` for both | Drawer is **non-modal**; background stays mouse-clickable; `inert` does NOT apply to drawer | Locked decision #1 (drawer overlay) implies the user can still interact with cards behind; `Modal` retains `inert`/focus-trap |
+| §6.4 component inventory | hand-built + Radix primitives | Same overall, but `<Dialog>` split into `<Modal>` + `<Drawer>` (separate primitives) | Section-4 frontend reviewer P0 — Radix `Dialog` is modal-only; non-modal drawer needs `FocusScope` + `DismissableLayer` directly |
+| §9 PR 3.1 | one PR | split into 3.1a / 3.1b / 3.1c | 100% coverage gate makes a single PR unreviewable at the original scope; sub-split halves the rebase blast radius |
+| §9 PR 3.5 | "Detail route: durable + live panels..." | "Detail drawer body" | Same content; route → drawer per locked decision #1 |
 
 ---
 
@@ -430,7 +444,44 @@ See §2.3 layout. Each composite is a thin orchestrator over design-system primi
 - Per-component `.module.css` consumes vars; never re-declares colors.
 - Stylelint enforcement of no-px-literal in CSS modules → Epic 6 polish (the PR 3.1a ESLint rule covers `style={{}}` immediately).
 
-### 5.5 Q1 — price filter
+### 5.5 Frozen DetailDrawer interface (PR 3.1c → 3.5)
+
+The `views/detail.tsx` interface is **fixed at PR 3.1c** so PRs 3.2 / 3.3 / 3.4 / 3.5 can ship in parallel without `App.tsx` refactors. PR 3.1c ships a stub-throw body; PR 3.5 fills the body without touching the import path, the default-export shape, the prop signature, or the trigger-element protocol.
+
+**Contract:**
+
+```ts
+// apps/public/src/views/detail.tsx
+// Frozen at PR 3.1c. PR 3.5 fills the body only — App.tsx is untouched.
+import type { JSX } from 'react'
+import type { ResortSlug } from '@snowboard-trip-advisor/schema'
+
+export interface DetailDrawerProps {
+  slug: ResortSlug
+}
+
+export default function DetailDrawer(_: DetailDrawerProps): JSX.Element {
+  // PR 3.1c body:
+  throw new Error('detail route stub — lands in PR 3.5')
+  // PR 3.5 body replaces the throw with the real composition.
+}
+```
+
+**Trigger-element protocol** (lifted from §7.11 acceptance into the contract):
+- Every shortlist-or-card affordance that opens the detail drawer must render a focusable element carrying `data-detail-trigger="<slug>"` (typically the star `<IconButton>` on `ResortCard`).
+- On drawer close, focus returns to the element with the matching `data-detail-trigger` attribute.
+- ResortCard's contract (PR 3.2) includes this attribute; tested in `ResortCard.test.tsx`.
+
+**Lazy-import shape** (PR 3.1c):
+```ts
+// apps/public/src/components/AppShell.tsx
+const DetailDrawer = lazy(() => import('../views/detail'))
+```
+The `default` re-export from `views/detail.tsx` is what `lazy()` consumes; PR 3.5 does not change this line.
+
+**Test coverage on the stub-throw line** (PR 3.1c): `views/detail.test.tsx` calls `expect(() => render(<DetailDrawer slug={someSlug} />)).toThrow('detail route stub — lands in PR 3.5')`. The throw line is covered immediately at 100%; PR 3.5's body replaces the throw and ships its own happy-path test in the same file.
+
+### 5.6 Q1 — price filter
 
 Bucketed `<Select>` with three options (`≤€40 / €40–80 / €80+`). Mini-ADR inside ADR-0004: *"revisit when N≥10 resorts and price variance >€20"*. No slider in Phase 1.
 
@@ -486,28 +537,47 @@ state/
 
 `apps/public/package.json` adds `@fontsource/{dm-serif-display,dm-sans,jetbrains-mono}`.
 
+**Subset selection.** The seed dataset contains Polish (`Białczańska` — `ł`, `ą`, `ń`) and Czech (`Špindlerův Mlýn` — `Š`, `ů`, `ý`) characters, all in the `latin-ext` Unicode subset (not the basic `latin` subset). `@fontsource` declares both subsets via `unicode-range` in the same `*.css` payload, so resort names render correctly regardless — but **preloaded** files only cover characters in the preloaded subset. Preloading `latin-400-normal.woff2` would mean Polish/Czech characters fall back to a separately-fetched `latin-ext-400-normal.woff2` not on the critical path, defeating the LCP optimization for the very strings our seed dataset relies on.
+
+**Decision.** Preload the `latin-ext` subset for both above-the-fold weights. (`latin-ext` is a superset of `latin` for our purposes — it contains the full Latin-1 + Latin Extended-A range.)
+
 `main.tsx`:
 ```ts
 import '@fontsource/dm-serif-display/400.css'
 import '@fontsource/dm-sans/400.css'
 import '@fontsource/dm-sans/600.css'
 import '@fontsource/jetbrains-mono/500.css'
-import dmSans400 from '@fontsource/dm-sans/files/dm-sans-latin-400-normal.woff2?url'
-import jetBrains500 from '@fontsource/jetbrains-mono/files/jetbrains-mono-latin-500-normal.woff2?url'
+import dmSans400 from '@fontsource/dm-sans/files/dm-sans-latin-ext-400-normal.woff2?url'
+import jetBrains500 from '@fontsource/jetbrains-mono/files/jetbrains-mono-latin-ext-500-normal.woff2?url'
 import { injectFontPreloads } from './lib/injectFontPreloads'
 injectFontPreloads([dmSans400, jetBrains500])
 ```
 
-`injectFontPreloads(urls)` is a pure helper that appends `<link rel="preload" as="font" type="font/woff2" crossorigin href={url}>` tags before render. Vite hashes the woff2 in build; imports resolve to hashed URLs that match `<link>` href values. `font-display: swap` from `@fontsource`.
+`injectFontPreloads(urls)` is a pure helper that appends `<link rel="preload" as="font" type="font/woff2" crossorigin href={url}>` tags before render. Vite hashes the woff2 in build; imports resolve to hashed URLs that match `<link>` href values. `font-display: swap` from `@fontsource`. PR 3.6 ships a CI smoke test that asserts each emitted preload href resolves to a real file in `dist/` (catches the silent 404 mode where Vite renames the asset but the import URL doesn't update — see §10.7).
 
 CSP `font-src 'self'` satisfied (assets land under origin).
 
 ### 6.4 CSP wiring
 
-`config/csp.ts` exposes `cspHeader({ mode: 'development' | 'production'; nonce?: string }): string`.
+`config/csp.ts` exposes `cspHeader({ mode: 'development' | 'production'; nonce?: string }): string`. Both modes' full directive lists below; both branches unit-tested.
 
-- **Dev:** `connect-src 'self' ws://localhost:* http://localhost:*` + `script-src 'self' 'nonce-${nonce}'`. Both branches unit-tested.
-- **Prod (Epic 6 nginx):** dev `ws:` / `http:` allowances absent; `script-src 'self'` only.
+**Dev:**
+```
+default-src 'self'
+img-src 'self' data: https:
+font-src 'self'
+connect-src 'self' ws://localhost:* wss://localhost:* http://localhost:*
+script-src 'self' 'nonce-{nonce}'
+style-src 'self' 'unsafe-inline'
+frame-ancestors 'none'
+base-uri 'self'
+form-action 'self'
+upgrade-insecure-requests
+```
+
+**Prod (Epic 6 nginx):** identical to dev except (a) `connect-src 'self'` only (no `ws:` / `wss:` / `http://localhost:*`), and (b) `script-src 'self'` only (no nonce — Vite's hashed bundle filenames are covered by `'self'`).
+
+`style-src 'self' 'unsafe-inline'` retained in both modes (Vite injects HMR style-update payloads inline in dev; design-token CSS-vars and inline style attributes via `style={{ width: percent + '%' }}` rely on this in prod). `img-src 'self' data: https:` retained per parent §2.6 — `data:` URIs are emitted by Vite for inline SVG icon assets in dev.
 
 `apps/public/main.tsx` does **not** read or use the nonce. The `<meta name="csp-nonce">` is dev-only debugging.
 
@@ -550,8 +620,8 @@ Headroom against the 180 KB budget: ≥95 KB. Code-split chunks: matrix view (~8
 
 | PR | Triggers (per CLAUDE.md "Subagent Review Discipline") |
 | --- | --- |
-| 3.1a | `packages/schema/**` + `eslint.config.js` + `docs/adr/**` (4 ADRs) |
-| 3.1b | `apps/public/vite.config.ts` (CSP plugin); `config/csp.ts` |
+| 3.1a | `packages/schema/**` (validator + `published.ts`) + `eslint.config.js` (DAG ban) + `docs/adr/**` (4 ADRs) + root `package.json` (engines pin) |
+| 3.1b | `config/csp.ts` (mode-aware refactor) + `apps/public/vite.config.ts` (CSP + dataset plugins) |
 | 3.1c | `packages/schema/**` + `packages/design-system/**` |
 | 3.2 | `packages/design-system/**` (cards-path components + icons) |
 | 3.3 | `packages/design-system/**` (Modal/Drawer primitives) |
@@ -596,19 +666,24 @@ CODEOWNER review request order: `3.1a → 3.1b → 3.1c`, then concurrent group,
 
 **Deliverables (tests first):**
 
-- *Tests added/updated:*
-  - `packages/schema/src/published.test.ts` — empty-array now fails with `dataset_empty`; one-resort fixture for happy path.
+- *Tests added/updated (group 1 — fixture migration to one-resort minimum):*
+  - `packages/schema/src/published.test.ts` — empty-array now fails with the new `dataset_empty` issue code; happy-path fixture switches to one resort.
   - `packages/schema/src/publishDataset.test.ts` — fixture migrated.
   - `packages/schema/src/publishDataset.lockTimeout.test.ts` — fixture migrated.
-  - `packages/schema/src/index.test.ts` — barrel re-export test updated for new exports landing in 3.1c (presence-by-key only).
   - `packages/schema/src/validatePublishedDataset.test.ts` — explicit `dataset_empty` issue code emission test.
-  - `config/csp.test.ts` — both modes; dev includes `ws:` + nonce; prod excludes both. Pure helper purity assertions.
+- *Tests added/updated (group 2 — barrel-export update for new exports):*
+  - `packages/schema/src/index.test.ts` adds **presence-by-key only** assertion for `loadResortDatasetFromObject`. (This is NOT a fixture migration — `index.test.ts` does not contain `resorts: []` and is not affected by the `min(1)` change.) This update may equivalently land in PR 3.1c when the new export ships; the spec attaches it to 3.1a only if 3.1a wants the assertion in place ahead of the export landing — recommend deferring to 3.1c so the test is non-trivial on landing.
+- *Unaffected tests (record for clarity):*
+  - `packages/schema/src/fixtures/current.v1.test.ts` is unaffected — it parses the live `current.v1.json` (2 resorts) which already satisfies `min(1)`.
+- *Tests added (CSP refactor moves to PR 3.1b):*
+  - See PR 3.1b deliverables — `config/csp.test.ts` lives there per the §7.2 trigger row.
 - *Implementation:*
   - `packages/schema/src/published.ts` — `resorts: z.array(...).min(1, { message: 'dataset_empty' })`.
-  - `packages/schema/src/validatePublishedDataset.ts` — emit `dataset_empty` on `min: 1` failure.
+  - `packages/schema/src/validatePublishedDataset.ts` — emit `dataset_empty` on `min: 1` failure (named issue code, not opaque `zod_parse_failed`, so Epic 4 admin can render a useful message).
   - `eslint.config.js` — `no-restricted-imports` rule banning `loadResortDataset` from `apps/public/**`.
-  - `config/csp.ts` — `cspHeader({ mode, nonce? })` refactor.
-  - Root `package.json` — `engines: { "node": ">=20.11" }`.
+  - Root `package.json` — `engines: { "node": ">=20.11" }`. Justification: `import.meta.dirname` is used in `apps/public/vite.config.ts` (PR 3.1b) for `datasetPlugin`'s SRC path resolution; the pin is required for that PR but landed up-front so all sub-PRs share the same Node baseline.
+
+  (`config/csp.ts` refactor moved to PR 3.1b per the §7.2 subagent-trigger matrix; it does not land in 3.1a.)
 - *Docs:*
   - `docs/adr/0004-public-app-form-controls-native.md`.
   - `docs/adr/0005-css-theme-no-js.md`.
@@ -624,18 +699,20 @@ CODEOWNER review request order: `3.1a → 3.1b → 3.1c`, then concurrent group,
 **Deliverables (tests first):**
 
 - *Tests added:*
+  - `config/csp.test.ts` — both modes (dev includes `ws://localhost:*`, `wss://localhost:*`, `http://localhost:*` in `connect-src` and `'nonce-{nonce}'` in `script-src`; prod excludes all of these). Both branches assert the full directive list (`default-src`, `img-src`, `font-src`, `connect-src`, `script-src`, `style-src 'self' 'unsafe-inline'`, `frame-ancestors 'none'`, `base-uri`, `form-action`, `upgrade-insecure-requests`).
   - `apps/public/src/lib/datasetPlugin.test.ts` — `serveDatasetMiddleware` happy + ENOENT; `copyDataset` against tmpdir.
-  - `apps/public/src/lib/csp.test.ts` — `generateNonce` purity (uses `crypto.getRandomValues`, distinct values), `injectNonce` purity.
-  - `apps/public/src/__tests__/cspDevPlugin.test.ts` — middleware invoked twice, asserts `Content-Security-Policy` `script-src 'nonce-...'` differs.
+  - `apps/public/src/lib/csp.test.ts` — `generateNonce` purity (uses `crypto.getRandomValues`, distinct values across calls), `injectNonce` purity (same input → identical output).
+  - `apps/public/src/__tests__/cspDevPlugin.test.ts` — middleware invoked twice, asserts `Content-Security-Policy` `script-src 'nonce-...'` differs across requests.
   - `apps/public/src/lib/injectFontPreloads.test.ts` — pure; appends N `<link>` tags with correct attributes.
 - *Implementation:*
+  - `config/csp.ts` — refactor to `cspHeader({ mode, nonce? })`. Dev branch: `connect-src 'self' ws://localhost:* wss://localhost:* http://localhost:*` + `script-src 'self' 'nonce-${nonce}'`. Prod branch: dev allowances absent; `script-src 'self'`. Both keep `style-src 'self' 'unsafe-inline'` (Vite injects HMR style payloads inline; tokens.css is also a stylesheet) and `img-src 'self' data: https:` (parent §2.6).
   - `apps/public/src/lib/{datasetPlugin,csp,injectFontPreloads}.ts`.
   - `apps/public/vite.config.ts` — registers `datasetPlugin()` and `cspDevPlugin()` (5-line lifecycle adapters; coverage-excluded with rationale).
   - `apps/public/index.html` — `<html lang="en">`, `<meta name="description">`, two `<meta name="theme-color">` with `media`, `<link rel="canonical">` placeholder.
-  - `apps/public/src/main.tsx` — `@fontsource` CSS + `injectFontPreloads([dmSans400, jetBrains500])` + mount.
+  - `apps/public/src/main.tsx` — `@fontsource` CSS + `injectFontPreloads([...])` (preload URL list — see §6.3 for `latin-ext` vs `latin` decision) + mount.
   - `apps/public/src/App.tsx` — temporary stub returning `<main className="app-shell" />` (real composition lands in 3.1c).
   - `apps/public/src/test-setup.ts` — `matchMedia` stub; `expect.extend({ toHaveNoViolations })`; MSW lifecycle.
-  - `apps/public/src/mocks/server.ts`.
+  - `apps/public/src/mocks/server.ts` — ships a default handler for `GET /data/current.v1.json` returning the seed fixture (loaded from disk at server-startup time); per-suite overrides via `server.use(...)`.
 
 **Acceptance gate:** `npm run qa` green; `npm run dev` boots; nonce-diff vitest passes; `dist/data/current.v1.json` exists after `npm run build`.
 
@@ -653,8 +730,10 @@ CODEOWNER review request order: `3.1a → 3.1b → 3.1c`, then concurrent group,
   - `apps/public/src/lib/{urlState,router,datasetFetch,errors,format,deepLinks}.test.ts` — pure helpers.
   - `apps/public/src/state/{useURLState,useLocalStorageState,useDataset,useShortlist,useMediaQuery,useDocumentMeta,useScrollReset,useDroppedSlugs}.test.ts` — each hook drives the underlying API directly.
   - `apps/public/src/state/dataset.test.ts` — contamination regression: two consecutive renders, independent fetch counts asserted via MSW request log.
-  - `apps/public/src/views/states/{DatasetLoading,DatasetUnavailable,NoResorts}.test.tsx`.
-  - `apps/public/src/components/AppShell.test.tsx` — render lifecycle order assertion (fallback → content; fallback → error UI); retry via `startTransition`; skip-link focus assertion.
+  - `apps/public/src/views/states/{DatasetLoading,DatasetUnavailable,NoResorts}.test.tsx` — render contract; `NoResorts` exercised via a test that filters all resorts out (`country=XX` with no matching resort) so `views.length === 0` is reachable post-validator-min(1).
+  - `apps/public/src/views/cards.test.tsx` (PR 3.1c placeholder) — asserts the dataset count renders; replaced wholesale in PR 3.2.
+  - `apps/public/src/views/detail.test.tsx` (PR 3.1c stub) — `expect(() => render(<DetailDrawer slug={someResortSlug} />)).toThrow('detail route stub — lands in PR 3.5')`; covers the throw line at 100% per §5.5.
+  - `apps/public/src/components/AppShell.test.tsx` — render lifecycle order (fallback → content; fallback → error UI); both `ShellErrorBoundary` lifecycle methods tested (`static getDerivedStateFromError` returns updated state; `componentDidCatch` invokes `onDatasetError(err)` no-op once); retry via `startTransition`; skip-link focus assertion.
 - *Implementation:*
   - `packages/schema/src/loadResortDatasetFromObject.ts` (NEW, pure).
   - `packages/schema/src/loadResortDataset.ts` (refactored Node wrapper; existing tests stay green by virtue of the wrapper).
@@ -682,7 +761,7 @@ CODEOWNER review request order: `3.1a → 3.1b → 3.1c`, then concurrent group,
   - `packages/design-system/src/components/{Button,IconButton,Input,Select,Chip,Pill,Card,SourceBadge,FieldValueRenderer}.test.tsx` — variant matrix + axe per state.
   - `packages/design-system/src/icons/{sources,ui}/*.test.tsx` — `currentColor` assertion + size-prop test.
   - `packages/design-system/src/primitives/Tooltip.test.tsx`.
-  - `apps/public/src/views/{cards,ResortCard,Hero,FilterBar}.test.tsx` — composition + axe; FilterBar country chip hidden on ≤1 country; ResortCard CTA carries `rel="noopener noreferrer"` + `referrerpolicy="no-referrer"`.
+  - `apps/public/src/views/{cards,ResortCard,Hero,FilterBar}.test.tsx` — composition + axe; FilterBar country chip hidden on ≤1 country; ResortCard CTA carries `rel="noopener noreferrer"` + `referrerpolicy="no-referrer"`; ResortCard's star `<IconButton>` carries `data-detail-trigger="<slug>"` per the §5.5 frozen-interface contract.
 - *Implementation:*
   - All design-system components and icons named in tests above.
   - `packages/design-system/src/primitives/Tooltip.tsx`.
@@ -691,7 +770,7 @@ CODEOWNER review request order: `3.1a → 3.1b → 3.1c`, then concurrent group,
   - FilterBar accepts `slot?: ReactNode` prop; PR 3.4 fills it.
 - *Docs:* README pointer added (cards landing is product-facing).
 
-**Acceptance gate:** `npm run qa` green; cards re-sort live on `&sort=` change; star toggles `aria-pressed`; visual smoke matches `docs/reference/01.png` modulo native form controls and the dropped #N badge.
+**Acceptance gate:** `npm run qa` green; cards re-sort live on `&sort=` change asserted in `cards.test.tsx`; star toggles `aria-pressed` asserted in `ResortCard.test.tsx`; the seed dataset's two slugs render with the four named live + durable fields each. Visual fidelity to `docs/reference/01.png` is reviewer-judgement only (no Playwright snapshot infra until Epic 6 per parent spec §6.5) — not a gate.
 
 ### 7.9 PR 3.3 — Shortlist & sharing
 
@@ -710,7 +789,7 @@ CODEOWNER review request order: `3.1a → 3.1b → 3.1c`, then concurrent group,
   - `apps/public/src/views/{ShortlistDrawer,MergeReplaceDialog,ShareUrlDialog}.tsx`.
 - *Docs:* README pointer (shortlist is product-facing).
 
-**Acceptance gate:** `npm run qa` green; star → drawer ↔ URL ↔ localStorage three-way coherence asserted; share-URL paste in fresh session triggers MergeReplaceDialog when local exists; same-set/different-order does NOT trigger.
+**Acceptance gate:** `npm run qa` green; star → drawer ↔ URL ↔ localStorage three-way coherence asserted; share-URL paste in fresh session triggers MergeReplaceDialog when local exists; same-set/different-order does NOT trigger. Drawer renders at every named breakpoint (xs/sm/md/lg) — asserted in `Drawer.test.tsx` via `vi.spyOn(window, 'matchMedia')` mocking each breakpoint and verifying the drawer mounts.
 
 ### 7.10 PR 3.4 — MatrixView
 
@@ -729,7 +808,7 @@ CODEOWNER review request order: `3.1a → 3.1b → 3.1c`, then concurrent group,
   - `apps/public/src/views/matrix.module.css` — when `<lg` and `&detail=` set, downgrade matrix to cards under the drawer.
 - *Docs:* README pointer (matrix is product-facing).
 
-**Acceptance gate:** `npm run qa` green; navigating cards → matrix produces a chunk fetch (asserted via MSW request log); back-button returns to cards; bundle visualizer shows matrix in its own chunk.
+**Acceptance gate:** `npm run qa` green; navigating cards → matrix produces a chunk fetch (asserted via MSW request log in `matrix.test.tsx`); browser-back from `?view=matrix` returns to `?view=cards` (asserted in `useURLState.test.ts` via `dispatchEvent(new PopStateEvent('popstate'))`); bundle visualizer shows matrix in its own chunk (verified by PR 3.6's analyze script — advisory at this PR).
 
 ### 7.11 PR 3.5 — DetailDrawer body
 
@@ -746,7 +825,7 @@ CODEOWNER review request order: `3.1a → 3.1b → 3.1c`, then concurrent group,
 - *Acceptance addendum:* attach `npm run analyze` advisory output to PR description.
 - *Docs:* README pointer (detail view is product-facing).
 
-**Acceptance gate:** `npm run qa` green; opening detail produces a lazy chunk fetch; drawer-on-matrix CSS rule fires at `<lg`; bundle visualizer shows detail in its own chunk.
+**Acceptance gate:** `npm run qa` green; opening detail produces a lazy chunk fetch (asserted via MSW request log in `detail.test.tsx`); the drawer-on-matrix CSS rule is present in `matrix.module.css` text (asserted by reading the module's source at test time — JSDOM does not evaluate `@media` queries; full media-query firing deferred to Epic 6 Playwright); bundle visualizer shows detail in its own chunk (advisory at this PR).
 
 ### 7.12 PR 3.6 — Integration tests + bundle analysis
 
@@ -773,7 +852,7 @@ CODEOWNER review request order: `3.1a → 3.1b → 3.1c`, then concurrent group,
 ### 7.13 Cross-cutting (every PR)
 
 - **TDD enforced via deliverable ordering** — tests first, implementation after.
-- **README pointer** — only PRs 3.2 / 3.3 / 3.4 / 3.5 (product-facing). 3.1a updates ADR index. 3.1b/3.1c/3.6 update no README.
+- **README evaluation** — PRs 3.2 / 3.3 / 3.4 / 3.5 (product-facing) **must evaluate** whether README.md needs an update per CLAUDE.md "Documentation Discipline"; the evaluation outcome is documented in the PR description even if no README change lands. PRs 3.1a / 3.1b / 3.1c / 3.6 are foundation/test-infra and do not move user-visible behavior — README evaluation may be skipped (with a one-line note in the PR description). 3.1a updates the ADR index in `docs/adr/README.md` (or wherever the ADR index lives).
 - **Subagent Review Discipline** — per the trigger matrix above.
 - **DCO sign-off** on every commit (`git commit -s`).
 - **Pre-commit `npm run qa`** runs before each commit; PreToolUse hook blocks `--no-verify`.
@@ -786,7 +865,7 @@ CODEOWNER review request order: `3.1a → 3.1b → 3.1c`, then concurrent group,
 | --- | --- | --- |
 | 0004 | `public-app-form-controls-native.md` | Phase 1 ships native `<input type="date">` and `<select>` with documented a11y trade-offs; revisit when Phase 2 design refresh demands custom popovers. Includes the bucketed-price-filter mini-decision (revisit when N≥10 resorts and price variance >€20). |
 | 0005 | `css-theme-no-js.md` | Theme switches via `prefers-color-scheme` in generated `tokens.css`; no JS theme branching; tokens semantic; future manual toggle is purely additive. |
-| 0006 | `public-app-no-css-framework.md` | Hand-built design system rejected in favor of Pico/Tailwind/Radix Themes after explicit user-reviewed brainstorm. Documents the cost-of-pivot trigger condition. |
+| 0006 | `public-app-no-css-framework.md` | Pico / Tailwind / Radix Themes rejected in favor of a hand-built design system after explicit user-reviewed brainstorm. Documents the cost-of-pivot trigger condition (revisit when N≥30 design-system components or `tokens.ts` maintenance becomes a bottleneck). |
 | 0007 | `axe-library-jest-axe-with-vitest.md` | A11y test library: `jest-axe` consumed via Vitest's `expect.extend({ toHaveNoViolations })`. |
 
 ---
@@ -798,18 +877,78 @@ CODEOWNER review request order: `3.1a → 3.1b → 3.1c`, then concurrent group,
 - Polling / revalidate-on-focus — Epic 6.
 - Storybook + Playwright visual regression + `visual:approve` label — Epic 6 per parent spec §6.5.
 - Manual theme toggle UI — Phase 2 (CSS invariant kept ready).
-- i18n translation framework — Phase 2; `lang` attribute on resort names only in Phase 1.
+- i18n translation framework — Phase 2; `lang` attribute on resort names only in Phase 1. Per-resort `lang` on `region` and `attribution_block` strings — Phase 2 i18n work.
 - `Reporting-Endpoints` / `report-to` CSP telemetry — Epic 6.
 - `prefers-reduced-data` image preload variants — Phase 2 (no images Phase 1 except a single self-hosted hero).
+- `prefers-reduced-motion` plumbing beyond Drawer animations (e.g. scroll-reset, view-toggle transitions) — Epic 6 polish.
 - Stylelint enforcement of no-px-literal in CSS modules — Epic 6 polish (PR 3.1a ESLint rule covers `style={{}}` immediately).
 - Lodging-near-resort grid (visual ref `03.png`) — Phase 2 only.
 - Geolocation-based "Nearest first" sort — Phase 2 with the lodging grid.
 - "Nearest" / IP geo / location services of any kind — Phase 2.
 - Bundle-budget enforcement at `error` severity — Epic 6 follow-up (PR 3.6 ships at `warn`).
+- Per-route LCP / CLS automated measurement — Epic 6 (`size-limit` + Lighthouse CI per parent §2.5).
+- Skip-link visible-on-focus styling beyond the focus assertion test — handled in PR 3.1c `Shell.tsx` (in scope; not a deferral, just naming where it lands).
+- ESLint enforcement that `setURLState` is never invoked inside `startTransition` — discipline note in §10.5; an ESLint `no-restricted-syntax` rule is a Phase-2 hardening pass.
 
 ---
 
-## 10. Verification & next steps
+## 10. Operational concerns
+
+### 10.1 Mid-epic rollback procedure
+
+If a merged PR turns out to be broken or incompatible with a downstream PR in flight:
+
+1. **`git revert <merge-sha>`** on the integration branch. Never force-push; rely on a new commit (parent spec §10.4 plus CLAUDE.md "PreToolUse hook blocks `git push --force` to main").
+2. **Worktrees with downstream work** rebase against the post-revert head. Worktree convention from CLAUDE.md (`.worktrees/` gitignored) keeps in-flight branches isolated.
+3. **Dependency-graph rules from §7.4 still apply** to the revert: if 3.1c reverts, every downstream PR pauses until 3.1c relands. If 3.4 reverts, 3.5 stays unblocked.
+4. **Re-run the affected sub-agent reviews** on the relanding PR — review state is per-commit, not per-branch.
+
+DCO sign-off applies to revert commits as well. CI's `dco` check fails the relanding PR otherwise.
+
+### 10.2 Epic 6 nginx coupling — dataset-serving handoff
+
+PR 3.1b's `writeBundle` adapter copies `data/published/current.v1.json` into `dist/data/current.v1.json`. The path under which this dist file is served at the edge (`/data/current.v1.json`) is implicit in `apps/public/src/lib/datasetFetch.ts`'s `fetch('/data/current.v1.json', ...)`. Epic 6 owns the nginx config; Epic 3 declares the contract:
+
+- **Epic-3 contract:** the deployed bundle places `current.v1.json` at `<bundle-root>/data/current.v1.json`. Static-file serving must expose it at the URL `/data/current.v1.json` (relative to the SPA's origin) with `Cache-Control: no-cache, must-revalidate` and `Content-Type: application/json; charset=utf-8`.
+- **Handoff item for Epic 6 nginx config:** add a `location /data/` directive serving from the bundle root with the cache headers above. Without it, prod 404s.
+- **Verification at Epic 3 close:** PR 3.6's CI step asserts `dist/data/current.v1.json` exists post-build; the URL-routing contract is asserted in Epic 6.
+
+### 10.3 Validator-issue-flooding UI cap
+
+`<DatasetUnavailable />`'s dev-only `<details>` block (§4.5) renders `error.issues` for `DatasetValidationError`. To avoid memory + screen-reader floods when the validator returns many issues:
+
+- **Cap rendered issues at 20.** Display `+N more` count for the tail.
+- `<details>` carries `aria-live="off"` so SR readers don't announce the listing on collapse/expand.
+- The cap and ellipsis are tested in `DatasetUnavailable.test.tsx` with a fixture of 100 issues.
+- Prod build does not render the `<details>` block (`import.meta.env.DEV` gate); production users see only the generic copy.
+
+### 10.4 HMR cache-reset hazard for `useDataset`
+
+`useDataset`'s module-scoped `cached` promise (§4.3) survives Vite HMR module-replacement, so a developer editing `useDataset.ts` would otherwise hit a stale promise across reloads. PR 3.1c adds:
+
+```ts
+if (import.meta.hot) {
+  import.meta.hot.accept(() => { cached = null })
+}
+```
+
+at the bottom of `state/useDataset.ts`. Coverage-excluded with rationale (`import.meta.hot` is undefined in vitest; the line is a dev-only safety net, not a runtime branch).
+
+### 10.5 URL-state setters and React 19 `startTransition`
+
+`setURLState` (§3.7) writes `history.pushState` / `replaceState` synchronously inside event handlers. **It must never be invoked inside `startTransition`** because the synchronous DOM write would race the deferred render. Documented as a JSDoc warning on `setURLState`; an ESLint `no-restricted-syntax` rule could enforce this in a Phase-2 hardening pass (deferred — single-call-site discipline suffices in Phase 1).
+
+### 10.6 MSW default handler
+
+`apps/public/src/mocks/server.ts` ships a default handler for `GET /data/current.v1.json` that responds with the seed fixture (the same JSON file at `data/published/current.v1.json`, read at test-server-startup time). Tests override per-suite via `server.use(http.get(...))` for failure-mode scenarios. Without the default handler, `onUnhandledRequest: 'error'` would fail every test that doesn't mock the dataset fetch.
+
+### 10.7 Bundle-fail mode for emitted preload hrefs
+
+PR 3.6 adds a CI smoke test that parses `dist/index.html`'s `<link rel="preload">` href values and asserts each resolves to a file in `dist/`. Catches the failure mode where Vite renames the woff2 asset but the import URL doesn't update (silent 404 in prod).
+
+---
+
+## 11. Verification & next steps
 
 1. This spec is committed to `docs/superpowers/specs/2026-04-28-epic-3-public-app-design.md` on branch `docs/epic-3-public-app-spec`.
 2. `spec-document-reviewer` subagent runs against this doc; findings folded into the same branch before maintainer review.
