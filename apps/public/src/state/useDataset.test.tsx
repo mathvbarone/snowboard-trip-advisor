@@ -1,8 +1,7 @@
-import { Component, Suspense, type JSX, type ReactNode } from 'react'
-
-import type { ResortSlug } from '@snowboard-trip-advisor/schema'
+import { ResortSlug } from '@snowboard-trip-advisor/schema'
 import { act, render, screen, waitFor } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
+import { Component, Suspense, type JSX, type ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { server } from '../mocks/server'
@@ -15,7 +14,7 @@ function Probe(): JSX.Element {
     <div>
       <p data-testid="views-count">{String(views.length)}</p>
       <p data-testid="has-kotelnica">
-        {String(slugs.has('kotelnica-bialczanska' as ResortSlug))}
+        {String(slugs.has(ResortSlug.parse('kotelnica-bialczanska')))}
       </p>
     </div>
   )
@@ -122,7 +121,7 @@ describe('useDataset', (): void => {
 
     let calls = 0
     server.use(
-      http.get('/data/current.v1.json', (): HttpResponse => {
+      http.get('/data/current.v1.json', (): Response => {
         calls += 1
         return HttpResponse.json({ schema_version: 99 })
       }),

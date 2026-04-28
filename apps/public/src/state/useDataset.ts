@@ -1,6 +1,5 @@
-import { use } from 'react'
-
 import type { ResortSlug, ResortView } from '@snowboard-trip-advisor/schema'
+import { use } from 'react'
 
 import { fetchDataset } from '../lib/datasetFetch'
 import { DatasetValidationError } from '../lib/errors'

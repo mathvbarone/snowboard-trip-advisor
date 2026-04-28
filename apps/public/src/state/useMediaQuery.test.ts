@@ -3,12 +3,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { useMediaQuery } from './useMediaQuery'
 
-type ChangeListener = (event: MediaQueryListEvent) => void
-
 function createMockMQL(matches: boolean): MediaQueryList & {
   __fire: (next: boolean) => void
 } {
-  const listeners = new Set<ChangeListener>()
+  const listeners = new Set<EventListener>()
   const mql = {
     matches,
     media: '(min-width: 768px)',
@@ -17,19 +15,20 @@ function createMockMQL(matches: boolean): MediaQueryList & {
     removeListener: (): void => undefined,
     addEventListener: (_event: string, cb: EventListenerOrEventListenerObject): void => {
       if (typeof cb === 'function') {
-        listeners.add(cb as ChangeListener)
+        listeners.add(cb)
       }
     },
     removeEventListener: (_event: string, cb: EventListenerOrEventListenerObject): void => {
       if (typeof cb === 'function') {
-        listeners.delete(cb as ChangeListener)
+        listeners.delete(cb)
       }
     },
     dispatchEvent: (): boolean => false,
     __fire: (next: boolean): void => {
-      mql.matches = next
+      Object.defineProperty(mql, 'matches', { value: next, configurable: true })
+      const event = { matches: next, media: mql.media } as MediaQueryListEvent
       for (const cb of listeners) {
-        cb({ matches: next, media: mql.media } as MediaQueryListEvent)
+        cb(event)
       }
     },
   } as MediaQueryList & { __fire: (next: boolean) => void }
