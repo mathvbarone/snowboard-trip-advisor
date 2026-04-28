@@ -71,6 +71,7 @@ Full product spec: [`docs/superpowers/specs/2026-04-22-product-pivot-design.md`]
 - Any PR that introduces meaningful product-facing functionality must evaluate whether `README.md` needs an update.
 - Treat README drift as a documentation bug, not optional cleanup.
 - Decisions with architectural consequence get an ADR in `docs/adr/` (MADR-style, numbered).
+- **After an epic / milestone PR merges to `main`**, run the post-epic doc-prune playbook at [`docs/superpowers/skills/pruning-done-work-references.md`](docs/superpowers/skills/pruning-done-work-references.md) before starting the next epic. The playbook trims done-work descriptions in the spec / agent-rules, deletes stale untracked plan/handoff scratchpads, and writes a fresh tracked post-milestone handoff. Don't let detailed PR-by-PR instructions for completed work accumulate in agent context.
 
 ## Quality Gate
 
