@@ -15,8 +15,11 @@
     "@fontsource/dm-sans": "^5.2.8",
     "@fontsource/dm-serif-display": "^5.2.8",
     "@fontsource/jetbrains-mono": "^5.2.8",
+    "@snowboard-trip-advisor/design-system": "*",
+    "@snowboard-trip-advisor/schema": "*",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "zod": "^3.24.0"
   },
   "devDependencies": {
     "@types/jest-axe": "^3.5.9",
