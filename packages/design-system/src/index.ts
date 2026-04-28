@@ -24,3 +24,7 @@ export {
   ResortFeedGlyph,
   SnowForecastGlyph,
 } from './icons/sources'
+export { StarGlyph, type StarGlyphProps } from './icons/ui/star'
+export { CloseGlyph } from './icons/ui/close'
+export { InfoGlyph } from './icons/ui/info'
+export { ChevronDownGlyph } from './icons/ui/chevron-down'
