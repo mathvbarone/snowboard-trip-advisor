@@ -54,6 +54,19 @@ function datasetPlugin(): Plugin {
 // `transformIndexHtml` is NOT a viable hook here — its context does
 // not expose `req`, so per-request state cannot be threaded in. We
 // own the HTML response via a `configureServer` middleware instead.
+//
+// The middleware is registered **synchronously** (pre-internal) rather
+// than via the deferred-return ("post-internal") form. Vite's internal
+// HTML middleware serves `/` and `/index.html` and ends the response
+// before post-internal middlewares run, which would silently skip
+// nonce injection + the CSP header on normal page loads. Registering
+// pre-internal lets us own the HTML response; we still call
+// `server.transformIndexHtml(...)` inside the middleware so Vite's
+// own HMR / module-preload tags are folded into the served HTML.
+// Non-HTML requests fall through to Vite's internals via `next()` —
+// the URL guard in `createCspDevMiddleware` only handles `/` and
+// `*.html` paths.
+//
 // The lifecycle adapter is coverage-excluded; the middleware factory
 // it calls is unit-tested in src/lib/csp.test.ts and the smoke test
 // in src/__tests__/cspDevPlugin.test.ts.
@@ -61,20 +74,15 @@ function cspDevPlugin(): Plugin {
   return {
     name: 'sta-csp-dev',
     apply: 'serve',
-    configureServer(server) {
+    configureServer(server): void {
       const middleware = createCspDevMiddleware({
         readIndexHtml: (): Promise<string> => readFile(INDEX_HTML, 'utf-8'),
         transformIndexHtml: (url, html, originalUrl): Promise<string> =>
           server.transformIndexHtml(url, html, originalUrl),
       })
-      // Defer to post-internal-middlewares so Vite's own HTML
-      // transforms run before us. (Returning a function from
-      // configureServer is Vite's official "after internal" hook.)
-      return (): void => {
-        server.middlewares.use((req, res, next): void => {
-          void middleware(req, res, next)
-        })
-      }
+      server.middlewares.use((req, res, next): void => {
+        void middleware(req, res, next)
+      })
     },
   }
 }
