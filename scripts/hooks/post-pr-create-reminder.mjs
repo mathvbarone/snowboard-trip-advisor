@@ -84,7 +84,8 @@ export function shouldFire(input) {
  * string. Returns the longest matching worktree root path (so a cwd nested
  * inside `.worktrees/feat` resolves to `feat`, not the parent main checkout).
  * Skips entries flagged `detached`, `locked`, or `prunable`. Falls back to
- * null on ambiguity or no match — the hook then emits the v1 reminder.
+ * null on no match, or when the matched worktree is detached / locked /
+ * prunable — the hook then emits the v1 reminder.
  *
  * Realpath normalization handles symlinked worktree roots; on darwin we
  * additionally lowercase paths (the OS treats `/Users/...` and `/users/...`
@@ -290,7 +291,7 @@ function main() {
   let resolvedWorktree = null
   const cwd = typeof input.cwd === 'string' ? input.cwd : ''
   if (cwd.length > 0) {
-    const projectDir = process.env.CLAUDE_PROJECT_DIR ?? process.cwd()
+    const projectDir = process.env.CLAUDE_PROJECT_DIR ?? cwd ?? process.cwd()
     const porcelain = runWorktreeList(projectDir)
     if (porcelain !== null) {
       resolvedWorktree = resolveWorktree(cwd, porcelain)

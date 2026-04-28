@@ -287,17 +287,23 @@ run_test_emits_excludes \
 
 # Latency SLO: hook must complete in well under 500ms (no network calls;
 # only one synchronous `git worktree list --porcelain` exec). Use perl
-# for sub-second portability across BSD/GNU date.
+# for sub-second portability across BSD/GNU date. Take 3 samples and
+# assert on the min — a real >500ms regression still trips 3-of-3, but
+# busy CI runners no longer flake on a single noisy sample.
 SLO_INPUT='{"cwd":"'"$SELF_WORKTREE"'","tool_input":{"command":"gh pr create"},"tool_response":{"stdout":"'"$PR_URL_OK"'"}}'
-START_MS="$(perl -MTime::HiRes=time -e 'printf "%d\n", time()*1000')"
-printf '%s' "$SLO_INPUT" | "$HOOK" >/dev/null 2>&1
-END_MS="$(perl -MTime::HiRes=time -e 'printf "%d\n", time()*1000')"
-ELAPSED_MS=$((END_MS - START_MS))
-if [ "$ELAPSED_MS" -lt 500 ]; then
+MIN_MS=999999
+for SAMPLE in 1 2 3; do
+  START_MS="$(perl -MTime::HiRes=time -e 'printf "%d\n", time()*1000')"
+  printf '%s' "$SLO_INPUT" | "$HOOK" >/dev/null 2>&1
+  END_MS="$(perl -MTime::HiRes=time -e 'printf "%d\n", time()*1000')"
+  ELAPSED_MS=$((END_MS - START_MS))
+  [ "$ELAPSED_MS" -lt "$MIN_MS" ] && MIN_MS=$ELAPSED_MS
+done
+if [ "$MIN_MS" -lt 500 ]; then
   PASS=$((PASS + 1))
 else
   FAIL=$((FAIL + 1))
-  FAILED_LINES="$FAILED_LINES\n  - post-pr-create: latency SLO <500ms (took ${ELAPSED_MS}ms)"
+  FAILED_LINES="$FAILED_LINES\n  - post-pr-create: latency SLO <500ms (min=${MIN_MS}ms over 3 samples)"
 fi
 
 # ---------- summary ----------
