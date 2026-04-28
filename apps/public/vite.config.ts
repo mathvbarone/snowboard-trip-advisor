@@ -96,10 +96,21 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: ['src/**'],
+      // src/state/useDataset.hmr.ts — HMR-only safety net. `import.meta.hot`
+      // is undefined in vitest (the entire module body is dead code), so
+      // coverage measurement against it is structurally impossible. The
+      // whole-file glob exclusion is the project's standard pattern (matches
+      // src/main.tsx, src/test-setup.ts, src/mocks/**). CLAUDE.md
+      // "Coverage Rules" bans inline coverage-suppression comments; the
+      // HMR block was extracted into its own file specifically so the
+      // exclusion can be expressed as a glob here. See useDataset.ts header
+      // for the cache-discipline rationale that the HMR handler exists to
+      // support.
       exclude: [
         'src/main.tsx',
         'src/test-setup.ts',
         'src/mocks/**',
+        'src/state/useDataset.hmr.ts',
         '**/*.test.{ts,tsx}',
         '**/*.d.ts',
       ],

@@ -260,16 +260,26 @@ export default tseslint.config(
     },
   },
 
-  // apps/public-only ban: the path-taking `loadResortDataset` reaches for
-  // node:fs/promises and must never end up in the browser bundle. The
-  // browser-safe `loadResortDatasetFromObject` (lands in PR 3.1c) is the
-  // intended entry point for the public app.
+  // apps/public-only ban: the path-taking `loadResortDataset` and `publishDataset`
+  // reach for node:fs/promises and must never end up in the browser bundle. The
+  // browser-safe `loadResortDatasetFromObject` is the intended entry point for
+  // the public app.
+  //
+  // Two specifiers must be banned:
+  //   1. `'@snowboard-trip-advisor/schema'`  — package root re-exports were
+  //      narrowed in PR 3.1c so `loadResortDataset` and `publishDataset` no
+  //      longer come through here, but the named-import ban is kept as a
+  //      defense-in-depth tripwire in case a future re-export regression
+  //      widens the surface again.
+  //   2. `'@snowboard-trip-advisor/schema/node'`  — the dedicated Node-only
+  //      subpath where `loadResortDataset` and `publishDataset` actually live.
+  //      Without an explicit ban, apps/public could import from this subpath
+  //      and the browser bundle would pull `node:fs/promises` at module
+  //      evaluation time and crash at `vite build`.
   //
   // Test files (*.test.{ts,tsx}) are exempted because they run under Node
   // (vitest + jsdom), not in the production browser bundle — the bundle-safety
-  // motivation does not apply. PR 3.1c migrates the existing apps/public test
-  // call site to loadResortDatasetFromObject; until then this exemption is the
-  // narrowest way to land the rule alongside the existing test.
+  // motivation does not apply.
   //
   // Flat-config rule arrays overwrite rather than merge, so:
   //   - the deep-import patterns from the apps/** block above are re-listed
@@ -299,21 +309,28 @@ export default tseslint.config(
           paths: [
             {
               name: '@snowboard-trip-advisor/schema',
-              importNames: ['loadResortDataset'],
+              importNames: ['loadResortDataset', 'publishDataset'],
               message:
                 'Use loadResortDatasetFromObject in apps/public to keep node:fs/promises out of the browser bundle. See spec §2.2.',
+            },
+            {
+              name: '@snowboard-trip-advisor/schema/node',
+              importNames: ['loadResortDataset', 'publishDataset'],
+              message:
+                "The '/node' subpath carries Node-only utilities (node:fs/promises). Use loadResortDatasetFromObject from '@snowboard-trip-advisor/schema' (the package root) instead — it's browser-safe and was designed for apps/public's runtime fetch path. See spec §2.2.",
             },
           ],
         },
       ],
       // Companion to the `no-restricted-imports` rule above: ESLint's
       // `no-restricted-imports` only matches static `import` declarations, so
-      // `await import('@snowboard-trip-advisor/schema')` would silently bypass
-      // the bundle-safety ban and reintroduce node:fs/promises into the
-      // browser bundle. Block ALL dynamic imports of the schema package from
-      // apps/public — code-split chunks (matrix view, detail drawer) are
-      // SPA-internal and have no legitimate need to dynamic-import the schema
-      // package, so the broader ban closes the bypass with one selector.
+      // `await import('@snowboard-trip-advisor/schema')` (or `/schema/node`)
+      // would silently bypass the bundle-safety ban and reintroduce
+      // node:fs/promises into the browser bundle. Block ALL dynamic imports
+      // of the schema package OR its `/node` subpath from apps/public —
+      // code-split chunks (matrix view, detail drawer) are SPA-internal and
+      // have no legitimate need to dynamic-import either specifier, so the
+      // broader ban closes the bypass with one selector.
       //
       // The four selectors after it are re-listed verbatim from the apps/**
       // block above; flat-config rule arrays overwrite rather than merge, so
@@ -322,9 +339,15 @@ export default tseslint.config(
       'no-restricted-syntax': [
         'error',
         {
-          selector: "ImportExpression[source.value='@snowboard-trip-advisor/schema']",
+          // esquery selector with a regex literal. Forward slashes inside
+          // the regex need backslash-escaping (`\/`); inside this JS string
+          // each becomes `\\/`. Pattern matches the package root specifier
+          // and its `/node` subpath; the bare-package, named-import case is
+          // covered by `no-restricted-imports` above.
+          selector:
+            'ImportExpression[source.value=/^@snowboard-trip-advisor\\/schema(\\/node)?$/]',
           message:
-            'Use a static import in apps/public to keep node:fs/promises out of the browser bundle. Dynamic imports bypass the bundle-safety check on loadResortDataset (see eslint.config.js no-restricted-imports above and spec §2.2).',
+            "Use a static import in apps/public to keep node:fs/promises out of the browser bundle. Dynamic imports of '@snowboard-trip-advisor/schema' or '@snowboard-trip-advisor/schema/node' bypass the bundle-safety check on loadResortDataset / publishDataset (see eslint.config.js no-restricted-imports above and spec §2.2).",
         },
         {
           selector: BRAND_CAST_SELECTOR,
