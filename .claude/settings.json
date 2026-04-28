@@ -32,6 +32,15 @@
             "command": "./scripts/hooks/post-edit-lint.sh"
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./scripts/hooks/post-pr-create-reminder.sh"
+          }
+        ]
       }
     ]
   }
