@@ -129,4 +129,54 @@ describe('eslint apps/public bundle-safety discipline (PR 3.1a)', (): void => {
     const ids = await violations('apps/public/src/__eslint_fixture__.ts', src)
     expect(ids).toContain('no-restricted-syntax')
   })
+
+  it('blocks `loadResortDataset` named import from the `/node` subpath in apps/public', async (): Promise<void> => {
+    // After the schema-package split, `loadResortDataset` lives at
+    // `'@snowboard-trip-advisor/schema/node'`. Without an explicit ban on
+    // this subpath, apps/public could import it directly and the browser
+    // bundle would pull node:fs/promises at module evaluation. This
+    // fixture pins the subpath-level ban.
+    const src = "import { loadResortDataset } from '@snowboard-trip-advisor/schema/node'\nexport { loadResortDataset }\n"
+    const ids = await violations('apps/public/src/__eslint_fixture__.ts', src)
+    expect(ids).toContain('no-restricted-imports')
+  })
+
+  it('blocks `publishDataset` named import from the `/node` subpath in apps/public', async (): Promise<void> => {
+    // `publishDataset` is the other Node-only utility on the `/node`
+    // subpath; it depends on node:fs/promises (write side). Same
+    // reasoning as the loadResortDataset ban above — the bundler would
+    // follow the re-export and pull Node built-ins into the browser
+    // bundle.
+    const src = "import { publishDataset } from '@snowboard-trip-advisor/schema/node'\nexport { publishDataset }\n"
+    const ids = await violations('apps/public/src/__eslint_fixture__.ts', src)
+    expect(ids).toContain('no-restricted-imports')
+  })
+
+  it('blocks dynamic `import("@snowboard-trip-advisor/schema/node")` from apps/public', async (): Promise<void> => {
+    // Dynamic-import bypass for the `/node` subpath. The
+    // `no-restricted-syntax` regex selector matches both the bare
+    // package specifier and its `/node` subpath; without the regex,
+    // `await import('@snowboard-trip-advisor/schema/node')` would
+    // silently bypass the static-import ban.
+    const src = "export const load = async (): Promise<unknown> => (await import('@snowboard-trip-advisor/schema/node'))\n"
+    const ids = await violations('apps/public/src/__eslint_fixture__.ts', src)
+    expect(ids).toContain('no-restricted-syntax')
+  })
+
+  it('does NOT block `loadResortDataset` from apps/admin via the `/node` subpath (loopback-only, node:fs/promises is fine)', async (): Promise<void> => {
+    // The carve-out for apps/admin must extend to the `/node` subpath
+    // (admin runs on Node and legitimately uses these utilities).
+    const src = "import { loadResortDataset } from '@snowboard-trip-advisor/schema/node'\nexport { loadResortDataset }\n"
+    const ids = await violations('apps/admin/src/__eslint_fixture__.ts', src)
+    expect(ids).not.toContain('no-restricted-imports')
+  })
+
+  it('does NOT block `loadResortDataset` from apps/public test files via the `/node` subpath (run under Node, not bundled)', async (): Promise<void> => {
+    // Same exemption as the package-root case: tests run under Node +
+    // jsdom and never reach the browser bundle. The `/node` subpath
+    // ban must respect the same `*.test.{ts,tsx}` carve-out.
+    const src = "import { loadResortDataset } from '@snowboard-trip-advisor/schema/node'\nexport { loadResortDataset }\n"
+    const ids = await violations('apps/public/src/__eslint_fixture__.test.ts', src)
+    expect(ids).not.toContain('no-restricted-imports')
+  })
 })
