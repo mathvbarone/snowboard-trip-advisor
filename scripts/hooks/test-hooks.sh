@@ -143,6 +143,54 @@ run_test_emits() {
   fi
 }
 
+# run_test_emits_contains <name> <hook> <input> <substring> — exits 0
+# AND stdout contains <substring>. Used to assert worktree-path injection
+# (and absence of injection) for the post-pr-create-reminder hook.
+run_test_emits_contains() {
+  name="$1"
+  hook="$2"
+  input="$3"
+  needle="$4"
+  set +e
+  out="$(printf '%s' "$input" | "$hook" 2>/dev/null)"
+  actual=$?
+  set -e
+  case "$out" in
+    *"$needle"*) found=1 ;;
+    *)           found=0 ;;
+  esac
+  if [ "$actual" = "0" ] && [ "$found" = "1" ]; then
+    PASS=$((PASS + 1))
+  else
+    FAIL=$((FAIL + 1))
+    FAILED_LINES="$FAILED_LINES\n  - $name (expected exit 0 + stdout containing [$needle]; got exit $actual + stdout=[$out])"
+  fi
+}
+
+# run_test_emits_excludes <name> <hook> <input> <substring> — exits 0,
+# stdout is non-empty (i.e. hook fired) AND does NOT contain <substring>.
+# Used to assert v1-fallback when cwd resolution fails.
+run_test_emits_excludes() {
+  name="$1"
+  hook="$2"
+  input="$3"
+  needle="$4"
+  set +e
+  out="$(printf '%s' "$input" | "$hook" 2>/dev/null)"
+  actual=$?
+  set -e
+  case "$out" in
+    *"$needle"*) found=1 ;;
+    *)           found=0 ;;
+  esac
+  if [ "$actual" = "0" ] && [ -n "$out" ] && [ "$found" = "0" ]; then
+    PASS=$((PASS + 1))
+  else
+    FAIL=$((FAIL + 1))
+    FAILED_LINES="$FAILED_LINES\n  - $name (expected exit 0 + non-empty stdout NOT containing [$needle]; got exit $actual + stdout=[$out])"
+  fi
+}
+
 # run_test_silent <name> <hook> <input> — exits 0 AND emits empty stdout.
 run_test_silent() {
   name="$1"
@@ -190,6 +238,53 @@ run_test_silent "post-pr-create: silent — gh pr create no tool_response"      
 # --- silent cases — malformed input ---
 run_test_silent "post-pr-create: silent — empty stdin"                          "$HOOK" ''
 run_test_silent "post-pr-create: silent — malformed JSON"                       "$HOOK" 'not json'
+
+# --- worktree-aware injection cases ---
+# Resolve the current worktree's absolute path from `git worktree list
+# --porcelain`. We use the *current* invocation directory (where this
+# test harness was launched from) as the cwd input — that way the test
+# stays correct whether run from the main checkout or from a worktree.
+# The hook process inherits CLAUDE_PROJECT_DIR explicitly so it consults
+# the same git worktree list we just queried.
+PROJECT_DIR="$(pwd)"
+export CLAUDE_PROJECT_DIR="$PROJECT_DIR"
+SELF_WORKTREE="$(git -C "$PROJECT_DIR" rev-parse --show-toplevel)"
+
+# Build a synthetic JSON payload with cwd set to the current worktree.
+# `printf` is the portable way to emit a string with a single embedded
+# variable; we construct the JSON inline below.
+WT_PAYLOAD_MATCH='{"cwd":"'"$SELF_WORKTREE"'","tool_input":{"command":"gh pr create"},"tool_response":{"stdout":"'"$PR_URL_OK"'"}}'
+WT_PAYLOAD_NESTED='{"cwd":"'"$SELF_WORKTREE/scripts/hooks"'","tool_input":{"command":"gh pr create"},"tool_response":{"stdout":"'"$PR_URL_OK"'"}}'
+WT_PAYLOAD_OUTSIDE='{"cwd":"/tmp/definitely-not-a-worktree","tool_input":{"command":"gh pr create"},"tool_response":{"stdout":"'"$PR_URL_OK"'"}}'
+WT_PAYLOAD_NO_CWD='{"tool_input":{"command":"gh pr create"},"tool_response":{"stdout":"'"$PR_URL_OK"'"}}'
+
+run_test_emits_contains \
+  "post-pr-create: injects worktree path when cwd matches" \
+  "$HOOK" "$WT_PAYLOAD_MATCH" "worktree at $SELF_WORKTREE"
+run_test_emits_contains \
+  "post-pr-create: injects worktree path when cwd is nested inside worktree" \
+  "$HOOK" "$WT_PAYLOAD_NESTED" "worktree at $SELF_WORKTREE"
+run_test_emits_excludes \
+  "post-pr-create: falls back to v1 when cwd is outside any worktree" \
+  "$HOOK" "$WT_PAYLOAD_OUTSIDE" "worktree at /"
+run_test_emits_excludes \
+  "post-pr-create: falls back to v1 when cwd field is missing" \
+  "$HOOK" "$WT_PAYLOAD_NO_CWD" "worktree at /"
+
+# Latency SLO: hook must complete in well under 500ms (no network calls;
+# only one synchronous `git worktree list --porcelain` exec). Use perl
+# for sub-second portability across BSD/GNU date.
+SLO_INPUT='{"cwd":"'"$SELF_WORKTREE"'","tool_input":{"command":"gh pr create"},"tool_response":{"stdout":"'"$PR_URL_OK"'"}}'
+START_MS="$(perl -MTime::HiRes=time -e 'printf "%d\n", time()*1000')"
+printf '%s' "$SLO_INPUT" | "$HOOK" >/dev/null 2>&1
+END_MS="$(perl -MTime::HiRes=time -e 'printf "%d\n", time()*1000')"
+ELAPSED_MS=$((END_MS - START_MS))
+if [ "$ELAPSED_MS" -lt 500 ]; then
+  PASS=$((PASS + 1))
+else
+  FAIL=$((FAIL + 1))
+  FAILED_LINES="$FAILED_LINES\n  - post-pr-create: latency SLO <500ms (took ${ELAPSED_MS}ms)"
+fi
 
 # ---------- summary ----------
 printf '\nHook tests: %d passed, %d failed\n' "$PASS" "$FAIL"
