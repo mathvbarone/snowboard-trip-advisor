@@ -80,3 +80,42 @@ describe('eslint branded-type discipline', (): void => {
     expect(ids).toContain('no-restricted-syntax')
   })
 })
+
+describe('eslint apps/public bundle-safety discipline (PR 3.1a)', (): void => {
+  it('blocks `loadResortDataset` named import from apps/public', async (): Promise<void> => {
+    // The path-taking variant pulls node:fs/promises in transitively; the
+    // browser-safe `loadResortDatasetFromObject` (lands in PR 3.1c) is the
+    // intended entry point for apps/public.
+    const src = "import { loadResortDataset } from '@snowboard-trip-advisor/schema'\nexport { loadResortDataset }\n"
+    const ids = await violations('apps/public/src/__eslint_fixture__.ts', src)
+    expect(ids).toContain('no-restricted-imports')
+  })
+
+  it('allows `loadResortDatasetFromObject` named import from apps/public', async (): Promise<void> => {
+    // Forward-looking assertion: PR 3.1c adds loadResortDatasetFromObject as
+    // the browser-safe replacement. The ban must NOT cover it; this fixture
+    // pins that distinction so a future regression can't widen the rule.
+    const src = "import { loadResortDatasetFromObject } from '@snowboard-trip-advisor/schema'\nexport { loadResortDatasetFromObject }\n"
+    const ids = await violations('apps/public/src/__eslint_fixture__.ts', src)
+    expect(ids).not.toContain('no-restricted-imports')
+  })
+
+  it('does NOT block `loadResortDataset` from apps/admin (loopback-only, node:fs/promises is fine)', async (): Promise<void> => {
+    // apps/admin runs on 127.0.0.1 with full Node access; it can use the path-taking variant.
+    const src = "import { loadResortDataset } from '@snowboard-trip-advisor/schema'\nexport { loadResortDataset }\n"
+    const ids = await violations('apps/admin/src/__eslint_fixture__.ts', src)
+    expect(ids).not.toContain('no-restricted-imports')
+  })
+
+  it('does NOT block `loadResortDataset` from apps/public test files (run under Node, not bundled)', async (): Promise<void> => {
+    // Vitest tests run under Node + jsdom; the bundle-safety motivation does not
+    // apply. PR 3.1c migrates the existing test to loadResortDatasetFromObject;
+    // until then the exemption keeps the rule landable without churn.
+    // Filename uses the `__eslint_fixture__.test.ts` sentinel: matches the
+    // flat-config's type-checking-disabled fixture block AND the bundle-safety
+    // rule's *.test.{ts,tsx} `ignores` glob.
+    const src = "import { loadResortDataset } from '@snowboard-trip-advisor/schema'\nexport { loadResortDataset }\n"
+    const ids = await violations('apps/public/src/__eslint_fixture__.test.ts', src)
+    expect(ids).not.toContain('no-restricted-imports')
+  })
+})
