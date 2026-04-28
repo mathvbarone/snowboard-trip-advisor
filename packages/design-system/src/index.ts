@@ -37,3 +37,4 @@ export {
   FieldValueRenderer,
   type FieldValueRendererProps,
 } from './components/FieldValueRenderer'
+export { HeaderBar, type HeaderBarProps } from './components/HeaderBar'
