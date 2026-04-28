@@ -98,6 +98,35 @@ describe('filterViews', (): void => {
   it('combines country filter and price bucket', (): void => {
     expect(filterViews([A, B, C], ['PL', 'AT'], 'hi').map((v): string => v.slug)).toEqual(['c'])
   })
+
+  // Stale-URL guard: if a shared link carries a country code that's not
+  // present in the current dataset (e.g. `?country=DE` against a PL-only
+  // dataset, or any 1-country deployment that hides the chip group), the
+  // filter must silently no-op so the grid is not empty with no in-UI
+  // control to clear it. Valid values in the URL still filter normally.
+  it('silently no-ops when every URL country is absent from the dataset', (): void => {
+    // Dataset is PL + CZ; URL says ?country=DE — DE has no chip to clear.
+    expect(
+      filterViews([A, B], ['DE'], 'any').map((v): string => v.slug),
+    ).toEqual(['a', 'b'])
+  })
+
+  it('silently no-ops when every URL country is absent (single-country dataset)', (): void => {
+    // Single-country dataset (chip group hidden); URL still carries a
+    // mismatch like ?country=PL. Without this guard the grid would be
+    // empty.
+    expect(
+      filterViews([B], ['PL'], 'any').map((v): string => v.slug),
+    ).toEqual(['b'])
+  })
+
+  it('intersects URL countries with dataset countries (mixed valid + invalid)', (): void => {
+    // Dataset is PL + CZ + AT; URL says DE + PL — only PL is valid, and
+    // only PL views survive.
+    expect(
+      filterViews([A, B, C, D], ['DE', 'PL'], 'any').map((v): string => v.slug),
+    ).toEqual(['a', 'd'])
+  })
 })
 
 describe('sortViews', (): void => {

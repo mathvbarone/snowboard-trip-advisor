@@ -170,13 +170,15 @@ describe('CardsView', (): void => {
     ).toBeInTheDocument()
   })
 
-  it('renders an empty grid when the country filter excludes every resort', async (): Promise<void> => {
+  it('silently no-ops a stale ?country= URL whose code is absent from the dataset', async (): Promise<void> => {
     // 'XX' is a syntactically valid ISO-2 string per CountrySchema and is
-    // therefore preserved through parseURL — it just matches no seed resort,
-    // exercising the empty-grid branch (zero cards).
+    // preserved through parseURL, but no seed resort uses it. With the
+    // stale-URL guard in filterViews, a country code that doesn't match
+    // any view in the dataset is treated as a no-op so the grid is never
+    // empty with no in-UI control to clear (chips for XX would not exist).
     setLocation('country=XX')
     await renderCardsView()
-    expect(screen.queryAllByRole('heading', { level: 2 })).toHaveLength(0)
+    expect(screen.queryAllByRole('heading', { level: 2 })).toHaveLength(2)
   })
 
   it('price-bucket Select filters cards by lift_pass_day amount (private filter UX)', async (): Promise<void> => {
