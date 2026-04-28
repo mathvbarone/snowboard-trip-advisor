@@ -187,6 +187,28 @@ describe('validatePublishedDataset (Epic 2 PR 2.2)', (): void => {
     expect(result.ok).toBe(true)
   })
 
+  it('rejects empty resorts array with ONLY a dataset_empty issue (PR 3.1a)', (): void => {
+    // PR 3.1a tightens PublishedDataset.resorts to .min(1). Validator surfaces the
+    // failure as a typed `dataset_empty` ValidationIssue and DROPS the redundant
+    // `zod_parse_failed` for this specific case — the only Zod failure is the one
+    // the typed code already names. Callers branch on the typed code; the raw Zod
+    // report would only repeat what the typed code already says.
+    //
+    // This contract narrowed in the post-review fold: pre-fold the validator emitted
+    // BOTH `dataset_empty` and `zod_parse_failed`; the dual emission was more complex
+    // than the plan called for (plan §7.5: "emit `dataset_empty` (not opaque
+    // `zod_parse_failed`)" — REPLACE, not augment). Other Zod failures (missing
+    // fields, type mismatches) still emit `zod_parse_failed` unchanged.
+    const mutated = structuredClone(fixture) as { resorts: unknown[]; manifest: { resort_count: number } }
+    mutated.resorts = []
+    mutated.manifest.resort_count = 0
+    const result = validatePublishedDataset(mutated)
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.issues).toEqual([{ code: 'dataset_empty' }])
+    }
+  })
+
   // Note: a `fx_provenance_required` test does NOT exist in Phase 1. Per ai-clean-code-adherence
   // audit, KNOWN_NON_EUR_SOURCES + the enforcement branch are deferred to Epic 5 PR 5.x. Epic 5
   // adds the test alongside the first non-EUR adapter.

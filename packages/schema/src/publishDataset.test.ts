@@ -9,12 +9,47 @@ import { PublishedDataset } from './published'
 
 let root: string
 
+// One-resort minimum fixture: PR 3.1a tightens PublishedDataset to
+// `resorts.min(1)`. publishDataset runs the full validatePublishedDataset
+// pipeline, which enforces METRIC_FIELDS coverage — so the resort needs a
+// field_sources entry per durable metric path.
+const SOURCE = {
+  source: 'manual',
+  source_url: 'https://bialkatatrzanska.pl/en/',
+  observed_at: '2026-04-26T08:00:00Z',
+  fetched_at: '2026-04-26T08:00:00Z',
+  attribution_block: { en: 'Source: manual seed.' },
+} as const
+
+const validResort = {
+  schema_version: 1,
+  slug: 'kotelnica-bialczanska',
+  name: { en: 'Kotelnica Białczańska' },
+  country: 'PL',
+  region: { en: 'Białka Tatrzańska, Tatra Mountains' },
+  altitude_m: { min: 770, max: 920 },
+  slopes_km: 8,
+  lift_count: 7,
+  skiable_terrain_ha: 40,
+  season: { start_month: 12, end_month: 4 },
+  publish_state: 'published',
+  field_sources: {
+    'altitude_m.min': { ...SOURCE, upstream_hash: '0000000000000000000000000000000000000000000000000000000000000001' },
+    'altitude_m.max': { ...SOURCE, upstream_hash: '0000000000000000000000000000000000000000000000000000000000000002' },
+    'slopes_km': { ...SOURCE, upstream_hash: '0000000000000000000000000000000000000000000000000000000000000003' },
+    'lift_count': { ...SOURCE, upstream_hash: '0000000000000000000000000000000000000000000000000000000000000004' },
+    'skiable_terrain_ha': { ...SOURCE, upstream_hash: '0000000000000000000000000000000000000000000000000000000000000005' },
+    'season.start_month': { ...SOURCE, upstream_hash: '0000000000000000000000000000000000000000000000000000000000000006' },
+    'season.end_month': { ...SOURCE, upstream_hash: '0000000000000000000000000000000000000000000000000000000000000007' },
+  },
+} as const
+
 const validDataset = {
   schema_version: 1,
   published_at: '2026-04-26T08:00:00Z',
-  resorts: [],
+  resorts: [validResort],
   live_signals: [],
-  manifest: { resort_count: 0, generated_by: 'test', validator_version: 'test' },
+  manifest: { resort_count: 1, generated_by: 'test', validator_version: 'test' },
 } as const
 
 beforeEach(async (): Promise<void> => {
