@@ -13,3 +13,4 @@ export {
   type SelectProps,
   type SelectOption,
 } from './components/Select'
+export { Input, type InputProps, type InputType } from './components/Input'
