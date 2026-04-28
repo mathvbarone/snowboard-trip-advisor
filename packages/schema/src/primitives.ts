@@ -23,12 +23,28 @@ export type AdapterSourceKey = z.infer<typeof AdapterSourceKey>
 export const SourceKey = z.enum(['opensnow', 'resort-feed', 'booking', 'airbnb', 'snowforecast', 'manual'])
 export type SourceKey = z.infer<typeof SourceKey>
 
+// PR 2.2 (ADR-0003): FX provenance for non-Eurozone Money fields. The fx sub-object is OPTIONAL on
+// FieldSource because (a) EUR-native upstreams legitimately omit it, and (b) Phase 1 manual fixtures
+// MAY include it for transparency but aren't forced to. Conditional enforcement (presence required
+// when source is in KNOWN_NON_EUR_SOURCES) is deferred to Epic 5 PR 5.x per the ai-clean-code-adherence
+// audit — Phase 1 has zero non-EUR adapter sources, so the table + validator branch ship together
+// alongside the first real adapter.
+export const FxProvenance = z.object({
+  source: z.literal('ecb-reference-rate'),                  // Phase 1: ECB only; widening = schema_version bump
+  observed_at: ISODateTimeString,                           // ECB rates publish ~16:00 CET end-of-day TARGET
+  rate: z.number().nonnegative(),                           // EUR per native unit
+  native_amount: z.number().nonnegative(),                  // amount in native currency
+  native_currency: z.enum(['PLN', 'CZK', 'CHF', 'GBP', 'NOK', 'SEK', 'DKK', 'HUF', 'RON', 'BGN']),
+})
+export type FxProvenance = z.infer<typeof FxProvenance>
+
 export const FieldSource = z.object({
   source: SourceKey,
   source_url: z.string().regex(/^https:/),
   observed_at: ISODateTimeString,
   fetched_at: ISODateTimeString,
   upstream_hash: UpstreamHash,
-  attribution_block: LocalizedString
+  attribution_block: LocalizedString,
+  fx: FxProvenance.optional(),                              // ADR-0003
 })
 export type FieldSource = z.infer<typeof FieldSource>

@@ -11,10 +11,15 @@ import {
   AdapterSourceKey,
   SourceKey,
   FieldSource,
+  FxProvenance,
   METRIC_FIELDS,
   Resort,
   ResortLiveSignal,
-  PublishedDataset
+  PublishedDataset,
+  validatePublishedDataset,
+  publishDataset,
+  loadResortDataset,
+  FRESHNESS_TTL_DAYS,
 } from './index'
 
 describe('package barrel (index.ts)', (): void => {
@@ -35,5 +40,10 @@ describe('package barrel (index.ts)', (): void => {
     expect(Resort).toBeDefined()
     expect(ResortLiveSignal).toBeDefined()
     expect(PublishedDataset).toBeDefined()
+    expect(FxProvenance).toBeDefined()
+    expect(validatePublishedDataset).toBeDefined()
+    expect(publishDataset).toBeDefined()
+    expect(loadResortDataset).toBeDefined()
+    expect(FRESHNESS_TTL_DAYS).toBeDefined()
   })
 })

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { Money, LocalizedString, FieldSource, PublishState, SourceKey, AdapterSourceKey } from './primitives'
+import { Money, LocalizedString, FieldSource, PublishState, SourceKey, AdapterSourceKey, FxProvenance } from './primitives'
 
 describe('Money', (): void => {
   it('parses { amount: number, currency: "EUR" }', (): void => {
@@ -50,6 +50,72 @@ describe('SourceKey', (): void => {
   )
   it('rejects unknown sources', (): void => {
     expect(() => SourceKey.parse('weatherchannel')).toThrow()
+  })
+})
+
+describe('FxProvenance (PR 2.2)', (): void => {
+  const validFx = {
+    source: 'ecb-reference-rate' as const,
+    observed_at: '2026-04-26T16:00:00Z',
+    rate: 0.231,
+    native_amount: 220,
+    native_currency: 'PLN' as const,
+  }
+
+  it('parses a valid FX provenance block', (): void => {
+    expect(FxProvenance.parse(validFx)).toEqual(validFx)
+  })
+
+  it('rejects unknown native currencies (Phase 1 enum is finite)', (): void => {
+    expect(() => FxProvenance.parse({ ...validFx, native_currency: 'USD' })).toThrow()
+  })
+
+  it('rejects unknown FX source (Phase 1 = ECB reference rate only)', (): void => {
+    expect(() => FxProvenance.parse({ ...validFx, source: 'oanda' })).toThrow()
+  })
+
+  it('rejects negative rate', (): void => {
+    expect(() => FxProvenance.parse({ ...validFx, rate: -0.1 })).toThrow()
+  })
+
+  it('rejects negative native_amount', (): void => {
+    expect(() => FxProvenance.parse({ ...validFx, native_amount: -10 })).toThrow()
+  })
+})
+
+describe('FieldSource.fx (PR 2.2)', (): void => {
+  const baseFs = {
+    source: 'manual' as const,
+    source_url: 'https://example.com/x',
+    observed_at: '2026-04-26T08:00:00Z',
+    fetched_at: '2026-04-26T08:00:01Z',
+    upstream_hash: 'a'.repeat(64),
+    attribution_block: { en: 'Source: example' },
+  }
+
+  it('parses without fx (FieldSource.fx is optional)', (): void => {
+    expect(FieldSource.parse(baseFs)).toEqual(baseFs)
+  })
+
+  it('parses with a valid fx sub-object', (): void => {
+    const withFx = {
+      ...baseFs,
+      fx: {
+        source: 'ecb-reference-rate',
+        observed_at: '2026-04-26T16:00:00Z',
+        rate: 0.231,
+        native_amount: 220,
+        native_currency: 'PLN',
+      },
+    }
+    expect(FieldSource.parse(withFx)).toMatchObject({ fx: { native_currency: 'PLN' } })
+  })
+
+  it('rejects an invalid fx sub-object', (): void => {
+    expect(() => FieldSource.parse({
+      ...baseFs,
+      fx: { source: 'oanda', observed_at: '2026-04-26T16:00:00Z', rate: 0.231, native_amount: 220, native_currency: 'PLN' },
+    })).toThrow()
   })
 })
 

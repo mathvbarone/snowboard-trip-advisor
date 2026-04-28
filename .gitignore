@@ -24,3 +24,7 @@ packages/*/dist/
 packages/*/coverage/
 tests/integration/dist/
 tests/integration/coverage/
+
+# publishDataset transient files
+data/published/.archive-counter.lock
+data/published/.*.tmp.*

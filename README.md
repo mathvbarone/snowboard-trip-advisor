@@ -2,7 +2,7 @@
 
 A **data-transparency comparison tool** for European ski resorts, built for a snowboard trip organizer choosing resorts for a group. The product surfaces durable resort facts and live market signals **side-by-side with visible source provenance** (source, `observed_at`, `fetched_at`) and lets the organizer rank the shortlist themselves. It does not compute an overall score.
 
-Phase 1 is a local, filesystem-only build with ~5 seed resorts. Phase 2 extends it toward multi-operator deployments. Booking stays external.
+Phase 1 is a local, filesystem-only build with two seed resorts. Phase 2 extends it toward multi-operator deployments. Booking stays external.
 
 ## What this is NOT
 
@@ -46,6 +46,8 @@ Two document types, separated because their freshness and validation rules diffe
 - **`ResortLiveSignal`** (volatile): snow_depth_cm, lifts_open, lift_pass_day (EUR), forecast, lodging sample. Each value carries `observed_at` and `fetched_at`; stale values render as "—" with a tooltip.
 
 Every metric field has a matching `field_sources` entry carrying `source`, `source_url`, `observed_at`, `fetched_at`, `upstream_hash`, and an attribution block. `validatePublishedDataset` enforces that coverage at publish time.
+
+The Phase 1 seed dataset ships two resorts: **Kotelnica Białczańska** (`kotelnica-bialczanska`, Poland, prices natively in PLN) and **Špindlerův Mlýn** (`spindleruv-mlyn`, Czech Republic, prices natively in CZK). Because both resorts are EU but neither uses the euro, every Money-typed field carries an additional `fx` sub-object on its `FieldSource` recording the ECB reference rate used to convert into EUR — see [ADR-0003](docs/adr/0003-fx-conversion-at-adapter-boundary.md) for rationale and the validator-enforced shape.
 
 ## Current state today
 
