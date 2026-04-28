@@ -56,8 +56,11 @@ Where this spec deviates from `2026-04-22-product-pivot-design.md`, the divergen
 | §2.1 `&sort=price_asc|price_desc|name` | three sort keys | adds `snow_depth_desc` (4 keys) | Locked decision #3; trip-planning-fit sort is high-value at near-zero implementation cost |
 | §2.4 "drawer and modal overlays use `inert` on background content" | `inert` for both | Drawer is **non-modal**; background stays mouse-clickable; `inert` does NOT apply to drawer | Locked decision #1 (drawer overlay) implies the user can still interact with cards behind; `Modal` retains `inert`/focus-trap |
 | §6.4 component inventory | hand-built + Radix primitives | Same overall, but `<Dialog>` split into `<Modal>` + `<Drawer>` (separate primitives) | Section-4 frontend reviewer P0 — Radix `Dialog` is modal-only; non-modal drawer needs `FocusScope` + `DismissableLayer` directly |
-| §9 PR 3.1 | one PR | split into 3.1a / 3.1b / 3.1c | 100% coverage gate makes a single PR unreviewable at the original scope; sub-split halves the rebase blast radius |
+| §9 PR 3.1 | one PR | 1→3 split of PR 3.1 into 3.1a / 3.1b / 3.1c (total 6→8 PRs) | 100% coverage gate makes a single PR unreviewable at the original scope; sub-split halves the rebase blast radius |
 | §9 PR 3.5 | "Detail route: durable + live panels..." | "Detail drawer body" | Same content; route → drawer per locked decision #1 |
+| §9 PR 2.2 (validator) | `validatePublishedDataset` exists; no min-cardinality rule on `resorts` | `resorts: z.array(...).min(1)` emitting `dataset_empty` issue code (lands in PR 3.1a) | Empty published dataset is a publishing bug, not a render-time mystery; named issue code lets Epic 4 admin render a useful message |
+| §2.1 routing | implicit (parent spec doesn't prescribe `popstate` vs subscriber pattern) | `useSyncExternalStore` + module-scoped `Set<() => void>` pubsub + `popstate` listener | Section-2 frontend reviewer P0 — pure `popstate` is insufficient because programmatic `pushState`/`replaceState` doesn't fire it; module-scoped pubsub avoids global event-name collision |
+| §2.4 share URL | "fallback modal for unsupported browsers" (no implementation guidance) | `<Modal>`-based clipboard fallback with copyable `<input>` (PR 3.3) | New addition — parent spec mandates the affordance, not the implementation; called out so future readers don't dismiss the dialog as out-of-scope |
 
 ---
 
@@ -186,7 +189,7 @@ Root `package.json` adds `engines: { "node": ">=20.11" }` (PR 3.1a) — required
 
 When `&detail=<slug>` is present:
 - Drawer renders over whichever `view` is active.
-- On `view=matrix` + viewport `<lg`: a CSS rule downgrades the matrix layout to single-column cards under the drawer (matrix at <30% width is unreadable).
+- On `view=matrix` + viewport `<lg` (1280): a CSS rule downgrades the matrix layout to single-column cards under the drawer (matrix at <30% width is unreadable). **Distinct from the `<md` (900) matrix-redirect** — at viewports `<md`, matrix is replaced by a redirect message regardless of `&detail=`; the `<lg` rule applies only when `&detail=` is set in the `md ≤ viewport < lg` band.
 - Closing the drawer removes the key via `pushState` so back closes it.
 - Slug-existence: `App.tsx` gates the drawer on `slugs.has(url.detail)`; missing slugs surface in the dropped-slugs banner.
 
@@ -481,6 +484,8 @@ The `default` re-export from `views/detail.tsx` is what `lazy()` consumes; PR 3.
 
 **Test coverage on the stub-throw line** (PR 3.1c): `views/detail.test.tsx` calls `expect(() => render(<DetailDrawer slug={someSlug} />)).toThrow('detail route stub — lands in PR 3.5')`. The throw line is covered immediately at 100%; PR 3.5's body replaces the throw and ships its own happy-path test in the same file.
 
+**Extension rule (PR 3.5).** PR 3.5 may *extend* `DetailDrawerProps` with **optional** props only (e.g. `onClose?`). Adding required props breaks the freeze and forces a synchronized update across PR 3.1c, 3.2 (ResortCard's drawer-trigger composition), and any other intervening consumer. If PR 3.5 finds a required-prop need, it triggers a follow-up amendment to this spec rather than a silent widening.
+
 ### 5.6 Q1 — price filter
 
 Bucketed `<Select>` with three options (`≤€40 / €40–80 / €80+`). Mini-ADR inside ADR-0004: *"revisit when N≥10 resorts and price variance >€20"*. No slider in Phase 1.
@@ -587,7 +592,10 @@ upgrade-insecure-requests
 - `apps/public/src/test-setup.ts`:
   - `vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: noop, removeEventListener: noop, ... }))`.
   - `expect.extend({ toHaveNoViolations })` from `jest-axe` (ADR-0007).
-  - MSW lifecycle: `beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))` + `afterEach(() => server.resetHandlers())` + `afterAll(() => server.close())`.
+  - MSW lifecycle:
+    - `beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))`
+    - `afterEach(() => { server.resetHandlers(); server.events.removeAllListeners() })` — request-log isolation alongside handler isolation (see §10.6).
+    - `afterAll(() => server.close())`.
   - `afterEach(() => __resetForTests())` for the `useDataset` singleton.
 - Unit per-component / per-hook with `jest-axe` per state (default + hover + focus + open/expanded + disabled).
 - Integration: `tests/integration/apps/public/*.test.ts` for route-composition focus-order + axe + e2e flows. Lit up in PR 3.6.
@@ -700,7 +708,7 @@ CODEOWNER review request order: `3.1a → 3.1b → 3.1c`, then concurrent group,
 
 - *Tests added:*
   - `config/csp.test.ts` — both modes (dev includes `ws://localhost:*`, `wss://localhost:*`, `http://localhost:*` in `connect-src` and `'nonce-{nonce}'` in `script-src`; prod excludes all of these). Both branches assert the full directive list (`default-src`, `img-src`, `font-src`, `connect-src`, `script-src`, `style-src 'self' 'unsafe-inline'`, `frame-ancestors 'none'`, `base-uri`, `form-action`, `upgrade-insecure-requests`).
-  - `apps/public/src/lib/datasetPlugin.test.ts` — `serveDatasetMiddleware` happy + ENOENT; `copyDataset` against tmpdir.
+  - `apps/public/src/lib/datasetPlugin.test.ts` — `serveDatasetMiddleware` happy + ENOENT; asserts `Content-Type: application/json; charset=utf-8` on success (matches the Epic-6 nginx contract per §10.2 — dev/prod must agree); `copyDataset` against tmpdir.
   - `apps/public/src/lib/csp.test.ts` — `generateNonce` purity (uses `crypto.getRandomValues`, distinct values across calls), `injectNonce` purity (same input → identical output).
   - `apps/public/src/__tests__/cspDevPlugin.test.ts` — middleware invoked twice, asserts `Content-Security-Policy` `script-src 'nonce-...'` differs across requests.
   - `apps/public/src/lib/injectFontPreloads.test.ts` — pure; appends N `<link>` tags with correct attributes.
@@ -761,7 +769,7 @@ CODEOWNER review request order: `3.1a → 3.1b → 3.1c`, then concurrent group,
   - `packages/design-system/src/components/{Button,IconButton,Input,Select,Chip,Pill,Card,SourceBadge,FieldValueRenderer}.test.tsx` — variant matrix + axe per state.
   - `packages/design-system/src/icons/{sources,ui}/*.test.tsx` — `currentColor` assertion + size-prop test.
   - `packages/design-system/src/primitives/Tooltip.test.tsx`.
-  - `apps/public/src/views/{cards,ResortCard,Hero,FilterBar}.test.tsx` — composition + axe; FilterBar country chip hidden on ≤1 country; ResortCard CTA carries `rel="noopener noreferrer"` + `referrerpolicy="no-referrer"`; ResortCard's star `<IconButton>` carries `data-detail-trigger="<slug>"` per the §5.5 frozen-interface contract.
+  - `apps/public/src/views/{cards,ResortCard,Hero,FilterBar}.test.tsx` — composition + axe; **FilterBar country chip hidden on ≤1 country exercised with an in-test single-country fixture** (the seed dataset has 2 countries; the chip-hidden branch wouldn't otherwise be reachable for 100% coverage); ResortCard CTA carries `rel="noopener noreferrer"` + `referrerpolicy="no-referrer"`; ResortCard's star `<IconButton>` carries `data-detail-trigger="<slug>"` per the §5.5 frozen-interface contract.
 - *Implementation:*
   - All design-system components and icons named in tests above.
   - `packages/design-system/src/primitives/Tooltip.tsx`.
@@ -932,15 +940,17 @@ if (import.meta.hot) {
 }
 ```
 
-at the bottom of `state/useDataset.ts`. Coverage-excluded with rationale (`import.meta.hot` is undefined in vitest; the line is a dev-only safety net, not a runtime branch).
+at the bottom of `state/useDataset.ts`. The 3-line `import.meta.hot` block is added to `apps/public/vite.config.ts`'s `coverage.exclude` list with the rationale: `// state/useDataset.ts HMR-only branch — import.meta.hot undefined in vitest; dev-only safety net, not a runtime branch`.
 
 ### 10.5 URL-state setters and React 19 `startTransition`
 
-`setURLState` (§3.7) writes `history.pushState` / `replaceState` synchronously inside event handlers. **It must never be invoked inside `startTransition`** because the synchronous DOM write would race the deferred render. Documented as a JSDoc warning on `setURLState`; an ESLint `no-restricted-syntax` rule could enforce this in a Phase-2 hardening pass (deferred — single-call-site discipline suffices in Phase 1).
+`setURLState` (§3.7) writes `history.pushState` / `replaceState` synchronously inside event handlers. **It must never be invoked inside `startTransition`** because the synchronous DOM write would race the deferred render. Documented as a JSDoc `@warning` block on `setURLState`. `useURLState.test.ts` reads the source text and asserts the `@warning` block is present (so the discipline note doesn't silently rot if the JSDoc is later edited away). An ESLint `no-restricted-syntax` rule that mechanically enforces the rule is deferred to a Phase-2 hardening pass — single-call-site discipline suffices in Phase 1.
 
 ### 10.6 MSW default handler
 
 `apps/public/src/mocks/server.ts` ships a default handler for `GET /data/current.v1.json` that responds with the seed fixture (the same JSON file at `data/published/current.v1.json`, read at test-server-startup time). Tests override per-suite via `server.use(http.get(...))` for failure-mode scenarios. Without the default handler, `onUnhandledRequest: 'error'` would fail every test that doesn't mock the dataset fetch.
+
+**Request-log isolation.** Tests that assert on MSW request counts (e.g. `dataset.test.ts`'s contamination regression — §7.7) must see independent counts per test. `apps/public/src/test-setup.ts`'s `afterEach` therefore calls **both** `server.resetHandlers()` (handler isolation) **and** `server.events.removeAllListeners()` (request-log isolation), in addition to `__resetForTests()` for the `useDataset` singleton.
 
 ### 10.7 Bundle-fail mode for emitted preload hrefs
 
