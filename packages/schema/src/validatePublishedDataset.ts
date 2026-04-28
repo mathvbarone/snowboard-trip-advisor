@@ -1,7 +1,7 @@
 import type { ResortLiveSignal } from './liveSignal'
 import type { MetricPath } from './metricFields'
 import type { FieldSource } from './primitives'
-import { PublishedDataset } from './published'
+import { EMPTY_DATASET_ZOD_MESSAGE, PublishedDataset } from './published'
 import type { Resort } from './resort'
 
 export type ValidationIssue =
@@ -42,7 +42,7 @@ export function validatePublishedDataset(input: unknown): ValidationResult {
     // the stable code, while callers that want the raw Zod report still get `zod_parse_failed`
     // with the full `zod_issues` array for debugging.
     const isDatasetEmpty = parse.error.issues.some(
-      (i): boolean => i.message === 'dataset_empty' && i.path[0] === 'resorts',
+      (i): boolean => i.message === EMPTY_DATASET_ZOD_MESSAGE && i.path[0] === 'resorts',
     )
     if (isDatasetEmpty) {
       issues.push({ code: 'dataset_empty' })
