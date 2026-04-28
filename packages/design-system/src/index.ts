@@ -29,3 +29,7 @@ export { CloseGlyph } from './icons/ui/close'
 export { InfoGlyph } from './icons/ui/info'
 export { ChevronDownGlyph } from './icons/ui/chevron-down'
 export { Tooltip, type TooltipProps } from './primitives/Tooltip'
+export {
+  SourceBadge,
+  type SourceBadgeProps,
+} from './components/SourceBadge'
