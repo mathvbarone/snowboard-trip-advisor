@@ -31,6 +31,16 @@ export function validatePublishedDataset(input: unknown): ValidationResult {
     // PR 3.1a: surface the resorts.min(1) failure as a typed `dataset_empty` issue so callers
     // can branch without matching on Zod path/message internals. The schema tags the rule with
     // message 'dataset_empty'; we detect by exact-message equality on a path that targets resorts.
+    //
+    // Emission ordering contract: when the dataset is empty, this function emits BOTH a
+    // `dataset_empty` issue AND a `zod_parse_failed` issue, in that order. `dataset_empty` is
+    // pushed FIRST so `issues[0].code === 'dataset_empty'` is reliable for the empty-dataset
+    // case, but consumers SHOULD prefer `issues.some((i) => i.code === 'dataset_empty')` over
+    // positional indexing to stay forward-compatible with future issue codes that may be
+    // co-emitted alongside `zod_parse_failed` (e.g. additional typed surfacings of specific
+    // Zod failures). The dual emission is intentional: callers that want the typed branch get
+    // the stable code, while callers that want the raw Zod report still get `zod_parse_failed`
+    // with the full `zod_issues` array for debugging.
     const isDatasetEmpty = parse.error.issues.some(
       (i): boolean => i.message === 'dataset_empty' && i.path[0] === 'resorts',
     )
