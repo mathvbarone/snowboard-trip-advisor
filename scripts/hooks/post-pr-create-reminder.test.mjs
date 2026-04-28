@@ -244,6 +244,47 @@ test('resolveWorktree: trailing slash on cwd treated as path equality', () => {
   assert.equal(result, '/Users/x/repo/.worktrees/feat')
 })
 
+test('resolveWorktree: porcelain block with no `worktree` line is skipped (defensive)', () => {
+  // Defensive shape: a block that only carries HEAD/branch lines (no
+  // `worktree <path>` header). Real git would never emit this, but the
+  // parser must skip it without crashing.
+  const porcelain = `HEAD aaaa
+branch refs/heads/orphan
+
+worktree /Users/x/repo
+HEAD bbbb
+branch refs/heads/main
+`
+  assert.equal(
+    resolveWorktree('/Users/x/repo', porcelain, { platform: 'linux' }),
+    '/Users/x/repo',
+  )
+})
+
+test('resolveWorktree: porcelain without trailing blank line still parses last block', () => {
+  // No trailing newline-blank — exercises the post-loop flush in
+  // parsePorcelainBlocks.
+  const porcelain = 'worktree /Users/x/repo\nHEAD a\nbranch refs/heads/main'
+  assert.equal(
+    resolveWorktree('/Users/x/repo', porcelain, { platform: 'linux' }),
+    '/Users/x/repo',
+  )
+})
+
+test('resolveWorktree: nonexistent paths fall back to resolve() (no realpath)', () => {
+  // Both cwd and worktree paths point at directories that don't exist on
+  // the test host. realpathSync throws ENOENT; the resolver must catch
+  // and compare via path.resolve. The match still succeeds because both
+  // sides resolve to the same absolute string.
+  const porcelain = 'worktree /this/does/not/exist/repo\nHEAD a\nbranch refs/heads/x\n'
+  const result = resolveWorktree(
+    '/this/does/not/exist/repo/sub',
+    porcelain,
+    { platform: 'linux' },
+  )
+  assert.equal(result, '/this/does/not/exist/repo')
+})
+
 test('resolveWorktree: symlink resolution via realpath (darwin and linux)', () => {
   const tmpRoot = mkdtempSync(join(tmpdir(), 'pp-create-symlink-test-'))
   try {
