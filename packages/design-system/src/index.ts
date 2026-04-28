@@ -3,4 +3,4 @@ export * from './format'                       // PR 3.1c: destructured-primitiv
 export { Shell } from './components/Shell'    // PR 3.1c
 export { Skeleton, type SkeletonVariant } from './components/Skeleton'
 export { EmptyStateLayout } from './components/EmptyStateLayout'
-export { Button, type ButtonProps } from './components/Button'
+export { Button, type ButtonProps, type ButtonVariant } from './components/Button'
