@@ -187,6 +187,20 @@ describe('validatePublishedDataset (Epic 2 PR 2.2)', (): void => {
     expect(result.ok).toBe(true)
   })
 
+  it('rejects empty resorts array with dataset_empty issue code (PR 3.1a)', (): void => {
+    // PR 3.1a tightens PublishedDataset.resorts to .min(1). Validator surfaces the
+    // failure as a typed `dataset_empty` ValidationIssue (NOT opaque `zod_parse_failed`)
+    // so callers can branch on the empty-dataset case explicitly.
+    const mutated = structuredClone(fixture) as { resorts: unknown[]; manifest: { resort_count: number } }
+    mutated.resorts = []
+    mutated.manifest.resort_count = 0
+    const result = validatePublishedDataset(mutated)
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.issues.some((i): boolean => i.code === 'dataset_empty')).toBe(true)
+    }
+  })
+
   // Note: a `fx_provenance_required` test does NOT exist in Phase 1. Per ai-clean-code-adherence
   // audit, KNOWN_NON_EUR_SOURCES + the enforcement branch are deferred to Epic 5 PR 5.x. Epic 5
   // adds the test alongside the first non-EUR adapter.

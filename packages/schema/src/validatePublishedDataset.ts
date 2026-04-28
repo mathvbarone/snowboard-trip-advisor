@@ -6,13 +6,17 @@ import type { Resort } from './resort'
 
 export type ValidationIssue =
   | { code: 'zod_parse_failed'; zod_issues: ReadonlyArray<{ path: ReadonlyArray<string | number>; message: string }> }
+  | { code: 'dataset_empty' }
   | { code: 'metric_field_missing_source'; resort_slug: string; metric_path: MetricPath; document: 'resort' | 'live_signal' }
   | { code: 'fx_provenance_invalid'; resort_slug: string; metric_path: MetricPath; reason: string }
   | { code: 'manifest_count_mismatch'; declared: number; actual: number }
   | { code: 'envelope_published_at_before_signal'; published_at: string; signal_observed_at: string; resort_slug: string }
   // Note: zod-side checks (https-only URL, slug regex, Money.currency literal, schema_version literal,
   // attribution_block presence, publish_state enum) all run as part of `PublishedDataset.parse` because
-  // each is encoded in the Zod schemas. They surface as `zod_parse_failed` issues.
+  // each is encoded in the Zod schemas. They surface as `zod_parse_failed` issues — except for
+  // `resorts.min(1)`, which the schema tags with message 'dataset_empty' so the validator can emit
+  // a typed `dataset_empty` issue (PR 3.1a). Callers that want to branch on the empty-dataset case
+  // get a stable code instead of pattern-matching on Zod's path/message internals.
   // The 'fx_provenance_required' issue code is deferred to Epic 5 PR 5.x — Phase 1 has zero non-EUR
   // adapter sources to enforce against (per ai-clean-code-adherence audit + ADR-0003).
 
@@ -23,16 +27,24 @@ export type ValidationResult =
 export function validatePublishedDataset(input: unknown): ValidationResult {
   const parse = PublishedDataset.safeParse(input)
   if (!parse.success) {
-    return {
-      ok: false,
-      issues: [{
-        code: 'zod_parse_failed',
-        zod_issues: parse.error.issues.map((i): { path: ReadonlyArray<string | number>; message: string } => ({
-          path: i.path,
-          message: i.message,
-        })),
-      }],
+    const issues: ValidationIssue[] = []
+    // PR 3.1a: surface the resorts.min(1) failure as a typed `dataset_empty` issue so callers
+    // can branch without matching on Zod path/message internals. The schema tags the rule with
+    // message 'dataset_empty'; we detect by exact-message equality on a path that targets resorts.
+    const isDatasetEmpty = parse.error.issues.some(
+      (i): boolean => i.message === 'dataset_empty' && i.path[0] === 'resorts',
+    )
+    if (isDatasetEmpty) {
+      issues.push({ code: 'dataset_empty' })
     }
+    issues.push({
+      code: 'zod_parse_failed',
+      zod_issues: parse.error.issues.map((i): { path: ReadonlyArray<string | number>; message: string } => ({
+        path: i.path,
+        message: i.message,
+      })),
+    })
+    return { ok: false, issues }
   }
 
   const dataset = parse.data

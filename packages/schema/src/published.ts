@@ -7,7 +7,7 @@ import { Resort } from './resort'
 export const PublishedDataset = z.object({
   schema_version: z.literal(1),
   published_at: ISODateTimeString,
-  resorts: z.array(Resort),
+  resorts: z.array(Resort).min(1, { message: 'dataset_empty' }),
   live_signals: z.array(ResortLiveSignal),
   manifest: z.object({
     resort_count: z.number().int(),
