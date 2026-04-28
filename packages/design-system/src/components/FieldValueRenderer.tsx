@@ -48,6 +48,10 @@ export function FieldValueRenderer<K extends FormatterKey>({
     return renderMissing(missingLabel, missingTooltip)
   }
   // field is `fresh` or `stale`. Both have value/source/observed_at.
+  // TS cannot narrow the heterogeneous formatter dispatch generically — the
+  // K-generic enforces the right shape at the call site, the cast erases it
+  // locally. Safe because FORMATTERS is keyed by FormatterKey and each entry
+  // matches its key's value type by construction.
   const fmt = FORMATTERS[formatter] as (v: FormatterValue<K>) => string
   const text = fmt(field.value)
   const display = unit !== undefined ? `${text} ${unit}` : text
@@ -98,8 +102,7 @@ function renderMissing(
 }
 
 function tooltipBody(
-  field: { state: 'fresh' | 'stale'; observed_at: string; source: string }
-    & ({ state: 'fresh' } | { state: 'stale'; age_days: number }),
+  field: Exclude<FieldValue<unknown>, { state: 'never_fetched' }>,
 ): string {
   // `field` is the discriminated `fresh | stale` subset; the type narrowing
   // below mirrors the FieldValue<T> union shape.

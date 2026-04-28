@@ -8,15 +8,9 @@ import FilterBar, { type PriceBucket } from './FilterBar'
 import Hero from './Hero'
 import ResortCard from './ResortCard'
 
-// Cards landing — composes Hero + FilterBar + a grid of ResortCard, with
-// dataset projections derived from URL state (`sort`, `country`) and the
-// private (non-URL) `priceBucket` filter (spec §3.1: bucketed price is a
-// transient filter, not shareable).
-//
-// Sort + filter logic lives in `cardsSelectors` (sibling pure module) so
-// branches that depend on `never_fetched` field states — unreachable
-// through the seed-dataset MSW path — can be unit-tested with synthetic
-// ResortView fixtures.
+// CardsView composes Hero + FilterBar + a grid of ResortCard. Filter/sort
+// live in `cardsSelectors.ts` so the never_fetched-handling branches stay
+// testable without coverage exclusions.
 
 export default function CardsView(): JSX.Element {
   const { views } = useDataset()

@@ -68,6 +68,9 @@ export default function FilterBar({
   }
 
   function onSortChange(next: string): void {
+    // Safe cast: <option> values are SORT_OPTIONS-bound; type narrowing across
+    // generic `<select>` onChange is a known TS limitation (parse-don't-cast
+    // would require redundant z.parse here for no behavior change).
     setURLState({ sort: next as SortValue })
   }
 
@@ -99,6 +102,10 @@ export default function FilterBar({
         value={priceBucket}
         options={PRICE_OPTIONS}
         onChange={(v): void => {
+          // Safe cast: <option> values are PRICE_OPTIONS-bound; type narrowing
+          // across generic `<select>` onChange is a known TS limitation
+          // (parse-don't-cast would require a redundant runtime guard here for
+          // no behavior change).
           onPriceBucketChange(v as PriceBucket)
         }}
       />

@@ -5,9 +5,6 @@ import type { JSX } from 'react'
 // purely-visual hero photo announces noise). The path is `/hero.jpg`,
 // served from `apps/public/public/hero.jpg` (Vite copies that directory
 // to the build output verbatim — same dev/build resolution).
-//
-// The headline copy gives the page its single <h1>; the rest of the
-// landing uses <h2> and below per the heading-order rule.
 export default function Hero(): JSX.Element {
   return (
     <section
