@@ -71,7 +71,7 @@ function AppContent(): JSX.Element {
   // detail overlay's slug-existence check depends on the dataset's slug set
   // — co-locating the two reads keeps the gate atomic.
   const url = useURLState()
-  const { slugs, views: _views } = useDataset()
+  const { slugs, views } = useDataset()
   const View = url.view === 'matrix' ? MatrixView : CardsView
   // The dataset slug set is widened to ReadonlySet<string> for the lookup —
   // url.detail is a plain string parsed off the query, ResortSlug is a
@@ -82,7 +82,7 @@ function AppContent(): JSX.Element {
   const wide: ReadonlySet<string> = slugs
   const detailMatch =
     url.detail !== undefined && wide.has(url.detail)
-      ? _views.find((v): boolean => v.slug === url.detail)
+      ? views.find((v): boolean => v.slug === url.detail)
       : undefined
   return (
     <>
