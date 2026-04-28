@@ -119,6 +119,78 @@ run_test "post-edit-lint: exit 0 on .md file"        "$HOOK" '{"tool_input":{"fi
 run_test "post-edit-lint: exit 0 on nonexistent"     "$HOOK" '{"tool_input":{"file_path":"nonexistent.ts"}}'                            0
 run_test "post-edit-lint: exit 0 on malformed JSON"  "$HOOK" 'not json'                                                                 0
 
+# ---------- post-pr-create-reminder.sh ----------
+HOOK="$HOOKS_DIR/post-pr-create-reminder.sh"
+
+# Always exits 0; the discriminator is whether stdout carries the
+# additionalContext payload. run_test only checks exit code, so we add a
+# bespoke run_test_emits / run_test_silent pair to assert on stdout.
+
+# run_test_emits <name> <hook> <input> — exits 0 AND emits non-empty stdout.
+run_test_emits() {
+  name="$1"
+  hook="$2"
+  input="$3"
+  set +e
+  out="$(printf '%s' "$input" | "$hook" 2>/dev/null)"
+  actual=$?
+  set -e
+  if [ "$actual" = "0" ] && [ -n "$out" ]; then
+    PASS=$((PASS + 1))
+  else
+    FAIL=$((FAIL + 1))
+    FAILED_LINES="$FAILED_LINES\n  - $name (expected exit 0 + non-empty stdout; got exit $actual + stdout=[$out])"
+  fi
+}
+
+# run_test_silent <name> <hook> <input> — exits 0 AND emits empty stdout.
+run_test_silent() {
+  name="$1"
+  hook="$2"
+  input="$3"
+  set +e
+  out="$(printf '%s' "$input" | "$hook" 2>/dev/null)"
+  actual=$?
+  set -e
+  if [ "$actual" = "0" ] && [ -z "$out" ]; then
+    PASS=$((PASS + 1))
+  else
+    FAIL=$((FAIL + 1))
+    FAILED_LINES="$FAILED_LINES\n  - $name (expected exit 0 + empty stdout; got exit $actual + stdout=[$out])"
+  fi
+}
+
+# Two-layer match: (a) command at command-start position AND (b) stdout
+# carries a github PR URL (success indicator). Only emit when both fire.
+PR_URL_OK='https://github.com/owner/repo/pull/42\n'
+
+# --- emit cases (command position match + PR URL in stdout) ---
+run_test_emits  "post-pr-create: emits — gh pr create at start, success"        "$HOOK" '{"tool_input":{"command":"gh pr create --title foo --body bar"},"tool_response":{"stdout":"'"$PR_URL_OK"'"}}'
+run_test_emits  "post-pr-create: emits — chained (cd ... && gh pr create)"      "$HOOK" '{"tool_input":{"command":"cd repo && gh pr create --base main"},"tool_response":{"stdout":"'"$PR_URL_OK"'"}}'
+run_test_emits  "post-pr-create: emits — chained with ;"                        "$HOOK" '{"tool_input":{"command":"date; gh pr create"},"tool_response":{"stdout":"'"$PR_URL_OK"'"}}'
+
+# --- silent cases — command-position fail (Codex P2 #1) ---
+# `echo "gh pr create"` is the false-positive Codex flagged on the v1
+# implementation. The hook MUST NOT fire when the substring lives inside
+# echo/grep/comment/etc., even if the stdout happens to mention a URL.
+run_test_silent "post-pr-create: silent — echo with substring (P2 #1)"          "$HOOK" '{"tool_input":{"command":"echo \"gh pr create\""},"tool_response":{"stdout":"gh pr create\n"}}'
+run_test_silent "post-pr-create: silent — grep matches the substring (P2 #1)"   "$HOOK" '{"tool_input":{"command":"grep '\''gh pr create'\'' file.txt"},"tool_response":{"stdout":"gh pr create\n"}}'
+run_test_silent "post-pr-create: silent — gh pr created-at"                     "$HOOK" '{"tool_input":{"command":"gh pr created-at"},"tool_response":{"stdout":""}}'
+run_test_silent "post-pr-create: silent — gh pr list"                           "$HOOK" '{"tool_input":{"command":"gh pr list"},"tool_response":{"stdout":""}}'
+run_test_silent "post-pr-create: silent — gh pr comment"                        "$HOOK" '{"tool_input":{"command":"gh pr comment 16 --body \"x\""},"tool_response":{"stdout":""}}'
+run_test_silent "post-pr-create: silent — npm run qa"                           "$HOOK" '{"tool_input":{"command":"npm run qa"},"tool_response":{"stdout":""}}'
+
+# --- silent cases — success-gate fail (Codex P2 #2) ---
+# Failed `gh pr create` (auth, network, etc.) leaves no PR URL in
+# stdout. Hook must not fire even though command position matches.
+run_test_silent "post-pr-create: silent — gh pr create empty stdout (auth fail)" "$HOOK" '{"tool_input":{"command":"gh pr create --title foo"},"tool_response":{"stdout":""}}'
+run_test_silent "post-pr-create: silent — gh pr create error stdout"             "$HOOK" '{"tool_input":{"command":"gh pr create"},"tool_response":{"stdout":"Error: GraphQL error\n"}}'
+run_test_silent "post-pr-create: silent — gh pr create no tool_response"         "$HOOK" '{"tool_input":{"command":"gh pr create --title foo"}}'
+
+# --- silent cases — malformed input ---
+run_test_silent "post-pr-create: silent — empty stdin"                          "$HOOK" ''
+run_test_silent "post-pr-create: silent — malformed JSON"                       "$HOOK" 'not json'
+
 # ---------- summary ----------
 printf '\nHook tests: %d passed, %d failed\n' "$PASS" "$FAIL"
 if [ "$FAIL" -gt 0 ]; then

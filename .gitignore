@@ -17,6 +17,9 @@ npm-debug.log*
 .idea/
 .vscode/
 
+# Playwright MCP runtime artifacts (snapshots, console logs, screenshots)
+.playwright-mcp/
+
 # per-workspace build & coverage outputs
 apps/*/dist/
 apps/*/coverage/
