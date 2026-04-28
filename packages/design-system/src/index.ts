@@ -14,3 +14,13 @@ export {
   type SelectOption,
 } from './components/Select'
 export { Input, type InputProps, type InputType } from './components/Input'
+export type { IconComponent, IconProps } from './icons/types'
+export {
+  SOURCE_GLYPHS,
+  AirbnbGlyph,
+  BookingGlyph,
+  ManualGlyph,
+  OpenSnowGlyph,
+  ResortFeedGlyph,
+  SnowForecastGlyph,
+} from './icons/sources'
