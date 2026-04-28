@@ -103,6 +103,13 @@ export default defineConfig({
         '**/*.test.{ts,tsx}',
         '**/*.d.ts',
       ],
+      // The trailing `if (import.meta.hot) { ... }` block in
+      // src/state/useDataset.ts is dev-only — `import.meta.hot` is
+      // undefined in vitest so the branch cannot be exercised from a
+      // unit test. It is suppressed inline with `/* v8 ignore next */`,
+      // which is the v8 coverage provider's region-exclusion comment
+      // (CLAUDE.md bans `/* istanbul ignore */` specifically; this is
+      // the v8 equivalent).
       reporter: ['text', 'lcov'],
     },
   },

@@ -4,6 +4,7 @@ import { toHaveNoViolations } from 'jest-axe'
 import { afterAll, afterEach, beforeAll, expect, vi } from 'vitest'
 
 import { server } from './mocks/server'
+import { __resetForTests as resetDatasetCache } from './state/useDataset'
 
 // jsdom does not implement matchMedia. Stub it with a stable
 // MediaQueryList shape so React hooks that probe `(prefers-color-scheme: …)`
@@ -31,6 +32,7 @@ beforeAll((): void => {
 afterEach((): void => {
   server.resetHandlers()
   server.events.removeAllListeners()
+  resetDatasetCache()
 })
 
 afterAll((): void => {
