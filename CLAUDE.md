@@ -73,6 +73,23 @@ Full product spec: [`docs/superpowers/specs/2026-04-22-product-pivot-design.md`]
 - Decisions with architectural consequence get an ADR in `docs/adr/` (MADR-style, numbered).
 - **After an epic / milestone PR merges to `main`**, run the post-epic doc-prune playbook at [`docs/superpowers/skills/pruning-done-work-references.md`](docs/superpowers/skills/pruning-done-work-references.md) before starting the next epic. The playbook trims done-work descriptions in the spec / agent-rules, deletes stale untracked plan/handoff scratchpads, and writes a fresh tracked post-milestone handoff. Don't let detailed PR-by-PR instructions for completed work accumulate in agent context.
 
+## PR Sizing Discipline
+
+PRs land **one atomic, reviewable concern at a time**. A "concern" is one new component, one hook, one bug fix, one doc update — not a multi-step plan task bundled into a single branch.
+
+**Concrete rules:**
+
+- **One concern per PR.** A multi-step plan task that adds N components / hooks / dialogs ships as N separate PRs, not as one PR with N commits. Each gets its own branch, its own PR, its own review cycle, its own merge.
+- **Hard ceilings:** target ≤300 lines added (excluding generated files / lockfiles), ≤5 commits, ≤8 files changed. If a PR exceeds any of these, split before opening unless every commit demonstrably depends on the previous one (and even then, prefer stacked PRs over a single bundle).
+- **Stacked PRs over bundled PRs.** When concerns have a hard dependency order (e.g. design-system primitive → consumer view), open the foundation PR first, then open the dependent PR with `--base <foundation-branch>` so reviewers see only the dependent's diff. When the foundation merges, the dependent's diff against `main` becomes correct automatically.
+- **Plan tasks are NOT PR units.** Spec/plan documents may describe a task with N substeps; the substeps map to N PRs, not one. The plan's "Task 5 — Steps 5.1 through 5.10" shape is a delivery plan, not a PR boundary.
+- **README + memory updates ride with the feature PR.** Don't separate them. The feature and its docs land together so reviewers see the product-facing change in context.
+- **Reviewability test:** if a single reviewer can't read the entire diff in one sitting and form a confident "approve / changes" verdict, the PR is too big.
+
+**Why:** large bundled PRs are hard to review, hard to revert, and hard to stage. Atomic PRs catch issues earlier (smaller surface = denser review attention), keep CI feedback loops fast, and let the maintainer cherry-pick what merges and when. Code is frequently agent-generated on this project; agents have no organic instinct against bundling, so the rule is mechanical.
+
+**How to apply:** when planning work, decompose by concern before opening any branch. The `superpowers:writing-plans` and `superpowers:subagent-driven-development` skills produce plans whose tasks are *coordination units*, not PR units — split each task into atomic PRs at execution time.
+
 ## Quality Gate
 
 The quality gate is a hard requirement. A task is not done until `npm run qa` passes cleanly.
@@ -86,6 +103,8 @@ This runs in sequence and fails fast:
 1. `npm run lint`
 2. `npm run typecheck`
 3. `npm run coverage`
+4. `npm run tokens:check` (drift check on the generated `packages/design-system/tokens.css`)
+5. `npm run test:hooks` (`scripts/hooks/test-hooks.sh` — both `node --test` unit tests and bash integration tests for the Claude Code hook scripts)
 
 Rules:
 
