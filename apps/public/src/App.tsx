@@ -5,6 +5,7 @@ import {
   Suspense,
   lazy,
   startTransition,
+  useState,
   type JSX,
   type ReactNode,
 } from 'react'
@@ -89,12 +90,20 @@ function AppContent(): JSX.Element {
     url.detail !== undefined && wide.has(url.detail)
       ? views.find((v): boolean => v.slug === url.detail)
       : undefined
+  // ShortlistDrawer takes controlled open/onOpenChange props (PR 3.3
+  // contract; the panel is reusable in PR 3.5's matrix-view route too).
+  // PR 3.4 will lift these into HeaderBar's shortlist trigger when Shell
+  // composes HeaderBar; until then App.tsx owns the state.
+  const [shortlistOpen, setShortlistOpen] = useState<boolean>(false)
   return (
     <>
       <DroppedSlugsBanner />
       <View />
       {detailMatch !== undefined ? <DetailDrawer slug={detailMatch.slug} /> : null}
-      <ShortlistDrawer />
+      <ShortlistDrawer
+        open={shortlistOpen}
+        onOpenChange={setShortlistOpen}
+      />
     </>
   )
 }

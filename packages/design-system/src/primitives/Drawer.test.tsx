@@ -161,7 +161,6 @@ describe('Drawer', (): void => {
     // Radix moves focus into the drawer on open. Tab through every focusable
     // and confirm we never land outside the dialog.
     for (let i = 0; i < 6; i++) {
-      // eslint-disable-next-line no-await-in-loop -- sequential Tab presses
       await user.tab()
       expect(document.activeElement?.closest('[role="dialog"]')).not.toBeNull()
     }
