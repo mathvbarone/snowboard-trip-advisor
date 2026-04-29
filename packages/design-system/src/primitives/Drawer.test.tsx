@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { axe } from 'jest-axe'
 import { useRef, useState } from 'react'
@@ -319,6 +319,44 @@ describe('Drawer', (): void => {
     expect(
       screen.getByRole('dialog', { name: 'Shortlist' }),
     ).not.toHaveAttribute('data-reduced-motion', 'true')
+  })
+
+  it('subscribes to prefers-reduced-motion changes (live OS preference toggle)', (): void => {
+    // Capture the listener so we can simulate an OS-level preference toggle.
+    let capturedListener: ((e: MediaQueryListEvent) => void) | null = null
+    let currentMatches = false
+    vi.spyOn(window, 'matchMedia').mockImplementation(
+      (q: string): MediaQueryList => ({
+        get matches(): boolean {
+          return q === '(prefers-reduced-motion: reduce)' && currentMatches
+        },
+        media: q,
+        onchange: null,
+        addListener: (): void => undefined,
+        removeListener: (): void => undefined,
+        addEventListener: (
+          _evt: string,
+          listener: EventListenerOrEventListenerObject,
+        ): void => {
+          if (q === '(prefers-reduced-motion: reduce)') {
+            capturedListener = listener as (e: MediaQueryListEvent) => void
+          }
+        },
+        removeEventListener: (): void => undefined,
+        dispatchEvent: (): boolean => false,
+      }),
+    )
+    render(<ControlledDrawer />)
+    const dialog = screen.getByRole('dialog', { name: 'Shortlist' })
+    expect(dialog).not.toHaveAttribute('data-reduced-motion', 'true')
+
+    // Flip the OS preference and fire the captured change listener.
+    expect(capturedListener).not.toBeNull()
+    act((): void => {
+      currentMatches = true
+      capturedListener?.({} as MediaQueryListEvent)
+    })
+    expect(dialog).toHaveAttribute('data-reduced-motion', 'true')
   })
 
   it('is axe-clean when open', async (): Promise<void> => {

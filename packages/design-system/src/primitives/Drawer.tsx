@@ -2,6 +2,7 @@ import * as RadixDialog from '@radix-ui/react-dialog'
 import {
   useEffect,
   useRef,
+  useSyncExternalStore,
   type AnimationEventHandler,
   type JSX,
   type ReactNode,
@@ -140,11 +141,33 @@ export function Drawer({
   )
 }
 
-// Inline matchMedia probe — duplicates apps/public's useMediaQuery on
+// Inline matchMedia subscriber — duplicates apps/public's useMediaQuery on
 // purpose. design-system depends only on schema (see CLAUDE.md "Workspace
 // & Architecture Rules"); pulling apps/public's hook would invert the DAG.
 // The hook here is private to the Drawer primitive.
+//
+// useSyncExternalStore subscribes to the MediaQueryList so the rendered
+// `data-reduced-motion` attribute tracks live OS-preference changes — a
+// bare snapshot would miss preference toggles between renders.
 function usePrefersReducedMotion(): boolean {
-  const mql = window.matchMedia('(prefers-reduced-motion: reduce)')
-  return mql.matches
+  // No SSR in this app, so the optional getServerSnapshot is omitted —
+  // useSyncExternalStore returns the client snapshot on every call.
+  return useSyncExternalStore(
+    subscribeReducedMotion,
+    getReducedMotionSnapshot,
+  )
+}
+
+const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)'
+
+function subscribeReducedMotion(callback: () => void): () => void {
+  const mql = window.matchMedia(REDUCED_MOTION_QUERY)
+  mql.addEventListener('change', callback)
+  return (): void => {
+    mql.removeEventListener('change', callback)
+  }
+}
+
+function getReducedMotionSnapshot(): boolean {
+  return window.matchMedia(REDUCED_MOTION_QUERY).matches
 }
