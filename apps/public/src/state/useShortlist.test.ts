@@ -1,7 +1,56 @@
-import { act, renderHook } from '@testing-library/react'
+import { act, render, renderHook } from '@testing-library/react'
+import { Fragment, createElement } from 'react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { __resetShortlistForTests, useShortlist } from './useShortlist'
+import { setURLState } from './useURLState'
+
+function ShortlistConsumer(): null {
+  // One hook instance per component — mirrors how each ResortCard / drawer
+  // / dialog calls useShortlist() once in App.tsx's tree.
+  useShortlist()
+  return null
+}
+
+function renderMultiConsumer(count: number): void {
+  // Mounts `count` ShortlistConsumer siblings in a single React root, which
+  // is what App.tsx actually does (N ResortCards plus drawer + dialogs).
+  // Single-root rendering ensures act() flushes all consumers' effects in
+  // one work loop — multiple separate renderHook calls do not share that
+  // flush domain and would mask the N-writes regression this test guards.
+  const children = Array.from({ length: count }).map(
+    (_, i): ReturnType<typeof createElement> =>
+      createElement(ShortlistConsumer, { key: i }),
+  )
+  render(createElement(Fragment, null, ...children))
+}
+
+interface SetItemCounter {
+  calls: () => number
+  restore: () => void
+}
+
+function trackSetItemCalls(): SetItemCounter {
+  // Patches Storage.prototype.setItem so tests can count writes regardless
+  // of which method (instance or prototype) the implementation invokes.
+  // jsdom's localStorage instance properties are non-writable; the
+  // prototype is writable. Call-through preserves real LS semantics so
+  // assertions on getItem after writes continue to work.
+  const proto = Object.getPrototypeOf(window.localStorage) as Storage
+  // eslint-disable-next-line @typescript-eslint/unbound-method -- prototype-patch idiom; the call below re-binds via .call(this, ...)
+  const originalSetItem = proto.setItem
+  let count = 0
+  proto.setItem = function patched(this: Storage, k: string, v: string): void {
+    count += 1
+    originalSetItem.call(this, k, v)
+  }
+  return {
+    calls: (): number => count,
+    restore: (): void => {
+      proto.setItem = originalSetItem
+    },
+  }
+}
 
 // Spec §6.1 + plan step 5.4 contract:
 //   - Mount: parse URL `&shortlist=`. Absent → hydrate from
@@ -107,6 +156,75 @@ describe('useShortlist', (): void => {
         result.current.toggle('kotelnica-bialczanska')
       })
       expect(window.localStorage.getItem(STORAGE_KEY)).toBe(JSON.stringify([]))
+    })
+
+    it('writes localStorage exactly once per URL change regardless of consumer count', (): void => {
+      // Reviewer's BLOCKER: the mirror used to live in a per-instance
+      // useEffect, so N hook consumers (every ResortCard + drawer + dialogs)
+      // produced N redundant setItem calls per toggle. The fix moves the
+      // mirror to a module-scoped subscriber so it fires once per URL
+      // change, not once per consumer.
+      renderMultiConsumer(12)
+      const counter = trackSetItemCalls()
+      try {
+        act((): void => {
+          setURLState({ shortlist: ['kotelnica-bialczanska'] })
+        })
+        expect(counter.calls()).toBe(1)
+      } finally {
+        counter.restore()
+      }
+    })
+
+    it('does not write localStorage during bootstrap from LS-only path', (): void => {
+      // Spec §6.1 LS-only hydration path: URL empty, LS has slugs → bootstrap
+      // writes LS value into URL. The cascade must NOT also re-write LS
+      // (LS already has the value the bootstrap is about to read; a write
+      // would be redundant and on N consumers would scale to N writes).
+      window.localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify(['kotelnica-bialczanska']),
+      )
+      const counter = trackSetItemCalls()
+      try {
+        renderHook(() => useShortlist())
+        expect(counter.calls()).toBe(0)
+      } finally {
+        counter.restore()
+      }
+    })
+
+    it('mirror fires on popstate (back/forward navigation)', (): void => {
+      // The previous per-instance mirror happened to cover popstate via the
+      // `urlShortlist` dep in useEffect. The module-scoped mirror must
+      // listen for popstate explicitly via useURLState's subscribe path.
+      setLocation('shortlist=kotelnica-bialczanska')
+      renderHook(() => useShortlist())
+      // Simulate a back-navigation that lands on a different shortlist.
+      window.history.replaceState({}, '', '/?shortlist=spindleruv-mlyn')
+      act((): void => {
+        window.dispatchEvent(new PopStateEvent('popstate'))
+      })
+      expect(window.localStorage.getItem(STORAGE_KEY)).toBe(
+        JSON.stringify(['spindleruv-mlyn']),
+      )
+    })
+
+    it('__resetShortlistForTests unsubscribes the module-scoped mirror', (): void => {
+      // Without unsubscribe, a leftover mirror from a prior test fires on
+      // the next test's setURLState, polluting LS across tests.
+      renderHook(() => useShortlist())
+      __resetShortlistForTests()
+      window.localStorage.clear()
+      const counter = trackSetItemCalls()
+      try {
+        act((): void => {
+          setURLState({ shortlist: ['leftover-write'] })
+        })
+        expect(counter.calls()).toBe(0)
+      } finally {
+        counter.restore()
+      }
     })
   })
 

@@ -1,7 +1,12 @@
-import { useEffect, useRef, useSyncExternalStore } from 'react'
+import { useEffect, useSyncExternalStore } from 'react'
 import { z } from 'zod'
 
-import { setURLState, useURLState } from './useURLState'
+import {
+  readURLState,
+  setURLState,
+  subscribeToURLChanges,
+  useURLState,
+} from './useURLState'
 
 // Spec §6.1 + plan step 5.4 contract:
 //   - URL is the source of truth; localStorage `sta-shortlist-last-known`
@@ -10,7 +15,11 @@ import { setURLState, useURLState } from './useURLState'
 //   - Mount: parse URL `&shortlist=`. Absent → hydrate from LS by writing
 //     LS into the URL (so back/forward navigation, share-link copy, and
 //     in-page reads all see the same data).
-//   - On URL change (post-mount): mirror the URL value into LS.
+//   - On URL change (post-mount): mirror the URL value into LS — exactly
+//     once per change, regardless of how many `useShortlist()` consumers
+//     are mounted (every ResortCard, the drawer, both dialogs). This is
+//     enforced by a module-scoped subscriber (see "Module-scoped mirror"
+//     below) that follows the same single-pubsub pattern as the bootstrap.
 //   - Collision detection: when both URL and LS have non-empty payloads on
 //     mount AND the sets differ, surface a `pendingCollision` so the
 //     consumer renders MergeReplaceDialog. Order-only differences are
@@ -59,29 +68,16 @@ export function useShortlist(): UseShortlistResult {
     getBootstrapSnapshot,
   )
 
-  // First-mount hydration + collision-detection. Module-scoped one-shot
-  // guard — `useShortlist()` is consumed by every ResortCard plus other
-  // views, so a per-instance effect would scale the URL-write storm with
-  // card count on the empty-URL/non-empty-LS hydration path. The bootstrap
-  // resolves once, writes its result into a module-scoped store, and every
-  // hook instance subscribes via useSyncExternalStore.
+  // First-mount hydration + collision-detection + mirror registration.
+  // Module-scoped one-shot guard (see runBootstrap below): `useShortlist()`
+  // is consumed by every ResortCard plus other views, so per-instance
+  // effects would scale the URL-write storm with card count. The bootstrap
+  // resolves once and registers the module-scoped mirror; every hook
+  // instance subscribes to the resulting state via useSyncExternalStore.
   useEffect((): void => {
     runBootstrap(urlShortlist)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot mount
   }, [])
-
-  // Mirror URL → LS on every URL change *after* mount. The mount-tick run
-  // is suppressed via a ref so we never overwrite the LS payload that the
-  // hydration effect just consumed. From the second commit forward the
-  // mirror writes whatever the URL contains.
-  const skipMirrorMountRef = useRef<boolean>(true)
-  useEffect((): void => {
-    if (skipMirrorMountRef.current) {
-      skipMirrorMountRef.current = false
-      return
-    }
-    writeStored(urlShortlist)
-  }, [urlShortlist])
 
   function toggle(slug: string): void {
     if (urlShortlist.includes(slug)) {
@@ -188,14 +184,45 @@ function getBootstrapSnapshot(): PendingCollision | null {
   return bootstrapCollision
 }
 
+// ---------- Module-scoped URL → LS mirror ----------
+//
+// Same precedent as `useURLState`'s `subscribers` Set: a single pubsub
+// listener fires once per URL change instead of scaling with consumer
+// count. `lastWrittenJson` memoizes the last value the mirror put into
+// LS so duplicate writes (e.g. from the bootstrap-cascade where LS
+// already holds the value being written into the URL) early-return.
+// Mirror registration is inlined into runBootstrap rather than guarded
+// by a separate `mirrorRegistered` flag because runBootstrap's own
+// `bootstrapDone` guard already makes the registration call one-shot.
+
+let mirrorUnsubscribe: (() => void) | null = null
+let lastWrittenJson: string | null = null
+
+function mirror(): void {
+  const json = JSON.stringify(readURLState().shortlist)
+  if (json === lastWrittenJson) {
+    return
+  }
+  lastWrittenJson = json
+  window.localStorage.setItem(STORAGE_KEY, json)
+}
+
 function runBootstrap(urlShortlist: ReadonlyArray<string>): void {
   if (bootstrapDone) {
     return
   }
   bootstrapDone = true
+  // Register the mirror BEFORE any potential bootstrap-write so subsequent
+  // user-toggle URL changes flow through the single mirror cb. The
+  // bootstrap-write itself is silenced via `lastWrittenJson` priming below.
+  mirrorUnsubscribe = subscribeToURLChanges(mirror)
   const stored = readStored()
   if (urlShortlist.length === 0) {
     if (stored !== null && stored.length > 0) {
+      // Prime the mirror's memo so the cascade `setURLState` (one line
+      // below) does not re-write LS — LS already holds `stored`; bootstrap
+      // is just bringing the URL into agreement with it.
+      lastWrittenJson = JSON.stringify(stored)
       setURLState({ shortlist: stored })
     }
     return
@@ -218,11 +245,16 @@ function clearBootstrapCollision(): void {
   notifyBootstrapListeners()
 }
 
-/** Test-only: reset module-scoped bootstrap state between tests. */
+/** Test-only: reset module-scoped bootstrap + mirror state between tests. */
 export function __resetShortlistForTests(): void {
   bootstrapDone = false
   bootstrapCollision = null
   bootstrapListeners.clear()
+  if (mirrorUnsubscribe !== null) {
+    mirrorUnsubscribe()
+    mirrorUnsubscribe = null
+  }
+  lastWrittenJson = null
 }
 
 function readStored(): ReadonlyArray<string> | null {
@@ -241,7 +273,11 @@ function readStored(): ReadonlyArray<string> | null {
 }
 
 function writeStored(value: ReadonlyArray<string>): void {
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(value))
+  // Keep the mirror's memo in sync with explicit writes so a subsequent
+  // mirror cb on the same JSON value does not redundantly rewrite LS.
+  const json = JSON.stringify(value)
+  lastWrittenJson = json
+  window.localStorage.setItem(STORAGE_KEY, json)
 }
 
 function capWithNewest(slugs: ReadonlyArray<string>): string[] {
