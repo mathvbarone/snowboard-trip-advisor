@@ -104,31 +104,46 @@ export function useShortlist(): UseShortlistResult {
     })
   }
 
+  // The three collision actions read `bootstrapCollision` LIVE from
+  // module-scope rather than the closure-captured `pendingCollision`.
+  // Reason: MergeReplaceDialog's Merge button is `type="submit"` AND has
+  // `onClick={merge}`, so a click fires merge() twice — once via onClick,
+  // once via the form's onSubmit. The closure-captured `pendingCollision`
+  // is the snapshot at render time and does NOT update between the two
+  // synchronous calls, so a closure-based guard would not early-return on
+  // the second call. Reading the live module-scoped value DOES early-
+  // return because the first call cleared it via `clearBootstrapCollision`.
+  // acceptUrl / keepStored aren't subject to the same double-call but
+  // adopt the same pattern for consistency / defense-in-depth.
+
   function acceptUrl(): void {
-    if (pendingCollision === null) {
+    const live = bootstrapCollision
+    if (live === null) {
       return
     }
     // Persist the URL choice so a reload of the same shared link doesn't
     // re-trigger the collision dialog (Codex P2): without this, LS still
     // holds the pre-Replace value and the next mount sees a fresh
     // collision against the same URL slugs.
-    writeStored(pendingCollision.urlSlugs)
+    writeStored(live.urlSlugs)
     clearBootstrapCollision()
   }
 
   function keepStored(): void {
-    if (pendingCollision === null) {
+    const live = bootstrapCollision
+    if (live === null) {
       return
     }
-    setURLState({ shortlist: [...pendingCollision.storedSlugs] })
+    setURLState({ shortlist: [...live.storedSlugs] })
     clearBootstrapCollision()
   }
 
   function merge(): void {
-    if (pendingCollision === null) {
+    const live = bootstrapCollision
+    if (live === null) {
       return
     }
-    const { urlSlugs, storedSlugs } = pendingCollision
+    const { urlSlugs, storedSlugs } = live
     const seen = new Set<string>(urlSlugs)
     const union: string[] = [...urlSlugs]
     for (const slug of storedSlugs) {
@@ -238,9 +253,10 @@ function runBootstrap(urlShortlist: ReadonlyArray<string>): void {
 }
 
 function clearBootstrapCollision(): void {
-  if (bootstrapCollision === null) {
-    return
-  }
+  // All callers (acceptUrl / keepStored / merge) guard on
+  // `bootstrapCollision !== null` themselves before invoking this, so the
+  // null-check that used to live here is now unreachable; restructure
+  // rather than suppress per CLAUDE.md "Coverage Rules".
   bootstrapCollision = null
   notifyBootstrapListeners()
 }

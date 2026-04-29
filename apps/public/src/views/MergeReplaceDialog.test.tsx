@@ -211,6 +211,51 @@ describe('MergeReplaceDialog', (): void => {
     expect(window.location.search).not.toContain('kotelnica')
   })
 
+  it('clicking Merge writes the URL exactly once (idempotent across the onClick+onSubmit double-call)', async (): Promise<void> => {
+    // The Merge button has type="submit" and onClick={merge}, so a click
+    // fires BOTH onClick AND the form's onSubmit. The hook's merge()
+    // reads the LIVE module-scoped bootstrapCollision (not the closure-
+    // captured snapshot) so the second call early-returns after the
+    // first cleared it. Without that fix, both calls used the same
+    // closure value and merge would silently double-write the same
+    // shortlist into history.
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify(['kotelnica-bialczanska']),
+    )
+    setLocation('shortlist=spindleruv-mlyn')
+    const user = userEvent.setup()
+    await renderAsync(<Harness />)
+    // Spy AFTER mount-time normalization (which can call replaceState once
+    // via useURLState's normalizeIfNeeded) so only the click's writes are
+    // counted. Patch the History prototype directly because vi.spyOn on the
+    // instance does not always hold in jsdom (same reason as useShortlist
+    // mirror tests).
+    const proto = Object.getPrototypeOf(window.history) as History
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- prototype-patch idiom; .call(this, ...) below re-binds correctly
+    const originalReplace = proto.replaceState
+    let calls = 0
+    proto.replaceState = function patched(
+      this: History,
+      data: unknown,
+      unused: string,
+      url?: string | null,
+    ): void {
+      calls += 1
+      originalReplace.call(this, data, unused, url)
+    }
+    try {
+      await user.click(screen.getByRole('button', { name: /^merge$/i }))
+      expect(calls).toBe(1)
+    } finally {
+      proto.replaceState = originalReplace
+    }
+    // Spy in scope only — assertions outside use the real history.
+    expect(window.location.search).toContain(
+      'shortlist=spindleruv-mlyn,kotelnica-bialczanska',
+    )
+  })
+
   it('is axe-clean when open', async (): Promise<void> => {
     window.localStorage.setItem(
       STORAGE_KEY,

@@ -75,11 +75,14 @@ export default function MergeReplaceDialog(): JSX.Element | null {
         </ul>
         <div className="sta-merge-replace-dialog__actions">
           {/* Merge is type="submit" so Enter inside the form submits it.
-              Clicking the button ALSO submits the form — `onClick={merge}`
-              is therefore redundant with `onSubmit`, but kept for symmetry
-              with Replace / Keep mine. The hook's merge() is idempotent
-              (sets pendingCollision to null on first call; subsequent
-              calls early-return) so the double-call is safe. */}
+              Clicking the button also fires the form's onSubmit handler
+              after the click handler — so merge() runs twice per click.
+              That is safe because useShortlist's merge() reads the LIVE
+              module-scoped bootstrapCollision (not the closure-captured
+              snapshot), so the second call early-returns after the first
+              call clears it. Symmetry with Replace / Keep mine motivates
+              keeping onClick={merge} here even though onSubmit alone
+              would suffice for the Enter path. */}
           <Button type="submit" variant="primary" onClick={merge}>
             Merge
           </Button>
