@@ -2,6 +2,7 @@ import {
   act,
   render,
   screen,
+  waitFor,
   type RenderResult,
 } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -35,6 +36,12 @@ async function renderAsync(node: ReactNode): Promise<RenderResult> {
     for (let i = 0; i < 20; i += 1) {
       await Promise.resolve()
     }
+  })
+  // MergeReplaceDialog now consumes useDataset(), so the parent Suspense
+  // boundary's "loading" fallback shows briefly until the dataset resolves.
+  // Wait for it to clear before tests run their assertions.
+  await waitFor((): void => {
+    expect(screen.queryByText('loading')).toBeNull()
   })
   return view
 }
@@ -92,19 +99,41 @@ describe('MergeReplaceDialog', (): void => {
     expect(screen.queryByRole('dialog')).toBeNull()
   })
 
-  it('previews the merged shortlist with URL order first, then unique stored extras', async (): Promise<void> => {
+  it('previews resort display names with URL order first, then unique stored extras', async (): Promise<void> => {
+    // The conflict dialog is the user's first interaction with a share-link
+    // mismatch — surfacing slugs (`kotelnica-bialczanska`) is developer-y
+    // and inconsistent with ShortlistDrawer one click away. Mirror the
+    // drawer's slug→ResortView.name.en lookup with slug fallback for
+    // unknown entries.
     window.localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify(['kotelnica-bialczanska']),
     )
     setLocation('shortlist=spindleruv-mlyn')
     await renderAsync(<Harness />)
-    // Look up the preview region — order is preserved.
     const preview = screen.getByTestId('merge-preview')
     const items = preview.querySelectorAll('li')
     expect([...items].map((li): string | null => li.textContent)).toEqual([
-      'spindleruv-mlyn',
-      'kotelnica-bialczanska',
+      'Špindlerův Mlýn',
+      'Kotelnica Białczańska',
+    ])
+  })
+
+  it('preview falls back to the raw slug when the dataset does not contain it', async (): Promise<void> => {
+    // Defensive: a stale share-link may carry a slug that has since been
+    // dropped from the dataset. Match ShortlistDrawer's behavior — fall
+    // back to the slug literal so the row stays selectable / removable.
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify(['kotelnica-bialczanska']),
+    )
+    setLocation('shortlist=ghost-resort')
+    await renderAsync(<Harness />)
+    const preview = screen.getByTestId('merge-preview')
+    const items = preview.querySelectorAll('li')
+    expect([...items].map((li): string | null => li.textContent)).toEqual([
+      'ghost-resort',
+      'Kotelnica Białczańska',
     ])
   })
 

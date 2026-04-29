@@ -1,6 +1,7 @@
 import { Button, Modal } from '@snowboard-trip-advisor/design-system'
 import type { JSX } from 'react'
 
+import { useDataset } from '../state/useDataset'
 import { useShortlist } from '../state/useShortlist'
 
 // Spec §3.5 + plan step 5.6 contract:
@@ -15,14 +16,20 @@ import { useShortlist } from '../state/useShortlist'
 //       Replace → useShortlist().acceptUrl() (URL stays as-is)
 //       Keep mine → useShortlist().keepStored() (stored → URL)
 //   - Preview list shows the merged shortlist (URL first, stored extras
-//     after) so the user sees what Merge would produce.
+//     after) with each row rendering the dataset's resort display name
+//     (slug fallback for unknown entries — mirrors ShortlistDrawer).
 //
 // The Modal primitive provides focus trap, body scroll lock, Escape
 // dismiss (Escape maps to Replace = keep what's in the URL = the user's
 // share-link intent).
+//
+// `useDataset()` is suspendful; App.tsx mounts MergeReplaceDialog inside
+// the same `<Suspense fallback={<DatasetLoading />}>` that wraps
+// AppContent, so the suspension is captured by the existing boundary.
 
 export default function MergeReplaceDialog(): JSX.Element | null {
   const { pendingCollision, acceptUrl, keepStored, merge } = useShortlist()
+  const { views } = useDataset()
 
   if (pendingCollision === null) {
     return null
@@ -34,6 +41,9 @@ export default function MergeReplaceDialog(): JSX.Element | null {
     ...urlSlugs,
     ...storedSlugs.filter((slug): boolean => !urlSet.has(slug)),
   ]
+  const slugToName = new Map<string, string>(
+    views.map((v): [string, string] => [v.slug, v.name.en]),
+  )
 
   return (
     <Modal
@@ -60,7 +70,7 @@ export default function MergeReplaceDialog(): JSX.Element | null {
         </p>
         <ul className="sta-merge-replace-dialog__preview" data-testid="merge-preview">
           {mergedPreview.map((slug): JSX.Element => (
-            <li key={slug}>{slug}</li>
+            <li key={slug}>{slugToName.get(slug) ?? slug}</li>
           ))}
         </ul>
         <div className="sta-merge-replace-dialog__actions">
