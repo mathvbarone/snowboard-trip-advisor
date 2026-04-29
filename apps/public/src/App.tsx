@@ -17,6 +17,7 @@ import { useURLState } from './state/useURLState'
 import CardsView from './views/cards'
 import type DetailDrawerType from './views/detail'
 import DroppedSlugsBanner from './views/DroppedSlugsBanner'
+import MergeReplaceDialog from './views/MergeReplaceDialog'
 import ShortlistDrawer from './views/ShortlistDrawer'
 import DatasetLoading from './views/states/DatasetLoading'
 import DatasetUnavailable from './views/states/DatasetUnavailable'
@@ -104,6 +105,7 @@ function AppContent(): JSX.Element {
         open={shortlistOpen}
         onOpenChange={setShortlistOpen}
       />
+      <MergeReplaceDialog />
     </>
   )
 }
