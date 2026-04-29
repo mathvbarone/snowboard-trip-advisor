@@ -48,12 +48,14 @@ export default function MergeReplaceDialog(): JSX.Element | null {
   return (
     <Modal
       open
-      onOpenChange={(open): void => {
-        // Escape / outside-click → Modal calls onOpenChange(false). Map
-        // that to Replace (URL wins — the share-link's intent).
-        if (!open) {
-          acceptUrl()
-        }
+      onOpenChange={(): void => {
+        // The dialog mounts with open={true} and never re-renders with
+        // open={false} (the parent unmounts it instead). Modal therefore
+        // only fires onOpenChange via its dismiss paths (Escape /
+        // outside-click), which the wrapped Radix Dialog always invokes
+        // with `false`. We ignore the boolean and treat any call here as
+        // "user dismissed" → Replace (URL wins, share-link intent).
+        acceptUrl()
       }}
       title="Shortlist conflict"
     >
