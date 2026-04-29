@@ -1,9 +1,11 @@
 import { Button } from '@snowboard-trip-advisor/design-system'
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { axe } from 'jest-axe'
 import { useState, type JSX } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { setURLState } from '../state/useURLState'
 
 import ShareUrlDialog from './ShareUrlDialog'
 
@@ -165,6 +167,26 @@ describe('ShareUrlDialog', (): void => {
     render(<Harness />)
     await user.keyboard('{Escape}')
     expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('displayed url updates when the URL state changes while open', (): void => {
+    // Reviewer's SUGGESTION: ShareUrlDialog used to read window.location.href
+    // on every render but did not subscribe to URL changes — the dialog only
+    // re-rendered if some other state change happened to push it. Now the
+    // dialog reads from useURLState() so URL transitions while the dialog is
+    // open update the displayed share link without depending on a parent
+    // re-render.
+    render(<Harness />)
+    expect(
+      screen.getByText(/shortlist=kotelnica-bialczanska/),
+    ).toBeInTheDocument()
+    act((): void => {
+      setURLState({ shortlist: ['spindleruv-mlyn'] })
+    })
+    expect(screen.getByText(/shortlist=spindleruv-mlyn/)).toBeInTheDocument()
+    expect(
+      screen.queryByText(/shortlist=kotelnica-bialczanska/),
+    ).toBeNull()
   })
 
   it('resets copyState to idle when the dialog is reopened after a copy', async (): Promise<void> => {

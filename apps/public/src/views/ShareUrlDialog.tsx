@@ -5,11 +5,19 @@ import {
 } from '@snowboard-trip-advisor/design-system'
 import { useEffect, useState, type JSX } from 'react'
 
+import { serializeURL } from '../lib/urlState'
+import { useURLState } from '../state/useURLState'
+
 // Spec §3.5 + plan step 5.7 contract:
 //   - Modal-based "share this link" dialog.
+//   - The displayed URL is derived from `useURLState()` (subscribed),
+//     not read from `window.location.href` on each render. That makes
+//     the read pure, makes the dependency on URL state explicit, and
+//     ensures the dialog updates if the user toggles a star while the
+//     dialog is open.
 //   - Happy path (modern browser): clicking "Copy link" calls
-//     `navigator.clipboard.writeText` with the full window.location.href;
-//     a transient success message confirms.
+//     `navigator.clipboard.writeText` with the same derived URL; a
+//     transient success message confirms.
 //   - Fallback (legacy / non-https / SR mode): when
 //     `navigator.clipboard` is undefined, render a readonly Input control
 //     pre-filled with the URL so the user can manually select + copy.
@@ -39,10 +47,17 @@ export default function ShareUrlDialog({
       setCopyState('idle')
     }
   }, [open])
-  // Read window.location.href on every render — the URL changes when the
-  // user toggles a star or sort, and the share link should reflect the
-  // current state.
-  const url = window.location.href
+  // Derive the share URL from the subscribed URL state so the dialog
+  // re-renders on every URL transition and the read stays pure (no
+  // window.location.href in render). origin + pathname remain read from
+  // window.location because they are stable for the SPA's lifetime —
+  // only the search string is state-derived.
+  const urlState = useURLState()
+  const search = serializeURL(urlState)
+  const url =
+    window.location.origin +
+    window.location.pathname +
+    (search.length > 0 ? `?${search}` : '')
   const clipboardAvailable =
     typeof navigator.clipboard !== 'undefined' &&
     typeof navigator.clipboard.writeText === 'function'
