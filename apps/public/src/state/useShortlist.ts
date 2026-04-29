@@ -74,6 +74,16 @@ export function useShortlist(): UseShortlistResult {
   // effects would scale the URL-write storm with card count. The bootstrap
   // resolves once and registers the module-scoped mirror; every hook
   // instance subscribes to the resulting state via useSyncExternalStore.
+  //
+  // Bootstrap fires inside useEffect (post-commit) rather than synchronously
+  // during render. On the LS-only hydration path (URL empty, LS non-empty)
+  // this produces a brief flash where the first commit shows urlShortlist=[]
+  // before the effect's setURLState triggers the hydrated render. A
+  // synchronous-during-render variant is technically possible (setURLState
+  // is a sync history write), but render-phase mutation of an external
+  // store while useSyncExternalStore is reading it has subtle React 19
+  // scheduling implications. The safer-for-now choice is the effect-based
+  // timing; the no-flash improvement is tracked in issue #23.
   useEffect((): void => {
     runBootstrap(urlShortlist)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot mount
