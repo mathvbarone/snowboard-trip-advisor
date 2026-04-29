@@ -30,6 +30,7 @@ export { InfoGlyph } from './icons/ui/info'
 export { ChevronDownGlyph } from './icons/ui/chevron-down'
 export { Tooltip, type TooltipProps } from './primitives/Tooltip'
 export { Modal, type ModalProps } from './primitives/Modal'
+export { Drawer, type DrawerProps } from './primitives/Drawer'
 export {
   SourceBadge,
   type SourceBadgeProps,
