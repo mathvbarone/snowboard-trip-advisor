@@ -41,6 +41,7 @@ Exit criteria:
 ### Phase 1 — Safe patch-first updates (same day once unblocked)
 1. Generate baseline:
    - `npm ci`
+   - `mkdir -p .tmp`
    - `npm outdated --all --json > .tmp/outdated.json`
    - `npm audit --json > .tmp/audit.json`
 2. Update patch + minor versions first:
