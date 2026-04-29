@@ -5,6 +5,7 @@ import {
   Suspense,
   lazy,
   startTransition,
+  useState,
   type JSX,
   type ReactNode,
 } from 'react'
@@ -16,6 +17,8 @@ import { useURLState } from './state/useURLState'
 import CardsView from './views/cards'
 import type DetailDrawerType from './views/detail'
 import DroppedSlugsBanner from './views/DroppedSlugsBanner'
+import MergeReplaceDialog from './views/MergeReplaceDialog'
+import ShareUrlDialog from './views/ShareUrlDialog'
 import ShortlistDrawer from './views/ShortlistDrawer'
 import DatasetLoading from './views/states/DatasetLoading'
 import DatasetUnavailable from './views/states/DatasetUnavailable'
@@ -89,12 +92,24 @@ function AppContent(): JSX.Element {
     url.detail !== undefined && wide.has(url.detail)
       ? views.find((v): boolean => v.slug === url.detail)
       : undefined
+  // ShortlistDrawer + ShareUrlDialog take controlled open/onOpenChange
+  // props (PR 3.3 contract). PR 3.4 will lift these into HeaderBar's
+  // trigger when Shell composes HeaderBar; until then App.tsx owns the
+  // state. The dialogs render inert (`open={false}`) until a trigger
+  // arrives.
+  const [shortlistOpen, setShortlistOpen] = useState<boolean>(false)
+  const [shareOpen, setShareOpen] = useState<boolean>(false)
   return (
     <>
       <DroppedSlugsBanner />
       <View />
       {detailMatch !== undefined ? <DetailDrawer slug={detailMatch.slug} /> : null}
-      <ShortlistDrawer />
+      <ShortlistDrawer
+        open={shortlistOpen}
+        onOpenChange={setShortlistOpen}
+      />
+      <ShareUrlDialog open={shareOpen} onOpenChange={setShareOpen} />
+      <MergeReplaceDialog />
     </>
   )
 }

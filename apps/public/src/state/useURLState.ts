@@ -120,3 +120,19 @@ export function setURLState(partial: Partial<URLState>): void {
 export function useURLState(): URLState {
   return useSyncExternalStore(subscribe, getSnapshot)
 }
+
+/**
+ * Module-scoped subscription to URL changes for non-React consumers.
+ * Returns the snapshot reader and an unsubscribe. Composes with the same
+ * `subscribers` Set + popstate handler that powers `useURLState`, so a
+ * subscriber installed here fires on every transition the React tree
+ * also sees (no parallel pubsub).
+ */
+export function subscribeToURLChanges(cb: () => void): () => void {
+  return subscribe(cb)
+}
+
+/** Read the current URL state synchronously, outside React render. */
+export function readURLState(): URLState {
+  return getSnapshot()
+}

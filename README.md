@@ -53,6 +53,10 @@ The Phase 1 seed dataset ships two resorts: **Kotelnica Białczańska** (`koteln
 
 The default route of the public app (`/`) is the **cards landing**: a hero header, a filter bar (country chips, sort, bucketed price), and one card per resort. Each card surfaces four metric fields side-by-side — durable (altitude range, slopes_km) and live (snow_depth_cm, lift_pass_day) — with the source glyph + observed_at tooltip from `field_sources`. A star toggles the resort into a URL-shared shortlist; "Browse lodging near …" routes outbound with `rel="noopener noreferrer"` + `referrerpolicy="no-referrer"`. Sort and country filter are URL-shared (`?sort=`, `?country=`) so links round-trip; the price bucket is a private filter and is not serialized. The matrix view (PR 3.4) and detail drawer (PR 3.5) compose against the same dataset projection.
 
+## Shortlist & sharing
+
+The shortlist is the trip organizer's working set — up to six resorts they want to compare side-by-side. Tapping the star on any card adds the resort to `?shortlist=…` in the URL; tapping again removes it. A right-edge drawer lists the shortlisted resorts with a per-row remove button and an "Open Matrix" CTA (visible at the `md` breakpoint and up; the matrix view itself redirects below `md`). Sharing is one click: the share-URL dialog copies the current `window.location.href` via the Clipboard API, with a readonly text-input fallback when the API is unavailable (legacy browsers, non-https). When a recipient opens a share-link in a session that already has a different shortlist saved, a merge/replace dialog asks whether to keep the link's set, keep the saved one, or merge them — set-equal-but-reordered links adopt URL order silently and never trigger the prompt.
+
 ## Current state today
 
 **The pivot is documented but not executed.** The codebase on `main` is still the pre-pivot scoring pipeline. Migration happens on the `pivot/data-transparency` branch across six epics (spec §9); `main` stays deployable until Epic 6 closes.

@@ -68,6 +68,42 @@ describe('Input', (): void => {
     expect(screen.getByLabelText('Resort name')).toBeDisabled()
   })
 
+  it('respects the readOnly prop and ignores user typing', async (): Promise<void> => {
+    const onChange = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <Input
+        label="Share URL"
+        value="https://example.test/?shortlist=a"
+        onChange={onChange}
+        readOnly
+      />,
+    )
+    const input = screen.getByLabelText('Share URL')
+    expect(input).toHaveAttribute('readonly')
+    await user.type(input, 'x')
+    expect(onChange).not.toHaveBeenCalled()
+    expect(input).toHaveValue('https://example.test/?shortlist=a')
+  })
+
+  it('renders a readOnly value without an onChange handler (Codex P3 / share-link fallback)', (): void => {
+    // The clipboard-unavailable fallback in ShareUrlDialog renders a
+    // readOnly Input with no onChange — the value is the live URL on every
+    // render and the user copies manually. React allows controlled `value`
+    // without `onChange` when `readOnly` is set; assert the rendered DOM
+    // attributes so a future contract change does not silently regress.
+    render(
+      <Input
+        label="Share URL"
+        value="https://example.test/?shortlist=a"
+        readOnly
+      />,
+    )
+    const input = screen.getByLabelText('Share URL')
+    expect(input).toHaveAttribute('readonly')
+    expect(input).toHaveValue('https://example.test/?shortlist=a')
+  })
+
   it('forwards aria-invalid', (): void => {
     render(
       <Input

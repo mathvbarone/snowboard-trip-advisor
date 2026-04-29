@@ -10,7 +10,6 @@ import type { JSX } from 'react'
 
 import { countryToPrimaryLang } from '../lib/lang'
 import { useShortlist } from '../state/useShortlist'
-import { setURLState } from '../state/useURLState'
 
 // Single-resort card on the cards landing. Composition (top → bottom):
 //  1. Hero photo strip (decorative CSS background — no <img alt>).
@@ -23,28 +22,22 @@ import { setURLState } from '../state/useURLState'
 //  5. "Browse lodging near X" external CTA (rel/referrerpolicy hardened
 //     via the design-system ExternalLink wrapper).
 //
-// SHORTLIST_MAX (=6) head-truncation lives in `lib/urlState.ts`'s
-// parseURL/serializeURL — both the in-memory snapshot and the wire form are
-// capped there, so toggleShortlist below can simply append without its own
-// cap. Likewise the "isShortlisted" branch eliminates a redundant
-// dedupe-check that would otherwise be dead code (and a coverage gap).
+// SHORTLIST_MAX (=6) head-truncate-on-add lives in useShortlist (the hook
+// is the user-visible setter — it drops the oldest slug when adding past
+// the cap). The URL layer (lib/urlState.ts) also clamps to 6 as a defence
+// in depth.
 
 export interface ResortCardProps {
   resort: ResortView
 }
 
 export default function ResortCard({ resort }: ResortCardProps): JSX.Element {
-  const { shortlist } = useShortlist()
+  const { shortlist, toggle } = useShortlist()
   const isShortlisted = shortlist.includes(resort.slug)
   const lang = countryToPrimaryLang(resort.country)
 
   function toggleShortlist(): void {
-    if (isShortlisted) {
-      const next = shortlist.filter((s): boolean => s !== resort.slug)
-      setURLState({ shortlist: next })
-      return
-    }
-    setURLState({ shortlist: [...shortlist, resort.slug] })
+    toggle(resort.slug)
   }
 
   const lodgingHref = `https://www.booking.com/searchresults.html?ss=${encodeURIComponent(
