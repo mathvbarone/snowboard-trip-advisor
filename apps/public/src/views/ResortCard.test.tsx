@@ -96,9 +96,11 @@ function makeSpindleruv(): ResortView {
 describe('ResortCard', (): void => {
   beforeEach((): void => {
     setLocation('')
+    window.localStorage.clear()
   })
   afterEach((): void => {
     setLocation('')
+    window.localStorage.clear()
   })
 
   it('renders the resort name as a heading', (): void => {
