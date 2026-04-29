@@ -1,0 +1,22 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: daily
+      time: "05:00"
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 10
+    groups:
+      npm-security-patches:
+        applies-to: security-updates
+        update-types:
+          - patch
+          - minor
+      npm-nonsecurity-weekly:
+        applies-to: version-updates
+        patterns:
+          - "*"
+    labels:
+      - dependencies
+      - security
