@@ -1,6 +1,8 @@
 import { useEffect, useSyncExternalStore } from 'react'
 import { z } from 'zod'
 
+import { SLUG_REGEX } from '../lib/urlState'
+
 import {
   readURLState,
   setURLState,
@@ -33,10 +35,13 @@ import {
 
 const STORAGE_KEY = 'sta-shortlist-last-known'
 
-// Persisted payload is a flat string array. The shape is loose by design —
-// downstream consumers (selectors / MatrixView) operate on the URL-derived
-// snapshot, not on this LS payload directly. Schema validation only guards
-// against malformed third-party writes.
+// Persisted payload is a flat string array. The shape itself is loose
+// (downstream consumers operate on the URL-derived snapshot, not this LS
+// payload directly), but each entry is validated against SLUG_REGEX inside
+// `readStored` and entries that fail are dropped before the value is
+// promoted into the URL. Without the per-entry filter, a tampered or legacy
+// LS value like 'foo&view=matrix' would round-trip through `setURLState`
+// and corrupt unrelated query keys (Codex P2).
 const StoredShortlistSchema = z.array(z.string())
 
 const SHORTLIST_MAX = 6
@@ -295,7 +300,14 @@ function readStored(): ReadonlyArray<string> | null {
     return null
   }
   const result = StoredShortlistSchema.safeParse(parsed)
-  return result.success ? result.data : null
+  if (!result.success) {
+    return null
+  }
+  // Filter to the same per-item slug shape parseURL enforces. URL parser's
+  // own filter would catch this on the next read, but only AFTER the bad
+  // value has already been written into the URL — at which point characters
+  // like '&' or '=' have spilled into other query keys.
+  return result.data.filter((slug): boolean => SLUG_REGEX.test(slug))
 }
 
 function writeStored(value: ReadonlyArray<string>): void {

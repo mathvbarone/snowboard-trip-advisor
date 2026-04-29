@@ -136,6 +136,33 @@ describe('useShortlist', (): void => {
       const { result } = renderHook(() => useShortlist())
       expect(result.current.shortlist).toEqual([])
     })
+
+    it('drops localStorage entries that fail the slug regex (no URL corruption)', (): void => {
+      // Codex P2: without slug validation, a tampered or legacy LS entry like
+      // 'foo&view=matrix' would be promoted into the URL via runBootstrap and
+      // corrupt unrelated query keys (view, sort, …) on load. Validation must
+      // mirror parseURL's per-item filter so only well-formed slugs survive.
+      window.localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([
+          'kotelnica-bialczanska',
+          'foo&view=matrix',
+          'UPPER-CASE',
+          'spindleruv-mlyn',
+        ]),
+      )
+      const { result } = renderHook(() => useShortlist())
+      expect(result.current.shortlist).toEqual([
+        'kotelnica-bialczanska',
+        'spindleruv-mlyn',
+      ])
+      const search = window.location.search
+      expect(search).toContain(
+        'shortlist=kotelnica-bialczanska,spindleruv-mlyn',
+      )
+      expect(search).not.toContain('view=matrix')
+      expect(search).not.toContain('UPPER-CASE')
+    })
   })
 
   describe('mirror writes on URL change', (): void => {

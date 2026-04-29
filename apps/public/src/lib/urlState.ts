@@ -10,7 +10,11 @@ import { z } from 'zod'
 // overlay key (&detail=<slug>), not a view (parent §2.1 deviation per
 // spec §1.1).
 
-const SLUG_REGEX = /^[a-z0-9-]{1,64}$/
+// Exported so adjacent consumers (e.g. useShortlist's localStorage hydration)
+// validate against the same shape. Keeping a single source of truth for the
+// slug shape prevents stored values from being promoted into the URL with
+// characters URLSearchParams would reinterpret as a separator.
+export const SLUG_REGEX = /^[a-z0-9-]{1,64}$/
 const COUNTRY_REGEX = /^[A-Z]{2}$/
 
 export const VIEW_VALUES = ['cards', 'matrix'] as const
