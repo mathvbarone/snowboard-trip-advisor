@@ -17,7 +17,7 @@ npm run setup
 
 The rules in this file are not suggestions. They are backed by mechanical gates that fire before content lands in git:
 
-- **CI required status check `quality-gate / qa`** — runs `npm run qa` (lint → typecheck → coverage → test:hooks) on every PR. PR cannot merge if red.
+- **CI required status check `quality-gate / qa`** — runs `npm run qa` (lint → typecheck → coverage → tokens:check → test:hooks) on every PR. PR cannot merge if red.
 - **CI required status check `dco`** — verifies every commit in the PR carries a `Signed-off-by:` trailer. Missing trailer fails the PR.
 - **Pre-commit hook** — `npm run qa` runs before every local commit (`scripts/pre-commit`, installed by `npm run setup`).
 - **Claude Code `PreToolUse:Bash` hook** — blocks `--no-verify` anywhere and `git push --force` (or `--force-with-lease` / `-f`) to `main`/`master` (`scripts/hooks/deny-dangerous-git.sh`). A blocked call surfaces the reason to the agent; adjust, don't retry.
