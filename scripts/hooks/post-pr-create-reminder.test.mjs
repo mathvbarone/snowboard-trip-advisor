@@ -153,36 +153,39 @@ test('resolveWorktree: cwd outside any worktree → null', () => {
   )
 })
 
-test('resolveWorktree: cwd matches a detached worktree → null (skipped)', () => {
+test('resolveWorktree: cwd matches a detached worktree → returns its path', () => {
+  // CI's actions/checkout produces a detached HEAD on PR refs; the only
+  // worktree IS detached, and suppressing it would return null even though
+  // the path is a valid resolution.
   assert.equal(
     resolveWorktree(
       '/Users/x/repo/.worktrees/detached-wt',
       FIXTURE_PORCELAIN,
       { platform: 'linux' },
     ),
-    null,
+    '/Users/x/repo/.worktrees/detached-wt',
   )
 })
 
-test('resolveWorktree: cwd matches a locked worktree → null (skipped)', () => {
+test('resolveWorktree: cwd matches a locked worktree → returns its path', () => {
   assert.equal(
     resolveWorktree(
       '/Users/x/repo/.worktrees/locked-wt',
       FIXTURE_PORCELAIN,
       { platform: 'linux' },
     ),
-    null,
+    '/Users/x/repo/.worktrees/locked-wt',
   )
 })
 
-test('resolveWorktree: cwd matches a prunable worktree → null (skipped)', () => {
+test('resolveWorktree: cwd matches a prunable worktree → returns its path', () => {
   assert.equal(
     resolveWorktree(
       '/Users/x/repo/.worktrees/prunable-wt',
       FIXTURE_PORCELAIN,
       { platform: 'linux' },
     ),
-    null,
+    '/Users/x/repo/.worktrees/prunable-wt',
   )
 })
 

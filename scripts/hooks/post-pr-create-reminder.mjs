@@ -108,13 +108,16 @@ export function resolveWorktree(cwd, porcelain, opts = {}) {
   const blocks = parsePorcelainBlocks(porcelain)
   const cwdNorm = normalizePath(cwd, platform)
 
-  // Find the LONGEST-PREFIX matching block across ALL blocks (including
-  // excluded ones). The most-specific worktree the cwd lives in is what
-  // the agent's command actually ran inside, regardless of healthy/detached
-  // status. Then: if that block is detached / locked / prunable, suppress
-  // the result entirely (return null → v1 fallback). Falling through to a
-  // less-specific ancestor worktree would mislead the agent into thinking
-  // its command ran from a different checkout than it did.
+  // Return the LONGEST-PREFIX matching block across ALL blocks. The most-
+  // specific worktree the cwd lives in is what the agent's command actually
+  // ran inside, regardless of git's housekeeping flags (`detached`,
+  // `locked`, `prunable`). Earlier versions suppressed excluded blocks but
+  // that broke CI's default `actions/checkout` behavior (detached HEAD on
+  // PR refs is the only worktree, and suppressing it returned null when a
+  // valid resolution was available). Returning the path is more useful to
+  // the agent — it accurately describes where the command ran — and any
+  // staleness signal is captured by the path itself ("oh, this is the
+  // .worktrees/stale-* directory").
   let bestBlock = null
   let bestLen = -1
   for (const block of blocks) {
@@ -129,13 +132,7 @@ export function resolveWorktree(cwd, porcelain, opts = {}) {
       }
     }
   }
-  if (bestBlock === null) {
-    return null
-  }
-  if (bestBlock.detached || bestBlock.locked || bestBlock.prunable) {
-    return null
-  }
-  return bestBlock.path
+  return bestBlock === null ? null : bestBlock.path
 }
 
 /**
