@@ -23,6 +23,20 @@ function setLocation(search: string): void {
   window.history.replaceState({}, '', `/${search.length > 0 ? `?${search}` : ''}`)
 }
 
+// Stub ONLY the clipboard getter on navigator, not the entire navigator
+// object. The previous `vi.stubGlobal('navigator', { clipboard: undefined })`
+// replaced navigator wholesale, which clobbered userEvent v14's keyboard
+// polyfills and forced "fallback" tests to dance around that side effect.
+// Targeted getter-spy keeps the rest of navigator intact; restoreAllMocks
+// in afterEach undoes the spy.
+function stubClipboardUndefined(): void {
+  vi.spyOn(navigator, 'clipboard', 'get').mockReturnValue(
+    // The runtime clipboard property is `Clipboard | undefined`; the DOM
+    // typing narrows the getter to `Clipboard`, so cast through unknown.
+    undefined as unknown as Clipboard,
+  )
+}
+
 function Harness({
   initialOpen = true,
 }: {
@@ -101,7 +115,7 @@ describe('ShareUrlDialog', (): void => {
     // onChange branch covered.
     const user = userEvent.setup()
     void user
-    vi.stubGlobal('navigator', { clipboard: undefined })
+    stubClipboardUndefined()
     render(<Harness />)
     const input = screen.getByLabelText(/share url/i)
     await user.type(input, 'x')
@@ -110,14 +124,10 @@ describe('ShareUrlDialog', (): void => {
 
   it('renders a readonly fallback input when navigator.clipboard is undefined', (): void => {
     // userEvent.setup polyfills navigator.clipboard for click-side support;
-    // we model "no clipboard support" by stubbing navigator with the
-    // clipboard property explicitly set to undefined. vi.stubGlobal
-    // captures the state and afterEach's vi.unstubAllGlobals restores it.
-    // Stubbing navigator entirely — only the props the dialog actually
-    // reads are needed. Using a fresh object (not `{...navigator}`) keeps
-    // the lint rule happy (Navigator is a class instance and spreading
-    // would lose its prototype).
-    vi.stubGlobal('navigator', { clipboard: undefined })
+    // we model "no clipboard support" by stubbing only the navigator
+    // .clipboard getter (helper above). afterEach's vi.restoreAllMocks
+    // undoes the spy.
+    stubClipboardUndefined()
     render(<Harness />)
     // Fallback: a text-input control showing the URL. The user copies
     // manually (Cmd/Ctrl+C on the pre-selected text).
@@ -153,11 +163,9 @@ describe('ShareUrlDialog', (): void => {
   })
 
   it('is axe-clean when open in clipboard-fallback mode', async (): Promise<void> => {
-    // Stubbing navigator entirely — only the props the dialog actually
-    // reads are needed. Using a fresh object (not `{...navigator}`) keeps
-    // the lint rule happy (Navigator is a class instance and spreading
-    // would lose its prototype).
-    vi.stubGlobal('navigator', { clipboard: undefined })
+    // Targeted clipboard-only stub (helper above) — keeps the rest of
+    // navigator (and userEvent's polyfills) intact.
+    stubClipboardUndefined()
     const view = render(<Harness />)
     expect(await axe(view.container)).toHaveNoViolations()
   })
