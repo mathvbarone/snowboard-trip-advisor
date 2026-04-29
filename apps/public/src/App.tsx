@@ -18,6 +18,7 @@ import CardsView from './views/cards'
 import type DetailDrawerType from './views/detail'
 import DroppedSlugsBanner from './views/DroppedSlugsBanner'
 import MergeReplaceDialog from './views/MergeReplaceDialog'
+import ShareUrlDialog from './views/ShareUrlDialog'
 import ShortlistDrawer from './views/ShortlistDrawer'
 import DatasetLoading from './views/states/DatasetLoading'
 import DatasetUnavailable from './views/states/DatasetUnavailable'
@@ -91,11 +92,13 @@ function AppContent(): JSX.Element {
     url.detail !== undefined && wide.has(url.detail)
       ? views.find((v): boolean => v.slug === url.detail)
       : undefined
-  // ShortlistDrawer takes controlled open/onOpenChange props (PR 3.3
-  // contract; the panel is reusable in PR 3.5's matrix-view route too).
-  // PR 3.4 will lift these into HeaderBar's shortlist trigger when Shell
-  // composes HeaderBar; until then App.tsx owns the state.
+  // ShortlistDrawer + ShareUrlDialog take controlled open/onOpenChange
+  // props (PR 3.3 contract). PR 3.4 will lift these into HeaderBar's
+  // trigger when Shell composes HeaderBar; until then App.tsx owns the
+  // state. The dialogs render inert (`open={false}`) until a trigger
+  // arrives.
   const [shortlistOpen, setShortlistOpen] = useState<boolean>(false)
+  const [shareOpen, setShareOpen] = useState<boolean>(false)
   return (
     <>
       <DroppedSlugsBanner />
@@ -105,6 +108,7 @@ function AppContent(): JSX.Element {
         open={shortlistOpen}
         onOpenChange={setShortlistOpen}
       />
+      <ShareUrlDialog open={shareOpen} onOpenChange={setShareOpen} />
       <MergeReplaceDialog />
     </>
   )
