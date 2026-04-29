@@ -320,7 +320,9 @@ test('buildReminder: null path → v1 reminder, no worktree prefix', () => {
 test('buildReminder: with path → prepends worktree-aware sentence', () => {
   const r = buildReminder('/Users/x/repo/.worktrees/feat')
   assert.match(r, /worktree at \/Users\/x\/repo\/\.worktrees\/feat/)
-  assert.match(r, /cd \/Users\/x\/repo\/\.worktrees\/feat &&/)
+  // The cd command argument is POSIX-shell-quoted so a literal copy-paste
+  // survives spaces, parens, etc.
+  assert.match(r, /cd '\/Users\/x\/repo\/\.worktrees\/feat' &&/)
   // The v1 reminder text must still be present after the prefix.
   assert.match(r, /PR opened via `gh pr create`/)
   assert.match(r, /post `@codex review`/)
@@ -334,4 +336,25 @@ test('buildReminder: prefix appears BEFORE the v1 body', () => {
     prefixIdx >= 0 && v1Idx >= 0 && prefixIdx < v1Idx,
     `prefix (${prefixIdx}) must precede v1 body (${v1Idx}); reminder=${r}`,
   )
+})
+
+test('buildReminder: paths with spaces are shell-quoted in the cd prefix', () => {
+  const r = buildReminder('/Users/Alice Smith/repo/.worktrees/feat')
+  // Human-readable mention — unquoted, prose context.
+  assert.match(
+    r,
+    /worktree at \/Users\/Alice Smith\/repo\/\.worktrees\/feat/,
+  )
+  // cd command — single-quoted so the space doesn't word-split.
+  assert.match(
+    r,
+    /cd '\/Users\/Alice Smith\/repo\/\.worktrees\/feat' &&/,
+  )
+})
+
+test("buildReminder: paths with single quotes are escaped via the '\\'' idiom", () => {
+  const r = buildReminder("/Users/O'Brien/repo")
+  // POSIX-safe escape: 'a'\''b' parses as the literal string a'b under sh.
+  // The actual character sequence in the output is: '/Users/O'\''Brien/repo'
+  assert.match(r, /cd '\/Users\/O'\\''Brien\/repo' &&/)
 })

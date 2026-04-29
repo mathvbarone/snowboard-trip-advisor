@@ -160,10 +160,28 @@ export function buildReminder(worktreePath) {
   if (typeof worktreePath !== 'string' || worktreePath.length === 0) {
     return v1Body
   }
+  // The `cd <path> &&` is meant to be copy-paste-runnable, so the path is
+  // POSIX-shell-quoted (single quotes; embedded `'` escaped via the `'\''`
+  // idiom). The human-readable `at <path>` mention stays unquoted for
+  // readability — it's prose, not a command.
+  const cdArg = shellQuoteSingle(worktreePath)
   const prefix =
     `Run all dev/test/build commands from inside the worktree at ${worktreePath}; ` +
-    `prefix bash invocations with cd ${worktreePath} && so the trace is auditable. Then: `
+    `prefix bash invocations with cd ${cdArg} && so the trace is auditable. Then: `
   return prefix + v1Body
+}
+
+/**
+ * POSIX shell-quote a string by wrapping in single quotes and escaping
+ * any embedded single quotes via the `'\''` idiom (close quote, escaped
+ * quote, reopen). Output is a single shell argument that survives
+ * spaces, parens, semicolons, etc. without re-interpretation.
+ *
+ * @param {string} s
+ * @returns {string}
+ */
+function shellQuoteSingle(s) {
+  return "'" + String(s).replace(/'/g, "'\\''") + "'"
 }
 
 // ---------- Internal helpers ----------
