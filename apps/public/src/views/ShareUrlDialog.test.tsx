@@ -166,4 +166,23 @@ describe('ShareUrlDialog', (): void => {
     await user.keyboard('{Escape}')
     expect(screen.queryByRole('dialog')).toBeNull()
   })
+
+  it('resets copyState to idle when the dialog is reopened after a copy', async (): Promise<void> => {
+    // Reviewer's SUGGESTION: ShareUrlDialog is mounted unconditionally by
+    // App.tsx (only Radix's Content unmounts on close), so a top-level
+    // useState in the dialog persists across open/close cycles. Without an
+    // explicit reset, "Copied!" leaks into the next open.
+    const user = userEvent.setup()
+    vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined)
+    render(<Harness />)
+    await user.click(screen.getByRole('button', { name: /copy link/i }))
+    expect(await screen.findByText(/copied/i)).toBeInTheDocument()
+    // Close via Escape, then reopen via the Harness's "Open share" button.
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog')).toBeNull()
+    await user.click(screen.getByRole('button', { name: /open share/i }))
+    expect(screen.getByRole('dialog', { name: /share/i })).toBeInTheDocument()
+    // The "Copied!" feedback must NOT carry over from the previous session.
+    expect(screen.queryByText(/copied/i)).toBeNull()
+  })
 })

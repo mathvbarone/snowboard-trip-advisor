@@ -3,7 +3,7 @@ import {
   Input,
   Modal,
 } from '@snowboard-trip-advisor/design-system'
-import { useState, type JSX } from 'react'
+import { useEffect, useState, type JSX } from 'react'
 
 // Spec §3.5 + plan step 5.7 contract:
 //   - Modal-based "share this link" dialog.
@@ -28,6 +28,17 @@ export default function ShareUrlDialog({
   onOpenChange,
 }: ShareUrlDialogProps): JSX.Element {
   const [copyState, setCopyState] = useState<CopyState>('idle')
+  // App.tsx mounts ShareUrlDialog unconditionally; only Radix's inner
+  // Content unmounts on close. Reset copyState on every open transition
+  // so "Copied!" / "Couldn't copy" messages from a previous session do
+  // not leak into the next one. Effect runs on every open change but the
+  // setter is a no-op when copyState is already 'idle', so there is no
+  // measurable cost on the close-then-open cycle.
+  useEffect((): void => {
+    if (open) {
+      setCopyState('idle')
+    }
+  }, [open])
   // Read window.location.href on every render — the URL changes when the
   // user toggles a star or sort, and the share link should reflect the
   // current state.
