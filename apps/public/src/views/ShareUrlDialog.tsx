@@ -92,13 +92,7 @@ export default function ShareUrlDialog({
             ) : null}
           </>
         ) : (
-          <Input
-            label="Share URL"
-            value={url}
-            onChange={(): void => {
-              // Read-only — the value is reset to the URL on every render.
-            }}
-          />
+          <Input label="Share URL" value={url} readOnly />
         )}
       </div>
     </Modal>

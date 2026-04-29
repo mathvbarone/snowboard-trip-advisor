@@ -107,17 +107,17 @@ describe('ShareUrlDialog', (): void => {
     expect(await screen.findByText(/copied/i)).toBeInTheDocument()
   })
 
-  it('fallback input ignores user typing (read-only — value snaps back to URL)', async (): Promise<void> => {
-    // The fallback Input is supplied an onChange handler so the design-
-    // system control type-checks; the handler is intentionally a no-op
-    // (the value is the current URL on every render, so user typing has
-    // no observable effect). Asserting the no-op behavior keeps the
-    // onChange branch covered.
+  it('fallback input is marked readOnly so user typing is rejected by the native control (Codex P3)', async (): Promise<void> => {
+    // Previously the fallback used a controlled Input with a no-op onChange,
+    // which silently discarded user keystrokes — focus + type appeared to
+    // work but edits vanished. The fix is `readOnly`: the native control
+    // surfaces the read-only affordance to the user (and to assistive tech)
+    // and suppresses user-driven input events at the source.
     const user = userEvent.setup()
-    void user
     stubClipboardUndefined()
     render(<Harness />)
     const input = screen.getByLabelText(/share url/i)
+    expect(input).toHaveAttribute('readonly')
     await user.type(input, 'x')
     expect((input as HTMLInputElement).value).toBe(window.location.href)
   })
@@ -133,6 +133,7 @@ describe('ShareUrlDialog', (): void => {
     // manually (Cmd/Ctrl+C on the pre-selected text).
     const input = screen.getByLabelText(/share url/i)
     expect(input).toBeInTheDocument()
+    expect(input).toHaveAttribute('readonly')
     expect((input as HTMLInputElement).value).toBe(window.location.href)
     // The clipboard button is NOT rendered when the API is unavailable —
     // the fallback path replaces it.
