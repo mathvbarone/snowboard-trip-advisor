@@ -10,6 +10,7 @@ import { Suspense, type JSX, type ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { __resetForTests } from '../state/useDataset'
+import { __resetShortlistForTests } from '../state/useShortlist'
 
 import MergeReplaceDialog from './MergeReplaceDialog'
 
@@ -53,12 +54,14 @@ function Harness(): JSX.Element {
 describe('MergeReplaceDialog', (): void => {
   beforeEach((): void => {
     __resetForTests()
+    __resetShortlistForTests()
     setLocation('')
     window.localStorage.clear()
   })
   afterEach((): void => {
     setLocation('')
     window.localStorage.clear()
+    __resetShortlistForTests()
   })
 
   it('does not render when there is no pending collision', async (): Promise<void> => {

@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App, { ShellErrorBoundary } from './App'
 import * as errors from './lib/errors'
 import { server } from './mocks/server'
+import { __resetShortlistForTests } from './state/useShortlist'
 
 async function renderAsync(node: ReactNode): Promise<ReturnType<typeof render>> {
   let view!: ReturnType<typeof render>
@@ -21,10 +22,14 @@ async function renderAsync(node: ReactNode): Promise<ReturnType<typeof render>> 
 
 beforeEach((): void => {
   window.history.replaceState({}, '', '/')
+  __resetShortlistForTests()
+  window.localStorage.clear()
 })
 afterEach((): void => {
   vi.restoreAllMocks()
   window.history.replaceState({}, '', '/')
+  __resetShortlistForTests()
+  window.localStorage.clear()
 })
 
 describe('App', (): void => {

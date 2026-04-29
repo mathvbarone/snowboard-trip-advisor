@@ -5,6 +5,7 @@ import { Suspense, type ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { __resetForTests } from '../state/useDataset'
+import { __resetShortlistForTests } from '../state/useShortlist'
 
 import CardsView from './cards'
 
@@ -41,10 +42,12 @@ async function renderCardsView(): Promise<RenderResult> {
 describe('CardsView', (): void => {
   beforeEach((): void => {
     __resetForTests()
+    __resetShortlistForTests()
     setLocation('')
   })
   afterEach((): void => {
     setLocation('')
+    __resetShortlistForTests()
   })
 
   it('renders the Hero <h1>', async (): Promise<void> => {

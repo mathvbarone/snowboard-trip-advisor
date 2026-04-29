@@ -1,7 +1,7 @@
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { useShortlist } from './useShortlist'
+import { __resetShortlistForTests, useShortlist } from './useShortlist'
 
 // Spec §6.1 + plan step 5.4 contract:
 //   - Mount: parse URL `&shortlist=`. Absent → hydrate from
@@ -27,10 +27,12 @@ describe('useShortlist', (): void => {
   beforeEach((): void => {
     setLocation('')
     window.localStorage.clear()
+    __resetShortlistForTests()
   })
   afterEach((): void => {
     setLocation('')
     window.localStorage.clear()
+    __resetShortlistForTests()
   })
 
   describe('hydration', (): void => {
@@ -223,6 +225,26 @@ describe('useShortlist', (): void => {
       })
       expect(result.current.pendingCollision).toBeNull()
       expect(result.current.shortlist).toEqual(['spindleruv-mlyn'])
+      // Replace persists the URL choice so a reload of the same shared
+      // link doesn't re-trigger the collision dialog (Codex P2 fix).
+      expect(window.localStorage.getItem(STORAGE_KEY)).toBe(
+        JSON.stringify(['spindleruv-mlyn']),
+      )
+    })
+
+    it('acceptUrl is a no-op when there is no pending collision (does not overwrite LS)', (): void => {
+      window.localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify(['kotelnica-bialczanska']),
+      )
+      setLocation('shortlist=kotelnica-bialczanska')
+      const { result } = renderHook(() => useShortlist())
+      expect(result.current.pendingCollision).toBeNull()
+      const lsBefore = window.localStorage.getItem(STORAGE_KEY)
+      act((): void => {
+        result.current.acceptUrl()
+      })
+      expect(window.localStorage.getItem(STORAGE_KEY)).toBe(lsBefore)
     })
 
     it('keepStored writes the stored set back to URL (Keep mine)', (): void => {

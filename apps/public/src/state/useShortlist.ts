@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useSyncExternalStore } from 'react'
 import { z } from 'zod'
 
 import { setURLState, useURLState } from './useURLState'
@@ -54,33 +54,19 @@ export interface UseShortlistResult {
 export function useShortlist(): UseShortlistResult {
   const url = useURLState()
   const urlShortlist = url.shortlist
-  const [pendingCollision, setPendingCollision] =
-    useState<PendingCollision | null>(null)
+  const pendingCollision = useSyncExternalStore(
+    subscribeBootstrap,
+    getBootstrapSnapshot,
+  )
 
-  // First-mount hydration + collision-detection. Runs once (deps=[]). The
-  // hydration effect runs in source order BEFORE the mirror effect on the
-  // mount commit, so when the URL is empty + LS has slugs, the
-  // setURLState({ shortlist: stored }) call here schedules a re-render
-  // that flows through the mirror effect's `[urlShortlist]` dep update —
-  // and the LS payload (still the same value we just hydrated from)
-  // remains untouched.
+  // First-mount hydration + collision-detection. Module-scoped one-shot
+  // guard — `useShortlist()` is consumed by every ResortCard plus other
+  // views, so a per-instance effect would scale the URL-write storm with
+  // card count on the empty-URL/non-empty-LS hydration path. The bootstrap
+  // resolves once, writes its result into a module-scoped store, and every
+  // hook instance subscribes via useSyncExternalStore.
   useEffect((): void => {
-    const stored = readStored()
-    if (urlShortlist.length === 0) {
-      // URL empty → hydrate from LS. No collision possible.
-      if (stored !== null && stored.length > 0) {
-        setURLState({ shortlist: stored })
-      }
-      return
-    }
-    if (stored === null || stored.length === 0) {
-      return
-    }
-    if (setEqual(urlShortlist, stored)) {
-      // Same set, possibly different order: URL order silently wins.
-      return
-    }
-    setPendingCollision({ urlSlugs: urlShortlist, storedSlugs: stored })
+    runBootstrap(urlShortlist)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot mount
   }, [])
 
@@ -123,7 +109,15 @@ export function useShortlist(): UseShortlistResult {
   }
 
   function acceptUrl(): void {
-    setPendingCollision(null)
+    if (pendingCollision === null) {
+      return
+    }
+    // Persist the URL choice so a reload of the same shared link doesn't
+    // re-trigger the collision dialog (Codex P2): without this, LS still
+    // holds the pre-Replace value and the next mount sees a fresh
+    // collision against the same URL slugs.
+    writeStored(pendingCollision.urlSlugs)
+    clearBootstrapCollision()
   }
 
   function keepStored(): void {
@@ -131,7 +125,7 @@ export function useShortlist(): UseShortlistResult {
       return
     }
     setURLState({ shortlist: [...pendingCollision.storedSlugs] })
-    setPendingCollision(null)
+    clearBootstrapCollision()
   }
 
   function merge(): void {
@@ -148,7 +142,7 @@ export function useShortlist(): UseShortlistResult {
       }
     }
     setURLState({ shortlist: union.slice(0, SHORTLIST_MAX) })
-    setPendingCollision(null)
+    clearBootstrapCollision()
   }
 
   return {
@@ -161,6 +155,74 @@ export function useShortlist(): UseShortlistResult {
     keepStored,
     merge,
   }
+}
+
+// ---------- Module-scoped one-shot bootstrap state ----------
+//
+// `useShortlist()` is consumed by every ResortCard plus other views, so a
+// per-instance mount effect would scale `setURLState` calls + collision-
+// state churn with card count. The bootstrap therefore runs at most once
+// (`bootstrapDone`) and exposes its collision result through a tiny
+// pub/sub backed by `useSyncExternalStore` — every hook instance reads
+// the same value, the dialog mount in App.tsx is the consumer that
+// matters.
+
+let bootstrapDone = false
+let bootstrapCollision: PendingCollision | null = null
+const bootstrapListeners = new Set<() => void>()
+
+function notifyBootstrapListeners(): void {
+  for (const listener of bootstrapListeners) {
+    listener()
+  }
+}
+
+function subscribeBootstrap(callback: () => void): () => void {
+  bootstrapListeners.add(callback)
+  return (): void => {
+    bootstrapListeners.delete(callback)
+  }
+}
+
+function getBootstrapSnapshot(): PendingCollision | null {
+  return bootstrapCollision
+}
+
+function runBootstrap(urlShortlist: ReadonlyArray<string>): void {
+  if (bootstrapDone) {
+    return
+  }
+  bootstrapDone = true
+  const stored = readStored()
+  if (urlShortlist.length === 0) {
+    if (stored !== null && stored.length > 0) {
+      setURLState({ shortlist: stored })
+    }
+    return
+  }
+  if (stored === null || stored.length === 0) {
+    return
+  }
+  if (setEqual(urlShortlist, stored)) {
+    return
+  }
+  bootstrapCollision = { urlSlugs: urlShortlist, storedSlugs: stored }
+  notifyBootstrapListeners()
+}
+
+function clearBootstrapCollision(): void {
+  if (bootstrapCollision === null) {
+    return
+  }
+  bootstrapCollision = null
+  notifyBootstrapListeners()
+}
+
+/** Test-only: reset module-scoped bootstrap state between tests. */
+export function __resetShortlistForTests(): void {
+  bootstrapDone = false
+  bootstrapCollision = null
+  bootstrapListeners.clear()
 }
 
 function readStored(): ReadonlyArray<string> | null {

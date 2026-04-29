@@ -11,6 +11,7 @@ import { Suspense, useState, type JSX, type ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { __resetForTests } from '../state/useDataset'
+import { __resetShortlistForTests } from '../state/useShortlist'
 
 import ShortlistDrawer from './ShortlistDrawer'
 
@@ -81,6 +82,7 @@ function Harness({
 describe('ShortlistDrawer', (): void => {
   beforeEach((): void => {
     __resetForTests()
+    __resetShortlistForTests()
     setLocation('')
     window.localStorage.clear()
     vi.restoreAllMocks()
@@ -89,6 +91,7 @@ describe('ShortlistDrawer', (): void => {
     setLocation('')
     window.localStorage.clear()
     vi.restoreAllMocks()
+    __resetShortlistForTests()
   })
 
   it('opens when the HeaderBar shortlist trigger is clicked', async (): Promise<void> => {

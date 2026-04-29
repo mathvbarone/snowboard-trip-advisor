@@ -9,6 +9,8 @@ import userEvent from '@testing-library/user-event'
 import { axe } from 'jest-axe'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
+import { __resetShortlistForTests } from '../state/useShortlist'
+
 import ResortCard from './ResortCard'
 
 function setLocation(search: string): void {
@@ -97,10 +99,12 @@ describe('ResortCard', (): void => {
   beforeEach((): void => {
     setLocation('')
     window.localStorage.clear()
+    __resetShortlistForTests()
   })
   afterEach((): void => {
     setLocation('')
     window.localStorage.clear()
+    __resetShortlistForTests()
   })
 
   it('renders the resort name as a heading', (): void => {
