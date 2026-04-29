@@ -106,6 +106,32 @@ describe('validatePublishedDataset (Epic 2 PR 2.2)', (): void => {
     }
   })
 
+  it('does NOT return fx_provenance_invalid when fx math is within 1.0 EUR of Money.amount', (): void => {
+    // Cover the false branch of `Math.abs(expected - moneyValue) > 1.0` — the
+    // pristine-fixture test indirectly exercises this when the bundled fx math
+    // lines up exactly, but a deliberate "off by < 1.0 EUR" case is explicit and
+    // independent of the fixture's specific rate / native_amount numbers.
+    const mutated = structuredClone(fixture) as {
+      live_signals: Array<{
+        resort_slug: string
+        lift_pass_day: { amount: number; currency: string }
+        field_sources: Record<string, { fx?: { rate: number; native_amount: number } } | undefined>
+      }>
+    }
+    const kot = mutated.live_signals.find((l): boolean => l.resort_slug === 'kotelnica-bialczanska')
+    if (!kot) { throw new Error('fixture invariant') }
+    const liftPassFs = kot.field_sources['lift_pass_day']
+    if (!liftPassFs?.fx) { throw new Error('fixture invariant: kotelnica lift_pass_day must carry fx') }
+    // Set fx.rate * native_amount to be 0.5 EUR off Money.amount — within tolerance.
+    const target = kot.lift_pass_day.amount + 0.5
+    liftPassFs.fx.native_amount = 1
+    liftPassFs.fx.rate = target
+    const result = validatePublishedDataset(mutated)
+    if (!result.ok) {
+      expect(result.issues.some((i): boolean => i.code === 'fx_provenance_invalid')).toBe(false)
+    }
+  })
+
   it('returns metric_field_missing_source for snow_depth_cm when field_sources entry is absent', (): void => {
     const mutated = structuredClone(fixture) as { live_signals: Array<{ resort_slug: string; field_sources: Record<string, unknown> }> }
     const kot = mutated.live_signals.find((l): boolean => l.resort_slug === 'kotelnica-bialczanska')
