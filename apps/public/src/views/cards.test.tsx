@@ -173,27 +173,114 @@ describe('CardsView', (): void => {
     ).toBeInTheDocument()
   })
 
-  it('silently no-ops a stale ?country= URL whose code is absent from the dataset', async (): Promise<void> => {
+  it('renders <NoResorts> when ?country= filters the grid to zero rows (defence-in-depth)', async (): Promise<void> => {
     // 'XX' is a syntactically valid ISO-2 string per CountrySchema and is
-    // preserved through parseURL, but no seed resort uses it. With the
-    // stale-URL guard in filterViews, a country code that doesn't match
-    // any view in the dataset is treated as a no-op so the grid is never
-    // empty with no in-UI control to clear (chips for XX would not exist).
+    // preserved through parseURL, but no seed resort uses it. Strict
+    // country filtering returns []; per spec §390, <NoResorts> ships as
+    // defence-in-depth for views.length === 0. FilterBar must remain
+    // mounted above NoResorts so the user can recover by toggling chips.
     setLocation('country=XX')
     await renderCardsView()
-    expect(screen.queryAllByRole('heading', { level: 2 })).toHaveLength(2)
+    // No resort cards render. The only <h2> in the subtree is the
+    // <NoResorts> empty-state heading from EmptyStateLayout.
+    expect(
+      screen.queryByRole('heading', { level: 2, name: 'Kotelnica Białczańska' }),
+    ).toBeNull()
+    expect(
+      screen.queryByRole('heading', { level: 2, name: 'Špindlerův Mlýn' }),
+    ).toBeNull()
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'No resorts to show' }),
+    ).toBeInTheDocument()
+    expect(screen.getByText('Try adjusting your filters.')).toBeInTheDocument()
+    // FilterBar (with country chips for the dataset countries) is still
+    // visible — that's the recovery affordance.
+    expect(screen.getByRole('button', { name: 'PL' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'CZ' })).toBeInTheDocument()
+  })
+
+  it('clicking "Clear filters" inside <NoResorts> restores the grid (?country=XX → /)', async (): Promise<void> => {
+    // Codex PR 53 P1: single-country deployments hide FilterBar's country
+    // chips, which would strand users on a stale `?country=XX` link with
+    // no in-UI recovery path. NoResorts now exposes the recovery directly
+    // — clicking it must clear url.country AND reset the private price
+    // bucket, so any combination of active filters resolves cleanly.
+    setLocation('country=XX')
+    await renderCardsView()
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'No resorts to show' }),
+    ).toBeInTheDocument()
+
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: /clear filters/i }))
+
+    // URL country filter cleared.
+    expect(window.location.search).not.toContain('country')
+    // Both seed cards back.
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'Kotelnica Białczańska' }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'Špindlerův Mlýn' }),
+    ).toBeInTheDocument()
+  })
+
+  it('clicking "Clear filters" also resets the private price bucket', async (): Promise<void> => {
+    // Active price-bucket alone empties the grid. NoResorts must surface
+    // its recovery affordance, and the click must reset the bucket back to
+    // 'any' so the grid re-populates without the user re-touching the
+    // <Select>.
+    await renderCardsView()
+    const user = userEvent.setup()
+    await user.selectOptions(
+      screen.getByRole('combobox', { name: /price/i }),
+      'lo',
+    )
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'No resorts to show' }),
+    ).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /clear filters/i }))
+
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'Kotelnica Białczańska' }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'Špindlerův Mlýn' }),
+    ).toBeInTheDocument()
+    // Bucket selector reflects the reset. `combobox` query already returns
+    // an HTMLSelectElement here (the `<Select>` from design-system renders
+    // a native <select>), so no cast is needed.
+    expect(screen.getByRole('combobox', { name: /price/i })).toHaveValue('any')
+  })
+
+  it('does not render the "Clear filters" button when no filters are active (default landing)', async (): Promise<void> => {
+    // The recovery affordance must NOT appear in the happy path — only
+    // when filters reduce the grid to zero AND filters are non-default.
+    await renderCardsView()
+    expect(
+      screen.queryByRole('button', { name: /clear filters/i }),
+    ).toBeNull()
   })
 
   it('price-bucket Select filters cards by lift_pass_day amount (private filter UX)', async (): Promise<void> => {
     await renderCardsView()
     const user = userEvent.setup()
     // 'lo' bucket is ≤ €40; both seed resorts (€51, €60) are above, so the
-    // grid empties.
+    // grid empties and <NoResorts> renders.
     await user.selectOptions(
       screen.getByRole('combobox', { name: /price/i }),
       'lo',
     )
-    expect(screen.queryAllByRole('heading', { level: 2 })).toHaveLength(0)
+    expect(
+      screen.queryByRole('heading', { level: 2, name: 'Kotelnica Białczańska' }),
+    ).toBeNull()
+    expect(
+      screen.queryByRole('heading', { level: 2, name: 'Špindlerův Mlýn' }),
+    ).toBeNull()
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'No resorts to show' }),
+    ).toBeInTheDocument()
     // The price bucket is private — never serialized to URL (spec §3.1).
     expect(window.location.search).not.toContain('price')
   })
@@ -215,7 +302,16 @@ describe('CardsView', (): void => {
       screen.getByRole('combobox', { name: /price/i }),
       'hi',
     )
-    expect(screen.queryAllByRole('heading', { level: 2 })).toHaveLength(0)
+    expect(
+      screen.queryByRole('heading', { level: 2, name: 'Kotelnica Białczańska' }),
+    ).toBeNull()
+    expect(
+      screen.queryByRole('heading', { level: 2, name: 'Špindlerův Mlýn' }),
+    ).toBeNull()
+    // <NoResorts> takes over (spec §4.7 / §390 defence-in-depth).
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'No resorts to show' }),
+    ).toBeInTheDocument()
   })
 
   it('exposes a <main>-shaped landmark with the cards grid', async (): Promise<void> => {
@@ -230,6 +326,13 @@ describe('CardsView', (): void => {
 
   it('is axe-clean (default landing)', async (): Promise<void> => {
     const view = await renderCardsView()
+    expect(await axe(view.container)).toHaveNoViolations()
+  })
+
+  it('is axe-clean when <NoResorts> is rendered for ?country=XX', async (): Promise<void> => {
+    setLocation('country=XX')
+    const view = await renderCardsView()
+    expect(screen.getByText('No resorts to show')).toBeInTheDocument()
     expect(await axe(view.container)).toHaveNoViolations()
   })
 })

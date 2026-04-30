@@ -13,6 +13,7 @@ import {
 import { onDatasetError } from './lib/errors'
 import { invalidateDataset, useDataset } from './state/useDataset'
 import { useDocumentMeta } from './state/useDocumentMeta'
+import { useScrollReset } from './state/useScrollReset'
 import { useURLState } from './state/useURLState'
 import CardsView from './views/cards'
 import type DetailDrawerType from './views/detail'
@@ -80,6 +81,10 @@ function AppContent(): JSX.Element {
   // changes (?view=matrix, future sort/filter shares, etc.) keep document
   // metadata in sync. Hook is effect-based; spec §3.7 + §6.1.
   useDocumentMeta(url)
+  // Spec §6.1 (line 244): scrollTo(0, 0) on cards <-> matrix transitions
+  // only. The hook narrows the URL surface to a single argument so sort /
+  // country / shortlist / detail / highlight changes do not scroll-reset.
+  useScrollReset(url.view)
   const { slugs, views } = useDataset()
   const View = url.view === 'matrix' ? MatrixView : CardsView
   // The dataset slug set is widened to ReadonlySet<string> for the lookup —

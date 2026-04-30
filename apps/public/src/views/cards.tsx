@@ -1,16 +1,34 @@
 import { useState, type JSX } from 'react'
 
 import { useDataset } from '../state/useDataset'
-import { useURLState } from '../state/useURLState'
+import { setURLState, useURLState } from '../state/useURLState'
 
 import { filterViews, sortViews } from './cardsSelectors'
 import FilterBar, { type PriceBucket } from './FilterBar'
 import Hero from './Hero'
 import ResortCard from './ResortCard'
+import NoResorts from './states/NoResorts'
 
 // CardsView composes Hero + FilterBar + a grid of ResortCard. Filter/sort
 // live in `cardsSelectors.ts` so the never_fetched-handling branches stay
 // testable without coverage exclusions.
+//
+// Empty-state contract (spec §4.7): when filters reduce the visible
+// dataset to zero rows, render <NoResorts> in place of the grid. Hero +
+// FilterBar stay mounted so the user can recover by toggling chips or
+// changing the price bucket — without those affordances above the empty
+// state, a stale share-link like `?country=XX` would have no in-UI
+// recovery path. The validator's min:1 rule prevents the no-data-loaded
+// case from reaching this component.
+//
+// Recovery affordance for hidden-chip cases (Codex PR 53 P1): FilterBar
+// hides its country chip group on single-country datasets
+// (`countries.length > 1` gate), which strands users with a stale
+// `?country=XX` link in <NoResorts>. We pass `onClearFilters` to NoResorts
+// only when at least one filter is active, so the button never appears in
+// the happy path. The handler clears both the URL country list AND the
+// private price bucket so any combination of active filters resolves in
+// one click.
 
 export default function CardsView(): JSX.Element {
   const { views } = useDataset()
@@ -20,6 +38,24 @@ export default function CardsView(): JSX.Element {
   const filtered = filterViews(views, url.country, priceBucket)
   const sorted = sortViews(filtered, url.sort)
 
+  const hasActiveFilters = url.country.length > 0 || priceBucket !== 'any'
+
+  function clearFilters(): void {
+    setURLState({ country: [] })
+    setPriceBucket('any')
+  }
+
+  // Two NoResorts shapes — the props object is built without `undefined`
+  // values to satisfy TS's `exactOptionalPropertyTypes`. Picking the
+  // shape here also keeps the JSX flat (no nested ternary, per the
+  // CLAUDE.md style rule).
+  let emptyState: JSX.Element
+  if (hasActiveFilters) {
+    emptyState = <NoResorts onClearFilters={clearFilters} />
+  } else {
+    emptyState = <NoResorts />
+  }
+
   return (
     <>
       <Hero />
@@ -28,13 +64,15 @@ export default function CardsView(): JSX.Element {
         priceBucket={priceBucket}
         onPriceBucketChange={setPriceBucket}
       />
-      <ul className="sta-cards-grid" data-region="cards-grid">
-        {sorted.map((view): JSX.Element => (
-          <li key={view.slug} className="sta-cards-grid__item">
-            <ResortCard resort={view} />
-          </li>
-        ))}
-      </ul>
+      {sorted.length === 0 ? emptyState : (
+        <ul className="sta-cards-grid" data-region="cards-grid">
+          {sorted.map((view): JSX.Element => (
+            <li key={view.slug} className="sta-cards-grid__item">
+              <ResortCard resort={view} />
+            </li>
+          ))}
+        </ul>
+      )}
     </>
   )
 }
