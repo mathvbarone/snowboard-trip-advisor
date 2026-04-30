@@ -1,3 +1,5 @@
+import './utilities.css'
+
 export * from './tokens'
 export * from './format'                       // PR 3.1c: destructured-primitive formatters
 export { Shell } from './components/Shell'    // PR 3.1c
