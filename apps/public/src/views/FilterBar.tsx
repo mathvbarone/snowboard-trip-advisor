@@ -1,27 +1,23 @@
 import {
   Chip,
   Select,
-  ToggleButtonGroup,
   type SelectOption,
-  type ToggleButtonOption,
 } from '@snowboard-trip-advisor/design-system'
 import type { ResortView } from '@snowboard-trip-advisor/schema'
 import type { JSX } from 'react'
 
-import { SORT_VALUES, VIEW_VALUES, type SortValue, type ViewValue } from '../lib/urlState'
+import { SORT_VALUES, type SortValue } from '../lib/urlState'
 import { setURLState, useURLState } from '../state/useURLState'
 
-// Cards-landing filter strip. Four controls:
+// Cards-landing filter strip. Three controls:
 //   - country chip group (URL-shared via `country` array)
 //   - sort `<Select>` (URL-shared via `sort`)
 //   - bucketed price `<Select>` (NOT URL-shared per spec §3.1 — private
 //     filter UX; the bucket is owned by the parent CardsView)
-//   - cards/matrix view toggle (PR 3.4 — owned by FilterBar; URL-shared
-//     via `view` with PUSH transition)
 //
-// The view toggle is OWNED here (not slot-injected by the consumer) per
-// spec §7.10. CardsView is the only consumer today and the matrix view
-// reuses the same FilterBar; both share one toggle implementation.
+// The cards/matrix view toggle lives at App level (`ViewToggle`), not
+// inside FilterBar, because FilterBar is rendered only by CardsView —
+// keeping the toggle here would make it disappear on the matrix route.
 //
 // Country chip group is hidden when the dataset has ≤1 country — there's
 // no useful filter to apply, and a 1-chip group is a noisy SR
@@ -48,15 +44,6 @@ const PRICE_OPTIONS: ReadonlyArray<SelectOption> = [
   { value: 'mid', label: '€40–80' },
   { value: 'hi', label: '€80+' },
 ]
-
-const VIEW_LABELS: Record<ViewValue, string> = {
-  cards: 'Cards',
-  matrix: 'Matrix',
-}
-
-const VIEW_OPTIONS: ReadonlyArray<ToggleButtonOption> = VIEW_VALUES.map(
-  (v): ToggleButtonOption => ({ value: v, label: VIEW_LABELS[v] }),
-)
 
 export interface FilterBarProps {
   views: ReadonlyArray<ResortView>
@@ -89,13 +76,6 @@ export default function FilterBar({
     // generic `<select>` onChange is a known TS limitation (parse-don't-cast
     // would require redundant z.parse here for no behavior change).
     setURLState({ sort: next as SortValue })
-  }
-
-  function onViewChange(next: string): void {
-    // Safe cast: option values are VIEW_OPTIONS-bound (cards | matrix); the
-    // ToggleButtonGroup contract is `string` because the primitive is
-    // generic, not view-specific.
-    setURLState({ view: next as ViewValue })
   }
 
   return (
@@ -133,14 +113,6 @@ export default function FilterBar({
           onPriceBucketChange(v as PriceBucket)
         }}
       />
-      <div data-region="slot">
-        <ToggleButtonGroup
-          label="View"
-          options={VIEW_OPTIONS}
-          selected={url.view}
-          onChange={onViewChange}
-        />
-      </div>
     </div>
   )
 }

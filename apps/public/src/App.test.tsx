@@ -102,6 +102,24 @@ describe('App', (): void => {
     ).toBeInTheDocument()
   })
 
+  it('renders the cards/matrix toggle on BOTH views (toggle lives at App level, above the View dispatch)', async (): Promise<void> => {
+    // Reachability invariant: the toggle must be present in the DOM on both
+    // ?view=cards and ?view=matrix so the user can navigate between them
+    // without browser-back / URL editing. FilterBar lives only inside
+    // CardsView, so the toggle cannot be owned by FilterBar without
+    // disappearing on the matrix route.
+    window.history.replaceState({}, '', '/?view=matrix')
+    await renderAsync(<App />)
+    await screen.findByText(/add resorts to compare/i)
+    expect(screen.getByRole('group', { name: 'View' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Matrix', pressed: true }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Cards', pressed: false }),
+    ).toBeInTheDocument()
+  })
+
   it('wires useDocumentMeta into AppContent so title + canonical track URL state', async (): Promise<void> => {
     // Initial load: AppContent calls useDocumentMeta(url), which writes
     // document.title and creates / updates <link rel="canonical">. We start
