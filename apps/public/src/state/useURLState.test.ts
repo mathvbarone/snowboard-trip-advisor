@@ -78,6 +78,36 @@ describe('useURLState', (): void => {
     expect(result.current.detail).toBe('kotelnica-bialczanska')
   })
 
+  it('uses replaceState when detail clears (close drawer should NOT add a history entry — Codex #52 P2)', (): void => {
+    // Open transition (undefined → slug) is PUSH so browser-back closes
+    // the drawer for users who navigated TO the URL via share-link. The
+    // manual-close transition (slug → undefined, e.g. Esc / outside-click /
+    // close button) must NOT add a second history entry — otherwise
+    // browser-back from the closed state reopens the drawer instead of
+    // dismissing it. Asymmetric inference: PUSH on set, REPLACE on clear.
+    setLocation('view=cards&detail=kotelnica-bialczanska')
+    const pushSpy = vi.spyOn(window.history, 'pushState')
+    const replaceSpy = vi.spyOn(window.history, 'replaceState')
+    const { result } = renderHook(() => useURLState())
+    act((): void => {
+      setURLState({ detail: undefined })
+    })
+    expect(pushSpy).not.toHaveBeenCalled()
+    expect(replaceSpy).toHaveBeenCalled()
+    expect(result.current.detail).toBeUndefined()
+  })
+
+  it('uses pushState when detail switches between two slugs (PUSH key, both sides defined)', (): void => {
+    setLocation('view=cards&detail=kotelnica-bialczanska')
+    const pushSpy = vi.spyOn(window.history, 'pushState')
+    const { result } = renderHook(() => useURLState())
+    act((): void => {
+      setURLState({ detail: 'spindleruv-mlyn' })
+    })
+    expect(pushSpy).toHaveBeenCalledTimes(1)
+    expect(result.current.detail).toBe('spindleruv-mlyn')
+  })
+
   it('two same-tick setters compose serially (each transition computed against latest URL)', (): void => {
     setLocation('view=cards')
     const { result } = renderHook(() => useURLState())
@@ -95,6 +125,61 @@ describe('useURLState', (): void => {
     const { unmount } = renderHook(() => useURLState())
     unmount()
     expect(removeSpy).toHaveBeenCalledWith('popstate', expect.any(Function))
+  })
+
+  // mergeURLState branches — exactOptionalPropertyTypes-safe merge.
+  // PR 3.5 added explicit-undefined clearing so DetailDrawer can call
+  // `setURLState({ detail: undefined })` to close the drawer. The
+  // merge function preserves untouched optional keys and clears the
+  // ones the caller explicitly nulls.
+
+  it('clears detail when partial sets detail: undefined explicitly', (): void => {
+    setLocation('detail=kotelnica-bialczanska')
+    const { result } = renderHook(() => useURLState())
+    expect(result.current.detail).toBe('kotelnica-bialczanska')
+    act((): void => {
+      setURLState({ detail: undefined })
+    })
+    expect(result.current.detail).toBeUndefined()
+    expect(window.location.search).not.toContain('detail=')
+  })
+
+  it('preserves detail when partial does not include the detail key', (): void => {
+    setLocation('detail=kotelnica-bialczanska&sort=name')
+    const { result } = renderHook(() => useURLState())
+    act((): void => {
+      // sort change must not blow away an unrelated detail key.
+      setURLState({ sort: 'price_asc' })
+    })
+    expect(result.current.detail).toBe('kotelnica-bialczanska')
+  })
+
+  it('sets highlight from partial when partial.highlight is defined', (): void => {
+    setLocation('')
+    const { result } = renderHook(() => useURLState())
+    act((): void => {
+      setURLState({ highlight: 'snow_depth_cm' })
+    })
+    expect(result.current.highlight).toBe('snow_depth_cm')
+  })
+
+  it('clears highlight when partial sets highlight: undefined explicitly', (): void => {
+    setLocation('highlight=snow_depth_cm')
+    const { result } = renderHook(() => useURLState())
+    expect(result.current.highlight).toBe('snow_depth_cm')
+    act((): void => {
+      setURLState({ highlight: undefined })
+    })
+    expect(result.current.highlight).toBeUndefined()
+  })
+
+  it('preserves highlight when partial does not include the highlight key', (): void => {
+    setLocation('highlight=snow_depth_cm&sort=name')
+    const { result } = renderHook(() => useURLState())
+    act((): void => {
+      setURLState({ sort: 'price_asc' })
+    })
+    expect(result.current.highlight).toBe('snow_depth_cm')
   })
 
   it('serializes a default-only state to a clean pathname URL (no query string)', (): void => {

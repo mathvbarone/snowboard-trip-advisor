@@ -26,6 +26,11 @@ export interface ButtonProps {
   variant?: ButtonVariant
   'aria-label'?: string
   'aria-pressed'?: boolean
+  // Pass-through for data-detail-trigger (§5.5) and any future data-* hooks.
+  // Mirrors IconButton's catch-all signature so apps/public can mark the
+  // "View details" Button as the drawer-open trigger without inflating the
+  // typed prop surface here.
+  [key: `data-${string}`]: string | undefined
 }
 
 export function Button({
@@ -36,6 +41,7 @@ export function Button({
   variant = 'primary',
   'aria-label': ariaLabel,
   'aria-pressed': ariaPressed,
+  ...rest
 }: ButtonProps): JSX.Element {
   // The raw-<button> ban fires in apps/**, not in packages/design-system —
   // this is the canonical wrapper that the apps/** call sites import.
@@ -48,6 +54,7 @@ export function Button({
       aria-pressed={ariaPressed}
       data-variant={variant}
       className="sta-button"
+      {...rest}
     >
       {children}
     </button>

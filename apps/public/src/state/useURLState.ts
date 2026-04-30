@@ -84,20 +84,82 @@ function getSnapshot(): URLState {
 function inferTransition(current: URLState, next: URLState): 'push' | 'replace' {
   for (const key of PUSH_KEYS) {
     if (current[key] !== next[key]) {
+      // Asymmetric: a PUSH key being CLEARED (set → undefined) is REPLACE,
+      // not PUSH. Manually closing an overlay (Esc / outside-click / close
+      // button) calls `setURLState({ detail: undefined })`; if that pushed,
+      // browser-back from the closed state would reopen the overlay
+      // instead of dismissing it. Spec §3.3 prescribes PUSH on the OPEN
+      // transition (so back-button closes the overlay for users who
+      // landed via share-link) but is silent on the manual-close path —
+      // matching back-button semantics for overlay dismissal requires
+      // REPLACE here. `view` (the other PUSH key) is `'cards' | 'matrix'`
+      // — neither value is `undefined`, so this branch never fires for
+      // view transitions; switching between two defined detail slugs
+      // (e.g. ResortCard A → ResortCard B without closing) also keeps
+      // PUSH because `next[key]` is defined.
+      const wasSet = current[key] !== undefined
+      const isCleared = next[key] === undefined
+      if (wasSet && isCleared) {
+        return 'replace'
+      }
       return 'push'
     }
   }
   return 'replace'
 }
 
+// Setter input — like `Partial<URLState>` but optional URL keys (the
+// ones whose value type is already `T | undefined` in URLState — i.e.
+// `detail?: string` and `highlight?: MetricPath`) accept an explicit
+// `undefined` so callers can *clear* them (e.g.
+// `setURLState({ detail: undefined })` closes the detail drawer). With
+// `exactOptionalPropertyTypes: true`, plain `Partial<URLState>` accepts
+// only "omit or set"; this widening adds "set to undefined" for keys
+// already typed as optional. The required keys (view, sort, country,
+// shortlist) keep their non-undefined value types — clearing them is
+// not a meaningful operation. `serializeURL` already drops undefined
+// values from the URL, so the runtime semantics are unchanged.
+type OptionalKeys<T> = { [K in keyof T]-?: undefined extends T[K] ? K : never }[keyof T]
+type RequiredKeys<T> = Exclude<keyof T, OptionalKeys<T>>
+export type SetURLStatePartial =
+  & { [K in OptionalKeys<URLState>]?: URLState[K] | undefined }
+  & { [K in RequiredKeys<URLState>]?: URLState[K] }
+
 /**
+ * Apply a partial URL-state update. The single state-write entry point
+ * for the SPA — every URL transition (view switch, drawer open/close,
+ * shortlist toggle, sort change, …) flows through here.
+ *
+ * Why `SetURLStatePartial` (not `Partial<URLState>`): with
+ * `exactOptionalPropertyTypes: true`, plain `Partial<URLState>` rejects
+ * an explicit `undefined` for keys that are already optional in
+ * `URLState` (e.g. `detail?: string`). DetailDrawer's close handler
+ * needs `setURLState({ detail: undefined })` to clear `&detail=` from
+ * the URL; the widening adds "set to undefined" exactly for those
+ * already-optional keys. Required keys (view, sort, country, shortlist)
+ * keep their non-undefined value types — clearing them is not a
+ * meaningful operation.
+ *
+ * Why a separate `clearURLKey(k)` helper was rejected: `setURLState` is
+ * the only state-write entry point. A parallel API would split the call
+ * surface, risk drift between the two, and force compound transitions
+ * ("set X, clear Y" in the same tick — e.g. switching view AND closing
+ * the drawer) to call two functions instead of one. Single-call
+ * atomicity preserves the invariant that one URL transition = one
+ * subscriber notification.
+ *
+ * Merge contract (see `mergeURLState`): required keys use
+ * `partial.X ?? current.X` (override-or-preserve); optional keys use an
+ * explicit `'X' in partial` guard so "explicitly undefined → clear"
+ * stays distinct from "absent → preserve current".
+ *
  * @warning Never invoke `setURLState` inside React 19's `startTransition`.
  * The synchronous DOM write (history.pushState/replaceState) would race the
  * deferred render — see spec §10.5.
  */
-export function setURLState(partial: Partial<URLState>): void {
+export function setURLState(partial: SetURLStatePartial): void {
   const current = getSnapshot()
-  const next: URLState = { ...current, ...partial }
+  const next = mergeURLState(current, partial)
   const search = serializeURL(next)
   const url = search.length > 0 ? `?${search}` : window.location.pathname
   const transition = inferTransition(current, next)
@@ -108,6 +170,43 @@ export function setURLState(partial: Partial<URLState>): void {
   }
   cachedSearch = null
   notify()
+}
+
+// Merge `partial` onto `current` with `exactOptionalPropertyTypes`-safe
+// semantics: a `partial` key explicitly set to `undefined` *clears* the
+// corresponding optional URLState key (omits it from `next`); a key set
+// to a defined value overrides; a key absent from `partial` leaves
+// `current`'s value untouched. Required keys (view, sort, country,
+// shortlist) cannot be cleared by SetURLStatePartial's type, so the
+// per-key handling for them is "override or leave alone". Building the
+// next object key-by-key (rather than spread + delete) avoids the
+// no-dynamic-delete lint rule.
+function mergeURLState(current: URLState, partial: SetURLStatePartial): URLState {
+  const next: URLState = {
+    view: partial.view ?? current.view,
+    sort: partial.sort ?? current.sort,
+    country: partial.country ?? current.country,
+    shortlist: partial.shortlist ?? current.shortlist,
+  }
+  // `partial.detail === undefined` means "clear" — leave `next.detail`
+  // omitted. The `'detail' in partial` check distinguishes "explicitly
+  // set to undefined (clear)" from "not present in partial (preserve
+  // current.detail)".
+  if ('detail' in partial) {
+    if (partial.detail !== undefined) {
+      next.detail = partial.detail
+    }
+  } else if (current.detail !== undefined) {
+    next.detail = current.detail
+  }
+  if ('highlight' in partial) {
+    if (partial.highlight !== undefined) {
+      next.highlight = partial.highlight
+    }
+  } else if (current.highlight !== undefined) {
+    next.highlight = current.highlight
+  }
+  return next
 }
 
 export function useURLState(): URLState {

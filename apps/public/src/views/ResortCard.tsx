@@ -1,4 +1,5 @@
 import {
+  Button,
   Card,
   ExternalLink,
   FieldValueRenderer,
@@ -10,16 +11,21 @@ import type { JSX } from 'react'
 
 import { countryToPrimaryLang } from '../lib/lang'
 import { useShortlist } from '../state/useShortlist'
+import { setURLState } from '../state/useURLState'
 
 // Single-resort card on the cards landing. Composition (top → bottom):
 //  1. Hero photo strip (decorative CSS background — no <img alt>).
 //  2. <h2> resort name with `lang={countryToPrimaryLang(country)}` per §6.6.
-//     - Star <IconButton data-detail-trigger=<slug> aria-pressed=> next to
-//       the heading (frozen interface per §5.5).
+//     - Star <IconButton aria-pressed=> next to the heading: shortlist
+//       toggle only. The star no longer carries data-detail-trigger.
 //  3. Region label (sub-heading).
-//  4. Four FieldValueRenderer rows: durable (altitude_m, slopes_km) and
+//  4. "View details" Button — the drawer-open trigger (UX-1 fold). Carries
+//     `data-detail-trigger=<slug>` so Drawer focus-restore on close lands
+//     here. Click pushes `?detail=<slug>` (PUSH transition; `detail` is
+//     in PUSH_KEYS so back-button closes the drawer).
+//  5. Four FieldValueRenderer rows: durable (altitude_m, slopes_km) and
 //     live (snow_depth_cm, lift_pass_day).
-//  5. "Browse lodging near X" external CTA (rel/referrerpolicy hardened
+//  6. "Browse lodging near X" external CTA (rel/referrerpolicy hardened
 //     via the design-system ExternalLink wrapper).
 //
 // SHORTLIST_MAX (=6) head-truncate-on-add lives in useShortlist (the hook
@@ -38,6 +44,10 @@ export default function ResortCard({ resort }: ResortCardProps): JSX.Element {
 
   function toggleShortlist(): void {
     toggle(resort.slug)
+  }
+
+  function openDetail(): void {
+    setURLState({ detail: resort.slug })
   }
 
   const lodgingHref = `https://www.booking.com/searchresults.html?ss=${encodeURIComponent(
@@ -61,13 +71,19 @@ export default function ResortCard({ resort }: ResortCardProps): JSX.Element {
             // hear the same name with a press-state delta on toggle.
             aria-label={`Add to shortlist: ${resort.name.en}`}
             aria-pressed={isShortlisted}
-            data-detail-trigger={resort.slug}
             onClick={toggleShortlist}
           >
             <StarGlyph size={20} filled={isShortlisted} />
           </IconButton>
         </header>
         <p className="sta-resort-card__region">{resort.region.en}</p>
+        <Button
+          variant="ghost"
+          onClick={openDetail}
+          data-detail-trigger={resort.slug}
+        >
+          View details
+        </Button>
         <dl className="sta-resort-card__metrics">
           <div className="sta-resort-card__metric">
             <dt>Altitude</dt>

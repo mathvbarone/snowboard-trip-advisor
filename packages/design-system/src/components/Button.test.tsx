@@ -95,6 +95,25 @@ describe('Button', (): void => {
     )
   })
 
+  it('passes through data-* attributes (e.g. data-detail-trigger per spec §5.5)', (): void => {
+    // Mirrors IconButton's data-* pass-through. apps/public's ResortCard
+    // attaches `data-detail-trigger=<slug>` to its "View details" Button so
+    // the Drawer primitive's focus-restore (querySelector lookup on close)
+    // lands on the visible trigger.
+    render(
+      <Button
+        onClick={(): void => undefined}
+        data-detail-trigger="kotelnica-bialczanska"
+      >
+        View details
+      </Button>,
+    )
+    expect(screen.getByRole('button', { name: 'View details' })).toHaveAttribute(
+      'data-detail-trigger',
+      'kotelnica-bialczanska',
+    )
+  })
+
   it('is axe-clean across primary / secondary / ghost / disabled', async (): Promise<void> => {
     const { container, rerender } = render(
       <Button onClick={(): void => undefined}>Primary</Button>,

@@ -1,0 +1,20 @@
+/* Design-system global utilities. Loaded as a side-effect of importing
+ * anything from the design-system package root (see index.ts).
+ *
+ * `.sta-visually-hidden` — content available to assistive tech but
+ * removed from visual flow. Standard SR-only pattern (clip-rect +
+ * absolute positioning + 1px box). Used by Skeleton, Table, Pill,
+ * DetailDrawer.
+ */
+
+.sta-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

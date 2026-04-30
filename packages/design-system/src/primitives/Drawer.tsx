@@ -9,6 +9,8 @@ import {
   type RefObject,
 } from 'react'
 
+import './Drawer.css'
+
 // Drawer — non-modal slide-in panel. Spec §7.9 contract:
 //   - keyboard focus stays inside (Radix `trapFocus` is true; the dialog
 //     traps Tab/Shift-Tab cycling);
