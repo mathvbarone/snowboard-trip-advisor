@@ -1,16 +1,23 @@
-import { Chip, Select, type SelectOption } from '@snowboard-trip-advisor/design-system'
+import {
+  Chip,
+  Select,
+  type SelectOption,
+} from '@snowboard-trip-advisor/design-system'
 import type { ResortView } from '@snowboard-trip-advisor/schema'
-import type { JSX, ReactNode } from 'react'
+import type { JSX } from 'react'
 
 import { SORT_VALUES, type SortValue } from '../lib/urlState'
 import { setURLState, useURLState } from '../state/useURLState'
 
-// Cards-landing filter strip. Three controls + an optional slot:
+// Cards-landing filter strip. Three controls:
 //   - country chip group (URL-shared via `country` array)
 //   - sort `<Select>` (URL-shared via `sort`)
 //   - bucketed price `<Select>` (NOT URL-shared per spec §3.1 — private
 //     filter UX; the bucket is owned by the parent CardsView)
-//   - `slot?: ReactNode` filled by PR 3.4 with the cards/matrix toggle
+//
+// The cards/matrix view toggle lives at App level (`ViewToggle`), not
+// inside FilterBar, because FilterBar is rendered only by CardsView —
+// keeping the toggle here would make it disappear on the matrix route.
 //
 // Country chip group is hidden when the dataset has ≤1 country — there's
 // no useful filter to apply, and a 1-chip group is a noisy SR
@@ -42,15 +49,12 @@ export interface FilterBarProps {
   views: ReadonlyArray<ResortView>
   priceBucket: PriceBucket
   onPriceBucketChange: (next: PriceBucket) => void
-  /** Filled with cards/matrix toggle in PR 3.4; undefined here. */
-  slot?: ReactNode
 }
 
 export default function FilterBar({
   views,
   priceBucket,
   onPriceBucketChange,
-  slot,
 }: FilterBarProps): JSX.Element {
   const url = useURLState()
   const countries = uniqueCountries(views)
@@ -109,7 +113,6 @@ export default function FilterBar({
           onPriceBucketChange(v as PriceBucket)
         }}
       />
-      {slot !== undefined ? <div data-region="slot">{slot}</div> : null}
     </div>
   )
 }

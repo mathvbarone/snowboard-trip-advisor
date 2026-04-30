@@ -203,27 +203,20 @@ describe('FilterBar', (): void => {
     expect(window.location.search).not.toContain('price')
   })
 
-  it('renders the slot when supplied (PR 3.4 fills it with the view toggle)', (): void => {
+  it('does NOT render the cards/matrix view-toggle (toggle lifted to App level)', (): void => {
     render(
       <FilterBar
         views={VIEWS_TWO_COUNTRY}
         priceBucket="any"
         onPriceBucketChange={(): void => undefined}
-        slot={<div data-testid="slot">view-toggle</div>}
       />,
     )
-    expect(screen.getByTestId('slot')).toBeInTheDocument()
-  })
-
-  it('renders nothing in the slot region when slot is undefined (PR 3.2 default)', (): void => {
-    const { container } = render(
-      <FilterBar
-        views={VIEWS_TWO_COUNTRY}
-        priceBucket="any"
-        onPriceBucketChange={(): void => undefined}
-      />,
-    )
-    expect(container.querySelector('[data-region="slot"]')).toBeNull()
+    // Toggle now lives in `apps/public/src/views/ViewToggle.tsx`, rendered
+    // by App.tsx above the View dispatch — keeps it reachable on the matrix
+    // route where FilterBar isn't mounted. Behavior tests live in
+    // ViewToggle.test.tsx; here we only assert the toggle is NOT inside
+    // FilterBar.
+    expect(screen.queryByRole('group', { name: 'View' })).toBeNull()
   })
 
   it('is axe-clean', async (): Promise<void> => {

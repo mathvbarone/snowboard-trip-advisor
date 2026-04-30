@@ -90,14 +90,34 @@ describe('App', (): void => {
     expect(document.getElementById('main')).toHaveFocus()
   })
 
-  it('selects MatrixView when ?view=matrix is set (boundary catches the stub throw)', async (): Promise<void> => {
-    // matrix.tsx is a frozen stub that throws on render until PR 3.4. This
-    // test only exercises the App.tsx ternary that picks MatrixView vs
-    // CardsView; the boundary catches the stub throw and we assert the alert
-    // appears.
+  it('selects MatrixView when ?view=matrix is set', async (): Promise<void> => {
+    // matrix.tsx is a real route as of PR 3.4 (previously a stub-throw). With
+    // an empty shortlist, the empty-state copy is the SR-detectable evidence
+    // that App.tsx routed to MatrixView rather than CardsView (which renders
+    // the Hero <h1> instead).
     window.history.replaceState({}, '', '/?view=matrix')
     await renderAsync(<App />)
-    expect(await screen.findByRole('alert')).toBeInTheDocument()
+    expect(
+      await screen.findByText(/add resorts to compare/i),
+    ).toBeInTheDocument()
+  })
+
+  it('renders the cards/matrix toggle on BOTH views (toggle lives at App level, above the View dispatch)', async (): Promise<void> => {
+    // Reachability invariant: the toggle must be present in the DOM on both
+    // ?view=cards and ?view=matrix so the user can navigate between them
+    // without browser-back / URL editing. FilterBar lives only inside
+    // CardsView, so the toggle cannot be owned by FilterBar without
+    // disappearing on the matrix route.
+    window.history.replaceState({}, '', '/?view=matrix')
+    await renderAsync(<App />)
+    await screen.findByText(/add resorts to compare/i)
+    expect(screen.getByRole('group', { name: 'View' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Matrix', pressed: true }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Cards', pressed: false }),
+    ).toBeInTheDocument()
   })
 
   it('wires useDocumentMeta into AppContent so title + canonical track URL state', async (): Promise<void> => {

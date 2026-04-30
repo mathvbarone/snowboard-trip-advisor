@@ -22,6 +22,7 @@ import ShareUrlDialog from './views/ShareUrlDialog'
 import ShortlistDrawer from './views/ShortlistDrawer'
 import DatasetLoading from './views/states/DatasetLoading'
 import DatasetUnavailable from './views/states/DatasetUnavailable'
+import ViewToggle from './views/ViewToggle'
 
 // Lazy-imported routes — code-split by view + the detail overlay. The lazy
 // imports work as soon as the stub files exist; PR 3.4 fills matrix.tsx and
@@ -102,6 +103,7 @@ function AppContent(): JSX.Element {
   return (
     <>
       <DroppedSlugsBanner />
+      <ViewToggle />
       <View />
       {detailMatch !== undefined ? <DetailDrawer slug={detailMatch.slug} /> : null}
       <ShortlistDrawer

@@ -1,0 +1,13 @@
+/* First behavioral CSS file in the design-system package. Until now, every
+ * primitive shipped class hooks (sta-button, sta-chip, sta-table) without
+ * any matching styles — the broader design-system styling pass is out of
+ * scope for PR 3.4. This rule lands now to satisfy spec §5.1's sticky-
+ * header invariant for the Table primitive (matrix view depends on it).
+ * No additional rules belong here unless they are directly required by
+ * spec §5.1.
+ */
+
+.sta-table thead th {
+  position: sticky;
+  top: 0;
+}
