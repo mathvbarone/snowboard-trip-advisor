@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react'
+import { screen } from '@testing-library/react'
 import { axe } from 'jest-axe'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
@@ -8,12 +8,21 @@ import { __resetShortlistForTests } from '../../../../apps/public/src/state/useS
 import { renderAsync, setLocation } from '../../helpers'
 
 // Integration: cards route with a stale-country URL filter that yields
-// zero rows. Asserts the spec §4.7 / §390 defence-in-depth contract:
-// when filters reduce the visible dataset to zero, <NoResorts> renders
-// in place of the grid, the Hero + FilterBar remain mounted (so the
-// user can recover by toggling country chips), the skip-link / view
-// toggle / FilterBar focus order is intact, and the rendered route is
-// axe-clean.
+// zero rows. Asserts the spec §4.7 / §390 defence-in-depth contract at
+// the App-shell level — when filters reduce the visible dataset to
+// zero, the <App> render reaches the <NoResorts> state, the App-shell
+// (Hero + ViewToggle + FilterBar) remains mounted so the user can
+// recover by toggling country chips, the skip-link → ViewToggle →
+// FilterBar focus order ahead of the empty-state heading is intact,
+// and the rendered route is axe-clean.
+//
+// NoResorts heading text + body copy + the per-grid-no-cards assertions
+// are owned by the unit-level test in apps/public/src/views/cards.test.tsx
+// (see "renders <NoResorts> when ?country=" + the price-bucket cases).
+// This file deliberately asserts the integration-unique surface only:
+// App-shell composition, focus order, axe coverage of the assembled
+// route. Duplicating heading-text assertions here would couple two
+// suites to the same string and waste review attention.
 //
 // Plan §8.3 (line 1110): cards-empty.test.ts: ?country=XX (filter yields
 // zero) → <NoResorts> renders (defence-in-depth) + axe.
@@ -29,45 +38,32 @@ describe('integration: cards route with empty filter result', (): void => {
     setLocation('')
   })
 
-  it('renders <NoResorts> in place of the grid and keeps the Hero mounted', async (): Promise<void> => {
+  it('App-shell render reaches <NoResorts> with the Hero still mounted', async (): Promise<void> => {
     await renderAsync(<App />)
-    await waitFor(
-      (): void => {
-        expect(
-          screen.getByRole('heading', {
-            level: 1,
-            name: /compare european ski resorts/i,
-          }),
-        ).toBeInTheDocument()
-      },
-      { timeout: 1500 },
-    )
-    // No resort cards. The seed dataset's two resorts are not present.
-    expect(
-      screen.queryByRole('heading', { level: 2, name: 'Kotelnica Białczańska' }),
-    ).toBeNull()
-    expect(
-      screen.queryByRole('heading', { level: 2, name: 'Špindlerův Mlýn' }),
-    ).toBeNull()
-    // <NoResorts> renders in their place; its heading is the only <h2>.
+    // Hero <h1> is App-shell-level (above CardsView); cards.test.tsx
+    // does not see it. Pair it with a single sentinel for the empty
+    // state so this test verifies the App actually reached NoResorts.
+    await screen.findByRole('heading', {
+      level: 1,
+      name: /compare european ski resorts/i,
+    })
     expect(
       screen.getByRole('heading', { level: 2, name: 'No resorts to show' }),
     ).toBeInTheDocument()
-    expect(screen.getByText('Try adjusting your filters.')).toBeInTheDocument()
   })
 
-  it('keeps the FilterBar mounted (recovery affordance) above <NoResorts>', async (): Promise<void> => {
+  it('keeps the FilterBar mounted within the App shell (recovery affordance)', async (): Promise<void> => {
     await renderAsync(<App />)
     await screen.findByRole('heading', {
       level: 1,
       name: /compare european ski resorts/i,
     })
-    // FilterBar's country chips must remain so the user can clear the
-    // stale URL filter without manually editing the URL.
+    // FilterBar's country chips must remain in the App-shell render so
+    // the user can clear the stale URL filter without manually editing
+    // the URL. cards.test.tsx asserts the same chip presence at the
+    // CardsView level; this assertion locks the App-shell wiring.
     expect(screen.getByRole('button', { name: 'PL' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'CZ' })).toBeInTheDocument()
-    // Confirm <NoResorts> is also rendered to lock the contract.
-    expect(screen.getByText('No resorts to show')).toBeInTheDocument()
   })
 
   it('exposes the skip-link, ViewToggle, and FilterBar in tab order ahead of the empty-state heading', async (): Promise<void> => {
@@ -99,6 +95,8 @@ describe('integration: cards route with empty filter result', (): void => {
       level: 1,
       name: /compare european ski resorts/i,
     })
+    // Sanity-guard so axe does not pass on a state that silently failed
+    // to reach the empty branch.
     expect(screen.getByText('No resorts to show')).toBeInTheDocument()
     expect(await axe(view.container)).toHaveNoViolations()
   })
