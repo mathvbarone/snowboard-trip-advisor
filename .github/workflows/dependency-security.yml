@@ -1,0 +1,114 @@
+name: Dependency Security
+
+# Implements ADR-0008 (docs/adr/0008-dependency-security-ci-gate.md).
+#
+# Phase 1 stance:
+# - audit job is INFORMATIONAL. Step-level `continue-on-error: true` on the
+#   `npm audit` step keeps the job green on the PR check list when high or
+#   critical advisories are reported. The failed step is still visible in the
+#   job log and is summarised via $GITHUB_STEP_SUMMARY linking back to the ADR.
+# - outdated-report job is non-blocking by design. The only failure-prone step
+#   (`npm outdated`) swallows its non-zero exit with `|| true`. We do NOT layer
+#   `continue-on-error` on top — genuine job-level failures (checkout, setup
+#   node, artifact upload) must remain red so the artifact pipeline does not
+#   decay silently.
+#
+# This workflow MUST NOT be added to required_status_checks in branch
+# protection in Phase 1. The Phase 2 ramp (a separate ADR-update PR) flips
+# `continue-on-error` off and registers the audit check as required.
+
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  pull_request:
+    paths:
+      - 'package.json'
+      - 'package-lock.json'
+      - 'apps/**/package.json'
+      - 'apps/**/package-lock.json'
+      - 'packages/**/package.json'
+      - 'packages/**/package-lock.json'
+      - '.github/workflows/dependency-security.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependency-security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: audit (informational)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: npm audit (informational; step-level continue-on-error per ADR-0008)
+        id: audit
+        continue-on-error: true
+        run: npm audit --audit-level=high
+
+      - name: Annotate informational status
+        if: always()
+        env:
+          AUDIT_OUTCOME: ${{ steps.audit.outcome }}
+          REPO: ${{ github.repository }}
+        run: |
+          {
+            echo "## Dependency Security — informational gate"
+            echo ""
+            echo "This job is **informational** per [ADR-0008](https://github.com/${REPO}/blob/main/docs/adr/0008-dependency-security-ci-gate.md)."
+            echo ""
+            echo "A failed \`npm audit\` step does **not** block PR merge in Phase 1."
+            echo ""
+            echo "**npm audit step outcome:** \`${AUDIT_OUTCOME}\`"
+            echo ""
+            if [ "${AUDIT_OUTCOME}" = "failure" ]; then
+              echo "⚠ \`npm audit --audit-level=high\` reported high or critical advisories."
+              echo "Remediate via a Dependabot PR or a follow-up dependency-update PR; see"
+              echo "\`docs/ops/dependency-policy.md\` for the triage process."
+            elif [ "${AUDIT_OUTCOME}" = "success" ]; then
+              echo "✓ \`npm audit --audit-level=high\` reported no high or critical advisories."
+            else
+              echo "ℹ \`npm audit\` did not run (a prior step failed, was skipped, or the run was cancelled). See the job log."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  outdated-report:
+    name: outdated report (non-blocking)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate outdated report
+        run: |
+          mkdir -p .tmp
+          npm outdated --all > .tmp/outdated.txt || true
+
+      - name: Upload outdated report
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-outdated-report
+          path: .tmp/outdated.txt
+          if-no-files-found: warn
