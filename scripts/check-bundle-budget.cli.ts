@@ -34,6 +34,11 @@ if (statsPath === undefined) {
 const raw = await readFile(statsPath, 'utf-8')
 const data = JSON.parse(raw) as VisualizerStats
 const result = checkBundleBudget(data)
-if (result.warning !== null) {
+const kb = (result.totalBytes / 1024).toFixed(1)
+if (result.warning === null) {
+  process.stdout.write(
+    `check-bundle-budget: initial chunk gzip = ${kb} KB / 100 KB advisory budget (within budget)\n`,
+  )
+} else {
   process.stdout.write(`${result.warning}\n`)
 }
