@@ -1,5 +1,7 @@
 import type { JSX, ReactNode } from 'react'
 
+import './Table.css'
+
 // Minimal headless table primitive — used by the matrix view (PR 3.4) to
 // render a comparison table where rows are metrics and columns are
 // shortlisted resorts. Spec §5.1 deliberately drops the horizontal-scroll
