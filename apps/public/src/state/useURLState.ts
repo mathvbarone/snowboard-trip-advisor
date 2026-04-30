@@ -56,18 +56,11 @@ function subscribe(cb: () => void): () => void {
     cb()
   }
   window.addEventListener('popstate', onPop)
-  popstateCallbacks.set(cb, onPop)
   return (): void => {
     subscribers.delete(cb)
-    const stored = popstateCallbacks.get(cb)
-    if (stored !== undefined) {
-      window.removeEventListener('popstate', stored)
-      popstateCallbacks.delete(cb)
-    }
+    window.removeEventListener('popstate', onPop)
   }
 }
-
-const popstateCallbacks = new WeakMap<() => void, () => void>()
 
 // useSyncExternalStore requires getSnapshot to return a stable reference when
 // the underlying state has not changed. parseURL allocates a fresh object on
