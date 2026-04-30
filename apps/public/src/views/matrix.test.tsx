@@ -51,6 +51,16 @@ describe('MatrixView', (): void => {
     vi.restoreAllMocks()
   })
 
+  // Spec §7.10 acceptance gate names "MSW request log assertion for the
+  // matrix chunk fetch". This is structurally untestable in JSDOM/Vite-dev:
+  // MSW only intercepts handlers registered against fetch URLs (in this
+  // app, `/data/current.v1.json`); lazy-imported modules are served from
+  // Vite's in-process module graph, never via fetch. The bundle-visualizer
+  // assertion (matrix in its own dist chunk) is the executable surrogate;
+  // PR 3.6 wires it into CI. This `it.skip` keeps the gate visible in the
+  // suite output.
+  it.skip('asserts the matrix lazy chunk is fetched on view=matrix navigation (deferred to PR 3.6 dist-chunk smoke)', (): void => {})
+
   it('renders the empty-shortlist EmptyStateLayout with no <table> when shortlist is empty', async (): Promise<void> => {
     await renderMatrix()
     await screen.findByText(/add resorts to compare/i, undefined, { timeout: 1500 })
