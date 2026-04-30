@@ -50,6 +50,13 @@ export default defineConfig({
         //    The lockTimeout.test.ts file validates the pre-condition (stale lock blocks publish
         //    for >200ms) giving meaningful regression protection without the 5-second cost.
         //    The throw itself is a one-liner; its correctness follows from the loop invariant.
+        //
+        // 3. The `unlink(lockPath).catch((): void => undefined)` best-effort cleanup arrow in
+        //    `withPublishLock`'s finally block. The catch body fires only when unlink throws,
+        //    which only happens on filesystem races we cannot trigger in unit tests without
+        //    ESM-incompatible `vi.mock` of `node:fs/promises` (same audit restriction as #1).
+        //    Vitest 4's v8 coverage detects this previously-undetected uncovered arrow;
+        //    `/* v8 ignore next */` marks it inline matching the pattern used for #1 and #2.
       ],
       reporter: ['text', 'lcov'],
     },
