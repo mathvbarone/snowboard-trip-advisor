@@ -50,8 +50,12 @@ export function validatePublishedDataset(input: unknown): ValidationResult {
     if (otherZodIssues.length > 0) {
       issues.push({
         code: 'zod_parse_failed',
+        // zod 4 widened ZodIssue.path from (string | number)[] to PropertyKey[]. The input here is
+        // a JSON-shaped PublishedDataset, so no path segment can be a symbol; assert the narrower
+        // type rather than runtime-coerce (a symbol-handling branch would be unreachable in practice
+        // and trip the 100% coverage gate).
         zod_issues: otherZodIssues.map((i): { path: ReadonlyArray<string | number>; message: string } => ({
-          path: i.path,
+          path: i.path as ReadonlyArray<string | number>,
           message: i.message,
         })),
       })

@@ -74,13 +74,13 @@ jobs:
 
       # QEMU is required for arm64 cross-build on an amd64 runner.
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -96,7 +96,7 @@ jobs:
 
       - name: Derive image metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ steps.repo.outputs.repository }}
           tags: |
@@ -109,7 +109,7 @@ jobs:
       # the homelab verify-image workflow expects.
       - name: Build and push (multi-arch)
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile
@@ -127,7 +127,7 @@ jobs:
       # layer) and application libraries (node_modules baked into the build
       # stage plus anything pulled into /usr/share/nginx/html).
       - name: Scan image with Trivy (linux/amd64)
-        uses: aquasecurity/trivy-action@0.35.0
+        uses: aquasecurity/trivy-action@v0.36.0
         env:
           TRIVY_PLATFORM: linux/amd64
         with:
@@ -139,7 +139,7 @@ jobs:
           format: table
 
       - name: Scan image with Trivy (linux/arm64)
-        uses: aquasecurity/trivy-action@0.35.0
+        uses: aquasecurity/trivy-action@v0.36.0
         env:
           TRIVY_PLATFORM: linux/arm64
         with:
@@ -182,14 +182,14 @@ jobs:
       # writes the signed predicate to GHCR as an OCI referrer of the image
       # digest. Verifies against github.com/<owner>/<repo> workflow identity.
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-name: ${{ steps.repo.outputs.repository }}
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
 
       - name: Attest SBOM
-        uses: actions/attest-sbom@v2
+        uses: actions/attest-sbom@v4
         with:
           subject-name: ${{ steps.repo.outputs.repository }}
           subject-digest: ${{ steps.build.outputs.digest }}
@@ -220,14 +220,14 @@ jobs:
           cat release-contract.json
 
       - name: Upload release-contract artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-contract
           path: release-contract.json
           retention-days: 90
 
       - name: Upload SBOM artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sbom-spdx
           path: sbom.spdx.json

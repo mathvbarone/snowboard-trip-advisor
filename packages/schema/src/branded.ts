@@ -9,5 +9,5 @@ export type UpstreamHash = z.infer<typeof UpstreamHash>
 export const ISOCountryCode = z.string().length(2).regex(/^[A-Z]{2}$/).brand<'ISOCountryCode'>()
 export type ISOCountryCode = z.infer<typeof ISOCountryCode>
 
-export const ISODateTimeString = z.string().datetime({ offset: true }).brand<'ISODateTimeString'>()
+export const ISODateTimeString = z.iso.datetime({ offset: true }).brand<'ISODateTimeString'>()
 export type ISODateTimeString = z.infer<typeof ISODateTimeString>
