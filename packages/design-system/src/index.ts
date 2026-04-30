@@ -9,6 +9,12 @@ export { Pill, type PillProps, type PillVariant } from './components/Pill'
 export { Chip, type ChipProps } from './components/Chip'
 export { Card, type CardProps, type CardVariant } from './components/Card'
 export {
+  Table,
+  type TableProps,
+  type TableColumn,
+  type TableRow,
+} from './components/Table'
+export {
   Select,
   type SelectProps,
   type SelectOption,
