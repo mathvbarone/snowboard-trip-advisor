@@ -148,20 +148,34 @@ describe('DetailDrawer', (): void => {
     expect(await axe(view.container)).toHaveNoViolations()
   })
 
-  it('renders the deep-link CTA with encodeURIComponent(name) in the href', async (): Promise<void> => {
+  it('renders the Booking deep-link CTA with encodeURIComponent(name) in the href', async (): Promise<void> => {
     await renderDrawer(KOTELNICA_SLUG)
     const cta = screen.getByRole('link', {
-      name: /browse lodging near kotelnica białczańska/i,
+      name: /browse booking\.com near kotelnica białczańska/i,
     })
     const href = cta.getAttribute('href') ?? ''
     expect(href.startsWith('https://www.booking.com/searchresults.html?ss=')).toBe(true)
     expect(href).toContain(encodeURIComponent('Kotelnica Białczańska'))
   })
 
-  it('shows the verbatim honesty micro-copy below the deep-link CTA', async (): Promise<void> => {
+  it('renders the Airbnb deep-link CTA with encodeURIComponent(name) in the href', async (): Promise<void> => {
     await renderDrawer(KOTELNICA_SLUG)
+    const cta = screen.getByRole('link', {
+      name: /browse airbnb near kotelnica białczańska/i,
+    })
+    const href = cta.getAttribute('href') ?? ''
+    expect(href.startsWith('https://www.airbnb.com/s/')).toBe(true)
+    expect(href).toContain(encodeURIComponent('Kotelnica Białczańska'))
+  })
+
+  it('shows the honesty micro-copy covering both Booking and Airbnb below the deep-link CTAs', async (): Promise<void> => {
+    await renderDrawer(KOTELNICA_SLUG)
+    // Widened from the parent §1 line 131 Booking-only wording to cover
+    // the second provider (Airbnb). Disclosure intent ("we may receive
+    // a commission") is character-pinned per the parent spec; only the
+    // provider list expands. See P1.1 fold rationale.
     const honesty =
-      'Opens Booking.com in a new tab. We may receive a commission if you book; this does not affect the data shown.'
+      'Opens Booking.com or Airbnb in a new tab. We may receive a commission if you book; this does not affect the data shown.'
     expect(screen.getByText(honesty)).toBeInTheDocument()
   })
 

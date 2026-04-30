@@ -7,7 +7,7 @@ import {
 import type { ResortSlug } from '@snowboard-trip-advisor/schema'
 import type { JSX } from 'react'
 
-import { bookingDeepLink } from '../lib/deepLinks'
+import { airbnbDeepLink, bookingDeepLink } from '../lib/deepLinks'
 import { countryToPrimaryLang } from '../lib/lang'
 import { useDataset } from '../state/useDataset'
 import { setURLState } from '../state/useURLState'
@@ -31,11 +31,15 @@ import { setURLState } from '../state/useURLState'
 //   5. Terrain stats section — durable facts (altitude range, slopes_km,
 //      lift_count, skiable_terrain_ha, season window).
 //   6. Trip note section — placeholder copy until Phase 2 analyst-note CMS.
-//   7. Browse-lodging CTA (ExternalLink, target="_blank") — booking deep
-//      link with security attrs (rel="noopener noreferrer" +
-//      referrerpolicy="no-referrer" emitted by the design-system
-//      ExternalLink). Followed by the verbatim parent-spec honesty
-//      micro-copy.
+//   7. Browse-lodging CTAs (Booking + Airbnb, both ExternalLink with
+//      target="_blank") — deep links with security attrs (rel="noopener
+//      noreferrer" + referrerpolicy="no-referrer" emitted by the
+//      design-system ExternalLink). Parent §1 line 131 names BOTH
+//      Booking and Airbnb providers + per-resort `booking_ss` /
+//      `airbnb_ss` overrides; both CTAs ship in PR 3.5. Followed by
+//      the honesty micro-copy widened from the spec's Booking-only
+//      wording to cover both providers (the disclosure intent is
+//      preserved verbatim; only the provider list expands).
 //
 // Slug → resort lookup pattern: `views.find((v) => v.slug === slug)`.
 // App.tsx already gates the mount on `slugs.has(url.detail)`, so the
@@ -60,7 +64,11 @@ export default function DetailDrawer({ slug }: DetailDrawerProps): JSX.Element |
     return null
   }
   const lang = countryToPrimaryLang(resort.country)
-  const lodgingHref = bookingDeepLink({
+  const bookingHref = bookingDeepLink({
+    slug: resort.slug,
+    name: resort.name.en,
+  })
+  const airbnbHref = airbnbDeepLink({
     slug: resort.slug,
     name: resort.name.en,
   })
@@ -217,12 +225,15 @@ export default function DetailDrawer({ slug }: DetailDrawerProps): JSX.Element |
         <p>Analyst notes for this resort will appear here.</p>
       </section>
       <section aria-label="Lodging" className="sta-detail-drawer__section">
-        <ExternalLink href={lodgingHref} target="_blank" variant="button">
-          {`Browse lodging near ${resort.name.en}`}
+        <ExternalLink href={bookingHref} target="_blank" variant="button">
+          {`Browse Booking.com near ${resort.name.en}`}
+        </ExternalLink>
+        <ExternalLink href={airbnbHref} target="_blank" variant="button">
+          {`Browse Airbnb near ${resort.name.en}`}
         </ExternalLink>
         <p className="sta-detail-drawer__honesty">
-          Opens Booking.com in a new tab. We may receive a commission if you
-          book; this does not affect the data shown.
+          Opens Booking.com or Airbnb in a new tab. We may receive a commission
+          if you book; this does not affect the data shown.
         </p>
       </section>
     </Drawer>

@@ -10,10 +10,29 @@
 // `ss=` (Booking) and the `/s/<segment>/homes` path (Airbnb) are filled
 // with the resort's display `name` — Booking's site searches by display
 // label, not slug; Airbnb's location-search URL is keyed off the human
-// label too. A defence-in-depth `slug=<encoded>` query parameter is also
-// emitted so a malicious slug surfaced via URL state cannot break out of
-// the canonical template (the URL stays well-formed even if `name` is
-// somehow empty).
+// label too. URLs are human-facing (users may copy / share / bookmark
+// them); a `name`-driven canonical template keeps the visible URL
+// readable.
+//
+// The `slug=<encoded>` query parameter is appended to BOTH templates as
+// belt-and-braces defence-in-depth. This is NOT specced — it's an
+// in-PR decision (PR 3.5). Rationale:
+//   1. Log-grep / fixture-asserting: tests + future ops dashboards can
+//      pin a deep-link to a resort by `slug=` without re-deriving it
+//      from the human-readable `name` (which depends on UTF-8
+//      normalization, locale casing, etc.).
+//   2. Future provider-side validators (e.g. an admin smoke-tester that
+//      visits each generated URL) may prefer a slug-based lookup —
+//      `slug=` keeps the URL machine-checkable.
+//   3. URL stays well-formed even if `name` somehow becomes empty
+//      (Booking would otherwise generate `?ss=&...`, which redirects
+//      to a generic landing page — `slug=` keeps the resort identity
+//      recoverable from the URL).
+// Booking and Airbnb both tolerate unknown query parameters (verified
+// via manual smoke; neither provider rejects requests with extra
+// params). If a future provider validator does reject unknown params,
+// the `slug=` emission becomes a per-builder flag rather than a
+// universal default — handled in the PR that introduces the validator.
 //
 // `override` — when supplied — replaces the `name` input. Operators can
 // curate search strings (e.g. "Bialka Tatrzanska resort area" instead of
