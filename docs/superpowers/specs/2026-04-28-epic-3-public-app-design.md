@@ -845,13 +845,13 @@ CODEOWNER review request order: `3.1a → 3.1b → 3.1c`, then concurrent group,
 
 ### 7.10 PR 3.4 — MatrixView
 
-**Goal.** Matrix route renders comparison table; `<md` shows redirect message; `&highlight=` activates column highlight; cards/matrix toggle lands in the slot.
+**Goal.** Matrix route renders comparison table; `<md` shows redirect message; `&highlight=<METRIC_FIELDS_entry>` activates row highlight (the metric path is a row identifier in the matrix; resorts are columns); cards/matrix toggle lands in the slot.
 
 **Deliverables (tests first):**
 
 - *Tests added:*
   - `packages/design-system/src/components/{Table,ToggleButtonGroup}.test.tsx`.
-  - `apps/public/src/views/matrix.test.tsx` — empty shortlist → "Add resorts to compare"; non-empty → table; `&highlight=snow_depth_cm` highlights column; viewport `<md` → redirect; lazy chunk loaded only when navigating.
+  - `apps/public/src/views/matrix.test.tsx` — empty shortlist → "Add resorts to compare"; non-empty → table; `&highlight=snow_depth_cm` highlights the matching row; viewport `<md` → redirect; lazy chunk loaded only when navigating.
   - `apps/public/src/views/FilterBar.test.tsx` extension — view toggle pushes `&view=` (PUSH transition).
 - *Implementation:*
   - `packages/design-system/src/components/{Table,ToggleButtonGroup}.tsx`.

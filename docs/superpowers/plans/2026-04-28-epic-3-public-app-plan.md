@@ -978,7 +978,7 @@ Parallel pairs after 3.1c lands: {3.2, 3.5}; after 3.2: {3.3, 3.5}; after 3.3: {
 
 - [ ] **Step 6.3: `apps/public/src/views/matrix.tsx` (lazy) — TDD-first.**
 
-  Tests: empty shortlist → "Add resorts to compare"; non-empty → table with shortlisted resorts × `MetricPath` rows; `&highlight=snow_depth_cm` highlights the column; viewport `<md` (mocked via `vi.spyOn(window, 'matchMedia')`) → redirect message; lazy chunk fetched only when navigating to matrix (asserted via MSW request log on the chunk URL — Vite dev serves `/src/views/matrix.tsx`); axe-clean per state. Run: FAIL. Implement (lazy `default` export; uses `useShortlist`, `useURLState`, `useMediaQuery`). Run: PASS. Commit.
+  Tests: empty shortlist → "Add resorts to compare"; non-empty → table with shortlisted resorts × `MetricPath` rows; `&highlight=snow_depth_cm` highlights the matching row (the `&highlight` value is a metric path, which identifies a row — resorts are columns); viewport `<md` (mocked via `vi.spyOn(window, 'matchMedia')`) → redirect message; lazy chunk fetched only when navigating to matrix (asserted via MSW request log on the chunk URL — Vite dev serves `/src/views/matrix.tsx`); axe-clean per state. Run: FAIL. Implement (lazy `default` export; uses `useShortlist`, `useURLState`, `useMediaQuery`). Run: PASS. Commit.
 
 - [ ] **Step 6.4: Update `FilterBar` — TDD-first (test-update precedes impl-fill).**
 
@@ -1109,7 +1109,7 @@ Parallel pairs after 3.1c lands: {3.2, 3.5}; after 3.2: {3.3, 3.5}; after 3.3: {
   Order:
   - `cards-empty.test.ts`: `?country=XX` (filter yields zero) → `<NoResorts>` renders (defence-in-depth) + axe.
   - `cards-loaded.test.ts`: default URL → cards render + focus order + axe.
-  - `matrix.test.ts`: `?view=matrix&shortlist=kotelnica-bialczanska,spindleruv-mlyn&highlight=snow_depth_cm` → matrix renders with column highlight + axe.
+  - `matrix.test.ts`: `?view=matrix&shortlist=kotelnica-bialczanska,spindleruv-mlyn&highlight=snow_depth_cm` → matrix renders with the `snow_depth_cm` row highlighted + axe.
   - `detail-open.test.ts`: `?detail=kotelnica-bialczanska` → drawer renders over cards + close → focus returns to `[data-detail-trigger]` + axe.
 
 - [ ] **Step 8.4: `scripts/check-bundle-budget.ts` — TDD-first.**
