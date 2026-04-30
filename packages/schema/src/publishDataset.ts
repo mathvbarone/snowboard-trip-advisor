@@ -131,6 +131,13 @@ async function withPublishLock<T>(
         await lockFh.close()
         // Best-effort cleanup: if unlink fails, the next caller times out cleanly.
         // A future hardening pass (Epic 5) could add stale-lock detection via PID.
+        // The catch arrow body is unreachable in the test environment — unlink only
+        // throws on filesystem race conditions we can't trigger in unit tests
+        // without ESM-incompatible vi.mock of node:fs/promises (the same audit
+        // restriction that motivates the EBADF and lock-timeout `v8 ignore`
+        // markers below). Exclusion rationale also recorded in
+        // packages/schema/vite.config.ts.
+        /* v8 ignore next */
         await unlink(lockPath).catch((): void => undefined)
       }
     } catch (e: unknown) {
