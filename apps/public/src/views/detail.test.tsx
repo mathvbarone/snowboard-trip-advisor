@@ -247,6 +247,9 @@ describe('DetailDrawer', (): void => {
   // graph, never via fetch. The bundle-visualizer assertion (detail in its
   // own dist chunk) is the executable surrogate; PR 3.6 wires it into CI
   // (mirrors the pattern matrix.test.tsx already uses for the matrix
-  // chunk).
+  // chunk — see `matrix.test.tsx` "asserts the matrix lazy chunk is fetched
+  // on view=matrix navigation (deferred to PR 3.6 dist-chunk smoke)" for
+  // the precedent and the surrogate that PR 3.6 will land in
+  // `scripts/check-chunks.ts`).
   it.skip('asserts the detail lazy chunk is fetched on detail-drawer open (deferred to PR 3.6 dist-chunk smoke)', (): void => {})
 })

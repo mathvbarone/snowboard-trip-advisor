@@ -30,8 +30,7 @@ import { setURLState } from '../state/useURLState'
 //      states share the same renderer; provenance is per-field).
 //   5. Terrain stats section — durable facts (altitude range, slopes_km,
 //      lift_count, skiable_terrain_ha, season window).
-//   6. Trip note section — placeholder copy until Phase 2 analyst-note CMS.
-//   7. Browse-lodging CTAs (Booking + Airbnb, both ExternalLink with
+//   6. Browse-lodging CTAs (Booking + Airbnb, both ExternalLink with
 //      target="_blank") — deep links with security attrs (rel="noopener
 //      noreferrer" + referrerpolicy="no-referrer" emitted by the
 //      design-system ExternalLink). Parent §1 line 131 names BOTH
@@ -227,12 +226,9 @@ export default function DetailDrawer({ slug }: DetailDrawerProps): JSX.Element |
           </dl>
         </section>
       </Card>
-      {/* TODO: analyst-note CMS lands in Phase 2. Phase 1 ships placeholder
-          copy so the section is structurally present and a11y-stable. */}
-      <section aria-label="Trip note" className="sta-detail-drawer__section">
-        <h3>Trip note</h3>
-        <p>Analyst notes for this resort will appear here.</p>
-      </section>
+      {/* TODO Phase 2: analyst-note CMS. Section deliberately omitted — per
+          CLAUDE.md "no half-finished implementations", a placeholder paragraph
+          shipping prose for nonexistent data is not an acceptable Phase 1 stub. */}
       <section aria-label="Lodging" className="sta-detail-drawer__section">
         <ExternalLink href={bookingHref} target="_blank" variant="button">
           {`Browse Booking.com near ${resort.name.en}`}

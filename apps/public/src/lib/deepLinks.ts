@@ -57,6 +57,25 @@ export type DeepLinkArgs = {
   slug: string
   name: string
   override?: string
+  /**
+   * Optional trip-window parameters appended to the deep-link URL.
+   *
+   * - `start` and `end` MUST be ISO 8601 calendar dates in the format
+   *   `YYYY-MM-DD` (e.g. `'2026-12-20'`). The builder does NOT validate or
+   *   transform — the strings flow through `encodeURIComponent` as-is and
+   *   land in the provider's `checkin=` / `checkout=` query params.
+   * - A non-ISO string (e.g. `Date.toString()`, locale-formatted) will
+   *   produce a malformed URL that the provider rejects. Validate at the
+   *   call site, not here. Phase 2's admin-app form-controls will brand
+   *   this as `ISODate`.
+   * - `party_size` (when set) becomes Booking's `group_adults=N` and
+   *   Airbnb's `adults=N`. When omitted, the adults param is NOT defaulted
+   *   to a magic number — the provider applies its own default.
+   *
+   * @example
+   *   bookingDeepLink({ slug: 'kotelnica-bialczanska', name: 'Kotelnica',
+   *     trip: { start: '2026-12-20', end: '2026-12-27', party_size: 4 } })
+   */
   trip?: { start: string; end: string; party_size?: number }
 }
 
