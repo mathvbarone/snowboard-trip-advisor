@@ -131,6 +131,31 @@ describe('validatePublishedDataset (Epic 2 PR 2.2)', (): void => {
     expect(issueCodes).not.toContain('fx_provenance_invalid')
   })
 
+  it('skips fx-provenance check when field_sources documents fx but the live signal omits the value', (): void => {
+    // Covers the false branch of `if (moneyValue !== undefined)` in the
+    // fx-provenance loop. A field_sources entry can declare an `fx` block
+    // even though the corresponding live-signal money value is absent
+    // (lodging_sample is optional; lift_pass_day is documented but not
+    // populated yet for some resorts). The validator's contract in that
+    // case is to skip — fx self-consistency only makes sense when there's
+    // a Money.amount to compare against.
+    const mutated = structuredClone(fixture) as {
+      live_signals: Array<{
+        resort_slug: string
+        lift_pass_day?: { amount: number; currency: string }
+        field_sources: Record<string, { fx?: { rate: number; native_amount: number } } | undefined>
+      }>
+    }
+    const kot = mutated.live_signals.find((l): boolean => l.resort_slug === 'kotelnica-bialczanska')
+    if (!kot) { throw new Error('fixture invariant') }
+    const liftPassFs = kot.field_sources['lift_pass_day']
+    if (!liftPassFs?.fx) { throw new Error('fixture invariant: kotelnica lift_pass_day must carry fx') }
+    delete kot.lift_pass_day // drop the money value but keep the fx block in field_sources
+    const result = validatePublishedDataset(mutated)
+    const issueCodes = result.ok ? [] : result.issues.map((i): string => i.code)
+    expect(issueCodes).not.toContain('fx_provenance_invalid')
+  })
+
   it('returns metric_field_missing_source for snow_depth_cm when field_sources entry is absent', (): void => {
     const mutated = structuredClone(fixture) as { live_signals: Array<{ resort_slug: string; field_sources: Record<string, unknown> }> }
     const kot = mutated.live_signals.find((l): boolean => l.resort_slug === 'kotelnica-bialczanska')
