@@ -31,3 +31,23 @@ vi.stubGlobal(
     dispatchEvent: (): boolean => false,
   }),
 )
+
+// jsdom 29's CSSOM rewrite dropped the global `AnimationEvent` constructor
+// (TransitionEvent is still defined; AnimationEvent is not). React 19's event
+// system attaches `onAnimationEnd` listeners only when AnimationEvent is
+// available on the window — without the polyfill, the listener silently
+// never fires and `<div onAnimationEnd={...}>` becomes untestable. Stub a
+// minimal Event subclass with the documented init fields so React recognises
+// the event and dispatches `onAnimationEnd` synthetic-event handlers.
+class AnimationEventStub extends Event {
+  animationName: string
+  elapsedTime: number
+  pseudoElement: string
+  constructor(type: string, init: AnimationEventInit = {}) {
+    super(type, init)
+    this.animationName = init.animationName ?? ''
+    this.elapsedTime = init.elapsedTime ?? 0
+    this.pseudoElement = init.pseudoElement ?? ''
+  }
+}
+vi.stubGlobal('AnimationEvent', AnimationEventStub)
