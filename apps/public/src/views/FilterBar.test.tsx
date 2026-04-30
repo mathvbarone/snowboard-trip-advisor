@@ -4,7 +4,7 @@ import {
   ResortSlug,
   type ResortView,
 } from '@snowboard-trip-advisor/schema'
-import { render, screen } from '@testing-library/react'
+import { act, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { axe } from 'jest-axe'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -203,19 +203,7 @@ describe('FilterBar', (): void => {
     expect(window.location.search).not.toContain('price')
   })
 
-  it('renders the slot when supplied (PR 3.4 fills it with the view toggle)', (): void => {
-    render(
-      <FilterBar
-        views={VIEWS_TWO_COUNTRY}
-        priceBucket="any"
-        onPriceBucketChange={(): void => undefined}
-        slot={<div data-testid="slot">view-toggle</div>}
-      />,
-    )
-    expect(screen.getByTestId('slot')).toBeInTheDocument()
-  })
-
-  it('renders nothing in the slot region when slot is undefined (PR 3.2 default)', (): void => {
+  it('renders the cards/matrix view-toggle inside the slot region by default (PR 3.4)', (): void => {
     const { container } = render(
       <FilterBar
         views={VIEWS_TWO_COUNTRY}
@@ -223,7 +211,90 @@ describe('FilterBar', (): void => {
         onPriceBucketChange={(): void => undefined}
       />,
     )
-    expect(container.querySelector('[data-region="slot"]')).toBeNull()
+    const slot = container.querySelector('[data-region="slot"]')
+    expect(slot).not.toBeNull()
+    // Toggle group is keyed by aria-label="View".
+    expect(within(slot as HTMLElement).getByRole('group', { name: 'View' }))
+      .toBeInTheDocument()
+    expect(within(slot as HTMLElement).getByRole('button', { name: 'Cards' }))
+      .toBeInTheDocument()
+    expect(within(slot as HTMLElement).getByRole('button', { name: 'Matrix' }))
+      .toBeInTheDocument()
+  })
+
+  it('reflects the URL view in aria-pressed on the toggle (initial state = cards default)', (): void => {
+    render(
+      <FilterBar
+        views={VIEWS_TWO_COUNTRY}
+        priceBucket="any"
+        onPriceBucketChange={(): void => undefined}
+      />,
+    )
+    expect(
+      screen.getByRole('button', { name: 'Cards', pressed: true }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Matrix', pressed: false }),
+    ).toBeInTheDocument()
+  })
+
+  it('reflects the URL view in aria-pressed when ?view=matrix is set on mount', (): void => {
+    setLocation('view=matrix')
+    render(
+      <FilterBar
+        views={VIEWS_TWO_COUNTRY}
+        priceBucket="any"
+        onPriceBucketChange={(): void => undefined}
+      />,
+    )
+    expect(
+      screen.getByRole('button', { name: 'Matrix', pressed: true }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Cards', pressed: false }),
+    ).toBeInTheDocument()
+  })
+
+  it('clicking "Matrix" pushes ?view=matrix via setURLState (PUSH transition)', async (): Promise<void> => {
+    const user = userEvent.setup()
+    const pushSpy = vi.spyOn(window.history, 'pushState')
+    render(
+      <FilterBar
+        views={VIEWS_TWO_COUNTRY}
+        priceBucket="any"
+        onPriceBucketChange={(): void => undefined}
+      />,
+    )
+    await user.click(screen.getByRole('button', { name: 'Matrix' }))
+    expect(pushSpy).toHaveBeenCalled()
+    expect(window.location.search).toContain('view=matrix')
+    pushSpy.mockRestore()
+  })
+
+  it('browser back from ?view=matrix returns toggle aria-pressed to cards', (): void => {
+    setLocation('view=matrix')
+    render(
+      <FilterBar
+        views={VIEWS_TWO_COUNTRY}
+        priceBucket="any"
+        onPriceBucketChange={(): void => undefined}
+      />,
+    )
+    // Sanity check pre-popstate: matrix is pressed.
+    expect(
+      screen.getByRole('button', { name: 'Matrix', pressed: true }),
+    ).toBeInTheDocument()
+    // Simulate browser back: address bar reverts, popstate fires.
+    act((): void => {
+      window.history.replaceState({}, '', '/')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    })
+    expect(
+      screen.getByRole('button', { name: 'Cards', pressed: true }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Matrix', pressed: false }),
+    ).toBeInTheDocument()
   })
 
   it('is axe-clean', async (): Promise<void> => {
