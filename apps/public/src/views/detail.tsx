@@ -90,27 +90,24 @@ export default function DetailDrawer({ slug }: DetailDrawerProps): JSX.Element |
       title={resort.name.en}
       position="right"
     >
-      {/* DialogTitle is the dialog's accessible name (Radix wires
-          `aria-labelledby` automatically from the `title` prop). Without
-          `aria-hidden` here, the body <h2> would surface as a second
-          heading inside the same dialog, causing screen readers to
-          announce the resort name TWICE consecutively (once via
-          DialogTitle, once via this h2). We hide the body h2 from the
-          a11y tree with `aria-hidden="true"` so the SR announcement is
-          single-pass.
-          The visual <h2 lang={lang}> is retained for two reasons:
-            1. Visual heading hierarchy — sighted users see the resort
-               name as a body-level heading inside the drawer.
-            2. The BCP 47 `lang` attribute hints browser-level
-               hyphenation, font-fallback, and (non-SR) pronunciation
-               rules for the resort's locale.
-          Trade-off: SR users lose the per-heading `lang` context. The
-          cleaner long-term fix is extending the design-system Drawer
-          primitive with an optional `titleLang?: string` (or
-          `titleNode?: ReactNode`) prop so DialogTitle itself carries
-          `lang=`. Deferred to a follow-up — touching the Drawer surface
-          falls under design-system CODEOWNERS. */}
-      <h2 className="sta-detail-drawer__name" lang={lang} aria-hidden="true">
+      {/* Heading mechanic (UX-4 fold):
+            - DialogTitle (Drawer's `title` prop, rendered visibly inside
+              the panel) is the SOLE visible heading + the dialog's
+              accessible name (Radix wires aria-labelledby automatically).
+            - Body <h2> is decorated with `sta-visually-hidden` —
+              invisible to sighted users, but kept in the a11y tree with
+              the BCP 47 `lang` attribute so screen readers / browser
+              hyphenation get pronunciation context for the resort's
+              locale.
+          Net effect: ONE visible heading; TWO a11y reads of the resort
+          name (DialogTitle + lang-tagged h2). The duplicate read is an
+          acknowledged structural cost — the cleaner long-term fix is
+          extending the Drawer primitive with an optional
+          `titleLang?: string` (or `titleNode?: ReactNode`) so
+          DialogTitle itself carries `lang=`. Deferred to Epic 6 backlog
+          (touching the Drawer surface falls under design-system
+          CODEOWNERS). */}
+      <h2 className="sta-detail-drawer__name sta-visually-hidden" lang={lang}>
         {resort.name.en}
       </h2>
       <p className="sta-detail-drawer__region">{resort.region.en}</p>

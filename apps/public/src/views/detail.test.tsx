@@ -74,10 +74,11 @@ describe('DetailDrawer', (): void => {
     expect(screen.getByRole('dialog')).toHaveAccessibleName('Kotelnica Białczańska')
   })
 
-  // The body <h2 lang={lang} aria-hidden="true"> is intentionally hidden
-  // from the a11y tree (DialogTitle owns the dialog's accessible name —
-  // see detail.tsx for the SR-double-read rationale). `getByRole` would
-  // therefore exclude it; we select via the class hook instead.
+  // The body <h2 lang={lang}> is decorated with `sta-visually-hidden` per
+  // the UX-4 fold: invisible to sighted users (DialogTitle is the visible
+  // heading) but kept in the a11y tree so the lang attribute provides
+  // pronunciation context. `getByRole` would still include it (no
+  // aria-hidden), so we select via the class hook for stable matching.
   function getBodyHeading(): HTMLElement {
     const dialog = screen.getByRole('dialog')
     const tagged = dialog.querySelector<HTMLHeadingElement>(
@@ -103,17 +104,32 @@ describe('DetailDrawer', (): void => {
     expect(heading.getAttribute('lang')).toBe('cs')
   })
 
-  it('hides the body-level heading from the a11y tree (single SR read via DialogTitle)', async (): Promise<void> => {
-    // DialogTitle is the dialog's accessible name (Radix sets
-    // aria-labelledby automatically). The body <h2> carries the visual
-    // heading + the BCP 47 lang attribute for browser-level hints, but
-    // is aria-hidden so screen readers announce the resort name once,
-    // not twice. See the comment block in detail.tsx for the trade-off.
+  it('visually hides the body-level heading via .sta-visually-hidden (single visible heading)', async (): Promise<void> => {
+    // UX-4 fold: the body <h2> carries `sta-visually-hidden` so sighted
+    // users see ONE visible heading (DialogTitle, rendered visibly by the
+    // Drawer primitive). The body <h2> stays in the a11y tree with its
+    // `lang` attribute so SR users get pronunciation context — at the
+    // structural cost of two SR reads of the resort name (DialogTitle
+    // via Radix aria-labelledby, plus the lang-tagged h2). The cleaner
+    // long-term fix is extending Drawer with `titleLang?` / `titleNode?`
+    // (Epic 6 backlog).
     await renderDrawer(KOTELNICA_SLUG)
     const heading = getBodyHeading()
-    expect(heading.getAttribute('aria-hidden')).toBe('true')
+    expect(heading.className).toContain('sta-visually-hidden')
     // DialogTitle continues to carry the dialog's accessible name.
     expect(screen.getByRole('dialog')).toHaveAccessibleName('Kotelnica Białczańska')
+  })
+
+  it('does NOT carry aria-hidden on the body-level heading (kept in a11y tree)', async (): Promise<void> => {
+    // Negative regression: the previous mechanic used `aria-hidden="true"`
+    // to suppress the second SR read of the resort name. The UX-4 fold
+    // replaces that with `sta-visually-hidden` so the lang-tagged h2 is
+    // STILL announced (with browser/SR pronunciation hints) — only the
+    // visual rendering is suppressed. Guard against accidental
+    // re-introduction of aria-hidden.
+    await renderDrawer(KOTELNICA_SLUG)
+    const heading = getBodyHeading()
+    expect(heading.getAttribute('aria-hidden')).toBeNull()
   })
 
   it('clears &detail=… from the URL when the drawer closes', async (): Promise<void> => {
