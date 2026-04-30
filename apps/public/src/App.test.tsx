@@ -166,6 +166,107 @@ describe('App', (): void => {
   })
 })
 
+describe('App > useScrollReset wire', (): void => {
+  // Asserts that App.tsx wires useScrollReset(url.view) inside AppContent.
+  // Per spec section 6.1 (line 244): scrollTo(0,0) fires on cards <-> matrix
+  // transitions only — sort / country / shortlist / detail / highlight URL
+  // changes must NOT scroll-reset. The first-mount fire is suppressed by
+  // the hook's isFirstRunRef so the cards-landing initial render keeps any
+  // user scroll position.
+
+  // Push a URL change and dispatch popstate so useURLState's subscriber
+  // fires synchronously inside the act() scope (the SPA listens on
+  // popstate, which jsdom does NOT auto-fire on history.replaceState).
+  function pushURL(search: string): void {
+    act((): void => {
+      window.history.replaceState({}, '', `/${search.length > 0 ? `?${search}` : ''}`)
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    })
+  }
+
+  it('does NOT call scrollTo on initial mount', async (): Promise<void> => {
+    const scrollSpy = vi.spyOn(window, 'scrollTo').mockImplementation((): void => {})
+    await renderAsync(<App />)
+    await screen.findByRole('heading', {
+      level: 1,
+      name: /compare european ski resorts/i,
+    })
+    expect(scrollSpy).not.toHaveBeenCalled()
+  })
+
+  it('calls scrollTo when view transitions cards -> matrix', async (): Promise<void> => {
+    const scrollSpy = vi.spyOn(window, 'scrollTo').mockImplementation((): void => {})
+    await renderAsync(<App />)
+    await screen.findByRole('heading', {
+      level: 1,
+      name: /compare european ski resorts/i,
+    })
+    scrollSpy.mockClear()
+    pushURL('view=matrix')
+    expect(scrollSpy).toHaveBeenCalled()
+  })
+
+  it('does NOT call scrollTo when sort changes', async (): Promise<void> => {
+    const scrollSpy = vi.spyOn(window, 'scrollTo').mockImplementation((): void => {})
+    await renderAsync(<App />)
+    await screen.findByRole('heading', {
+      level: 1,
+      name: /compare european ski resorts/i,
+    })
+    scrollSpy.mockClear()
+    pushURL('sort=price_desc')
+    expect(scrollSpy).not.toHaveBeenCalled()
+  })
+
+  it('does NOT call scrollTo when country changes', async (): Promise<void> => {
+    const scrollSpy = vi.spyOn(window, 'scrollTo').mockImplementation((): void => {})
+    await renderAsync(<App />)
+    await screen.findByRole('heading', {
+      level: 1,
+      name: /compare european ski resorts/i,
+    })
+    scrollSpy.mockClear()
+    pushURL('country=PL')
+    expect(scrollSpy).not.toHaveBeenCalled()
+  })
+
+  it('does NOT call scrollTo when shortlist changes', async (): Promise<void> => {
+    const scrollSpy = vi.spyOn(window, 'scrollTo').mockImplementation((): void => {})
+    await renderAsync(<App />)
+    await screen.findByRole('heading', {
+      level: 1,
+      name: /compare european ski resorts/i,
+    })
+    scrollSpy.mockClear()
+    pushURL('shortlist=kotelnica-bialczanska')
+    expect(scrollSpy).not.toHaveBeenCalled()
+  })
+
+  it('does NOT call scrollTo when detail opens', async (): Promise<void> => {
+    const scrollSpy = vi.spyOn(window, 'scrollTo').mockImplementation((): void => {})
+    await renderAsync(<App />)
+    await screen.findByRole('heading', {
+      level: 1,
+      name: /compare european ski resorts/i,
+    })
+    scrollSpy.mockClear()
+    pushURL('detail=kotelnica-bialczanska')
+    expect(scrollSpy).not.toHaveBeenCalled()
+  })
+
+  it('does NOT call scrollTo when highlight changes', async (): Promise<void> => {
+    const scrollSpy = vi.spyOn(window, 'scrollTo').mockImplementation((): void => {})
+    await renderAsync(<App />)
+    await screen.findByRole('heading', {
+      level: 1,
+      name: /compare european ski resorts/i,
+    })
+    scrollSpy.mockClear()
+    pushURL('highlight=snow_depth_cm')
+    expect(scrollSpy).not.toHaveBeenCalled()
+  })
+})
+
 describe('ShellErrorBoundary', (): void => {
   it('getDerivedStateFromError returns hasError + the error reference', (): void => {
     const e = new Error('boom')
