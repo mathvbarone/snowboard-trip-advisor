@@ -200,4 +200,48 @@ describe('MatrixView', (): void => {
     expect(dataHeaders).toHaveLength(1)
     expect(dataHeaders[0]?.textContent).toContain('Kotelnica')
   })
+
+  // Spec §3.3 drawer-on-matrix downgrade — the matrix-table section root
+  // carries `data-detail-open` whenever `&detail=<slug>` is present in the
+  // URL. matrix.module.css's `@media (max-width: 1279.98px) .matrix[data-
+  // detail-open]` rule scopes the single-column flow to that combination.
+  // JSDOM does not honour @media; the testable wiring at this layer is the
+  // attribute itself. The CSS hashed-class assertion mirrors the CSS-module
+  // contract: `styles.matrix` resolves to `_matrix_<hash>` at build time —
+  // its presence on the section element is what makes the module's
+  // `.matrix[data-detail-open]` selector reachable at runtime.
+  it('sets data-detail-open="" on the matrix-table section when &detail=<slug> is in the URL', async (): Promise<void> => {
+    setLocation('shortlist=kotelnica-bialczanska,spindleruv-mlyn&detail=kotelnica-bialczanska')
+    await renderMatrix()
+    await screen.findByRole('table', undefined, { timeout: 1500 })
+    const section = document.querySelector('[data-region="matrix-table"]')
+    expect(section).not.toBeNull()
+    expect(section?.getAttribute('data-detail-open')).toBe('')
+  })
+
+  it('omits data-detail-open on the matrix-table section when &detail is absent', async (): Promise<void> => {
+    setLocation('shortlist=kotelnica-bialczanska,spindleruv-mlyn')
+    await renderMatrix()
+    await screen.findByRole('table', undefined, { timeout: 1500 })
+    const section = document.querySelector('[data-region="matrix-table"]')
+    expect(section).not.toBeNull()
+    expect(section?.hasAttribute('data-detail-open')).toBe(false)
+  })
+
+  it('applies the matrix.module.css hashed class to the matrix-table section', async (): Promise<void> => {
+    // CSS Modules transform `.matrix` into a build-time hashed class name
+    // (vitest's CSS handling matches Vite's). The exact hash is unstable,
+    // but the class list MUST be non-empty AND contain the literal token
+    // 'matrix' as a substring (Vite's default CSS-module name pattern is
+    // `_<localName>_<hash>`). Without this class, the module's
+    // `.matrix[data-detail-open]` rule cannot match at runtime.
+    setLocation('shortlist=kotelnica-bialczanska')
+    await renderMatrix()
+    await screen.findByRole('table', undefined, { timeout: 1500 })
+    const section = document.querySelector('[data-region="matrix-table"]')
+    expect(section).not.toBeNull()
+    const className = section?.className ?? ''
+    expect(className.length).toBeGreaterThan(0)
+    expect(className).toContain('matrix')
+  })
 })

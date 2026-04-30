@@ -12,6 +12,7 @@ import { useMediaQuery } from '../state/useMediaQuery'
 import { useShortlist } from '../state/useShortlist'
 import { useURLState } from '../state/useURLState'
 
+import styles from './matrix.module.css'
 import { METRIC_LABELS, METRIC_RENDERERS } from './matrixRenderers'
 
 // MatrixView — comparison-table view across the URL-shared shortlist.
@@ -89,7 +90,16 @@ export default function MatrixView(): JSX.Element {
   )
 
   return (
-    <section className="sta-matrix" data-region="matrix-table">
+    <section
+      className={styles.matrix}
+      data-region="matrix-table"
+      // Spec §3.3 drawer-on-matrix downgrade: matrix.module.css scopes its
+      // single-column flow to `.matrix[data-detail-open]` under @media
+      // (max-width: 1279.98px). The attribute is set HERE (not on App.tsx)
+      // so the CSS-module hashed class and the attribute live on the same
+      // node — App.tsx's lazy-import lines stay frozen per spec §5.5.
+      data-detail-open={url.detail !== undefined ? '' : undefined}
+    >
       <Table caption="Resort comparison matrix" columns={columns} rows={rows} />
     </section>
   )
