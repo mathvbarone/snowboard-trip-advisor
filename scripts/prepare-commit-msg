@@ -1,0 +1,20 @@
+#!/bin/sh
+# Auto-add a DCO Signed-off-by trailer if one isn't already present.
+# Reads identity from `git config user.name` / `user.email` (per-repo first, then global).
+
+case "${2:-}" in
+  merge|squash) exit 0 ;;
+esac
+
+NAME=$(git config user.name)
+EMAIL=$(git config user.email)
+if [ -z "$NAME" ] || [ -z "$EMAIL" ]; then
+  echo "prepare-commit-msg: skipping DCO sign-off (user.name/user.email not set)" >&2
+  exit 0
+fi
+
+TRAILER="Signed-off-by: $NAME <$EMAIL>"
+
+if ! grep -qxF "$TRAILER" "$1"; then
+  printf '\n%s\n' "$TRAILER" >> "$1"
+fi

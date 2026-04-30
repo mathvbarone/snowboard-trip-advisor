@@ -79,7 +79,7 @@ export default defineConfig({
         // `import.meta.hot` is undefined in vitest (the entire module body
         // is dead code), so coverage measurement against it is structurally
         // impossible. The whole-file glob exclusion is the project's
-        // standard pattern. CLAUDE.md "Coverage Rules" bans inline
+        // standard pattern. AGENTS.md "Coverage Rules" bans inline
         // coverage-suppression comments; the HMR block was extracted into
         // its own file specifically so the exclusion can be expressed as a
         // glob both here and in apps/public/vite.config.ts. See
@@ -90,6 +90,11 @@ export default defineConfig({
         // `scripts/pre-commit` is a shell script installed into the worktree
         // hooks dir by `npm run setup`.
         'scripts/pre-commit',
+        // `scripts/prepare-commit-msg` is also a shell hook. It is covered by
+        // `scripts/install-git-hooks.test.mjs` and by the real `npm run setup`
+        // installer path, but it is not JavaScript and rolldown/v8 cannot
+        // parse it as a coverage target.
+        'scripts/prepare-commit-msg',
         // `scripts/generate-tokens.cli.ts` is a side-effect entry point that
         // writes `packages/design-system/tokens.css` at import time. Its three
         // executable lines are exercised end-to-end by `npm run tokens:generate`

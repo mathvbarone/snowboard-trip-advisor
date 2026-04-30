@@ -21,10 +21,12 @@
     "coverage": "vitest run --coverage",
     "test:integration": "vitest run --project @snowboard-trip-advisor/tests-integration",
     "test:hooks": "./scripts/hooks/test-hooks.sh",
+    "test:agent-discipline-sync": "node --test scripts/check-agent-discipline-sync.test.mjs",
+    "check:agent-discipline-sync": "node scripts/check-agent-discipline-sync.mjs",
     "tokens:generate": "tsx scripts/generate-tokens.cli.ts",
     "tokens:check": "npm run tokens:generate && git diff --exit-code packages/design-system/tokens.css",
-    "qa": "npm run lint && npm run typecheck && npm run coverage && npm run tokens:check && npm run test:hooks && npm run test:integration",
-    "setup": "cp scripts/pre-commit \"$(git rev-parse --git-path hooks)/pre-commit\" && chmod +x \"$(git rev-parse --git-path hooks)/pre-commit\" && npm run tokens:generate"
+    "qa": "npm run lint && npm run typecheck && npm run coverage && npm run tokens:check && npm run test:hooks && npm run test:agent-discipline-sync && npm run check:agent-discipline-sync && npm run test:integration",
+    "setup": "node scripts/install-git-hooks.mjs && npm run tokens:generate"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",

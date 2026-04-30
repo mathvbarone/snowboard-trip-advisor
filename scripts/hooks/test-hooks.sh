@@ -13,13 +13,15 @@ FAIL=0
 FAILED_LINES=""
 
 # ---------- .mjs unit tests (node --test) ----------
-# The post-pr-create-reminder.mjs hook ships a sibling unit-test file
-# exercised via `node --test`. Run it before the bash integration tests
-# below so this single entry point covers both layers and CI's exit code
-# reflects regressions in either. Without this, unit-only-covered code
-# paths (e.g. porcelain-parser defensive branches) wouldn't fail CI.
+# The hook/installer helpers ship sibling unit-test files exercised via
+# `node --test`. Run them before the bash integration tests below so this
+# single entry point covers both layers and CI's exit code reflects
+# regressions in either. Without this, unit-only-covered code paths
+# wouldn't fail CI.
 echo "==> Running .mjs unit tests via node --test..."
-if ! node --test scripts/hooks/post-pr-create-reminder.test.mjs; then
+if ! node --test \
+  scripts/hooks/post-pr-create-reminder.test.mjs \
+  scripts/install-git-hooks.test.mjs; then
   echo "FAIL: .mjs unit tests failed" >&2
   exit 1
 fi

@@ -5,8 +5,10 @@
 # by editing this file requires maintainer approval.
 
 # Agent instructions and product direction
+/AGENTS.md                               @mathvbarone
 /CLAUDE.md                               @mathvbarone
 /README.md                               @mathvbarone
+/docs/agent-discipline/**                @mathvbarone
 /docs/superpowers/specs/**               @mathvbarone
 /docs/adr/**                             @mathvbarone
 
@@ -18,7 +20,10 @@
 /.github/dependabot.yml                  @mathvbarone
 /.claude/settings.json                   @mathvbarone
 /scripts/hooks/**                        @mathvbarone
+/scripts/install-git-hooks.mjs           @mathvbarone
+/scripts/check-agent-discipline-sync.mjs @mathvbarone
 /scripts/pre-commit                      @mathvbarone
+/scripts/prepare-commit-msg              @mathvbarone
 /scripts/apply-branch-protection.sh      @mathvbarone
 
 # Quality-gate wiring

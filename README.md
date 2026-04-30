@@ -88,7 +88,7 @@ Until the branch merges, the `main` branch still behaves like a scoring-based di
 
 ```bash
 npm install
-npm run setup      # installs the pre-commit hook
+npm run setup      # installs the local git hooks
 npm run dev        # Vite dev server for the public app
 npm run qa         # lint → typecheck → coverage (hard gate)
 ```
@@ -100,14 +100,14 @@ Additional Phase 1 commands — `npm run dev:admin` (loopback admin) and `npm ru
 Every commit goes through:
 
 ```bash
-npm run qa  # npm run lint → npm run typecheck → npm run coverage
+npm run qa  # lint → typecheck → coverage → tokens:check → test:hooks → test:agent-discipline-sync → check:agent-discipline-sync → test:integration
 ```
 
 - 100% line / branch / function / statement coverage is a hard gate.
 - TDD is required: failing test first, then minimal implementation.
 - `--no-verify` is forbidden; the pre-commit hook runs `npm run qa` and must pass.
 
-Details and agent rules are in [`CLAUDE.md`](CLAUDE.md).
+Details and agent rules are in [`AGENTS.md`](AGENTS.md).
 
 ## Data & trust posture
 
@@ -149,4 +149,4 @@ The full license boundary (which file types fall under which license) is specifi
 - Current spec: [`docs/superpowers/specs/2026-04-22-product-pivot-design.md`](docs/superpowers/specs/2026-04-22-product-pivot-design.md)
 - Pivot rationale: [`docs/adr/0001-pivot-to-data-transparency.md`](docs/adr/0001-pivot-to-data-transparency.md)
 - Superseded (historical): [`docs/superpowers/specs/ARCHIVED-2026-04-03-snowboard-trip-advisor-design.md`](docs/superpowers/specs/ARCHIVED-2026-04-03-snowboard-trip-advisor-design.md)
-- Agent instructions: [`CLAUDE.md`](CLAUDE.md)
+- Agent instructions: [`AGENTS.md`](AGENTS.md)
