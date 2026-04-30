@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { axe } from 'jest-axe'
 import { useRef, useState } from 'react'
@@ -272,9 +272,13 @@ describe('Drawer', (): void => {
     )
     // Drawer wires onAnimationEnd onto the sliding panel; jsdom does not
     // run real CSS transitions, so we dispatch the synthetic React event
-    // by firing a native animationend on the panel element.
+    // via RTL's fireEvent (which constructs a proper AnimationEvent).
+    // jsdom 29 tightened event-type matching: dispatching a generic
+    // `new Event('animationend')` no longer triggers React's
+    // `onAnimationEnd` handler because React listens specifically for
+    // `AnimationEvent` instances. fireEvent.animationEnd handles this.
     const panel = screen.getByRole('dialog', { name: 'Shortlist' })
-    panel.dispatchEvent(new Event('animationend', { bubbles: true }))
+    fireEvent.animationEnd(panel)
     expect(onAnimationEnd).toHaveBeenCalledTimes(1)
   })
 
