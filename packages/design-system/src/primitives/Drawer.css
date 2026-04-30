@@ -1,0 +1,36 @@
+/* Drawer slide-in panel CSS. Mirrors Table.css precedent — minimal
+ * surface to satisfy spec §3.3 (right-side overlay) + §5.5 (Drawer
+ * primitive's data-position + reduced-motion contract). Broader
+ * design-system styling pass is deferred to Epic 6.
+ */
+
+.sta-drawer {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  width: min(420px, 100vw);
+  background: white;
+  z-index: var(--z-drawer, 50);
+  transition: transform var(--duration-base, 180ms) ease;
+  overflow-y: auto;
+  padding: var(--space-lg, 16px);
+  box-shadow: 0 0 16px rgba(0, 0, 0, 0.15);
+}
+
+.sta-drawer[data-position='right'] {
+  right: 0;
+  transform: translateX(100%);
+}
+
+.sta-drawer[data-position='left'] {
+  left: 0;
+  transform: translateX(-100%);
+}
+
+.sta-drawer[data-state='open'] {
+  transform: translateX(0);
+}
+
+.sta-drawer[data-reduced-motion='true'] {
+  transition: none;
+}
