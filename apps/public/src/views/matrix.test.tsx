@@ -194,6 +194,20 @@ describe('MatrixView', (): void => {
     expect(dataHeaders[0]?.textContent).toContain('Kotelnica')
   })
 
+  it('renders the empty-shortlist EmptyState when ALL slugs are unknown (post-filter)', async (): Promise<void> => {
+    // Shared URLs whose resorts were removed from the dataset (or hand-typed
+    // garbage that passed slug-regex but not the dataset's slug set) yield
+    // a non-empty shortlist that resolves to zero ResortViews. Rendering a
+    // header-only degenerate table here is wrong UX — fall through to the
+    // recovery EmptyState the same way an empty shortlist does. The
+    // DroppedSlugsBanner separately surfaces the "your previous resorts
+    // are gone" affordance at App level. Codex review #49 P2.
+    setLocation('shortlist=ghost-resort,vanished-resort')
+    await renderMatrix()
+    await screen.findByText(/add resorts to compare/i, undefined, { timeout: 1500 })
+    expect(document.querySelector('table')).toBeNull()
+  })
+
   // Spec §3.3 drawer-on-matrix downgrade — the matrix-table section root
   // carries `data-detail-open` whenever `&detail=<slug>` is present in the
   // URL. matrix.module.css's `@media (max-width: 1279.98px) .matrix[data-

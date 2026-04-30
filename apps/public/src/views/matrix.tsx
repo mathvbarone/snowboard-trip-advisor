@@ -52,7 +52,20 @@ export default function MatrixView(): JSX.Element {
     )
   }
 
-  if (shortlist.length === 0) {
+  // Project shortlist slugs → ResortView, dropping URL-rot (slugs absent
+  // from the dataset). Order is preserved from the URL. Empty-state gating
+  // happens AFTER the filter so that a fully-stale shortlist (every slug
+  // unknown — e.g. a shared URL whose resorts were removed from the dataset)
+  // surfaces the same recovery EmptyState as an empty shortlist, rather
+  // than a header-only degenerate table.
+  const bySlug = new Map<string, ResortView>(
+    views.map((v): readonly [string, ResortView] => [v.slug, v]),
+  )
+  const resolved: ReadonlyArray<ResortView> = shortlist
+    .map((slug): ResortView | undefined => bySlug.get(slug))
+    .filter((v): v is ResortView => v !== undefined)
+
+  if (resolved.length === 0) {
     return (
       <section data-region="matrix-empty">
         <EmptyStateLayout
@@ -62,15 +75,6 @@ export default function MatrixView(): JSX.Element {
       </section>
     )
   }
-
-  // Project shortlist slugs → ResortView, dropping URL-rot (slugs absent
-  // from the dataset). Order is preserved from the URL.
-  const bySlug = new Map<string, ResortView>(
-    views.map((v): readonly [string, ResortView] => [v.slug, v]),
-  )
-  const resolved: ReadonlyArray<ResortView> = shortlist
-    .map((slug): ResortView | undefined => bySlug.get(slug))
-    .filter((v): v is ResortView => v !== undefined)
 
   const columns: ReadonlyArray<TableColumn> = resolved.map(
     (view): TableColumn => ({ key: view.slug, label: view.name.en }),
