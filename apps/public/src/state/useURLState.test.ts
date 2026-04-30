@@ -78,6 +78,36 @@ describe('useURLState', (): void => {
     expect(result.current.detail).toBe('kotelnica-bialczanska')
   })
 
+  it('uses replaceState when detail clears (close drawer should NOT add a history entry — Codex #52 P2)', (): void => {
+    // Open transition (undefined → slug) is PUSH so browser-back closes
+    // the drawer for users who navigated TO the URL via share-link. The
+    // manual-close transition (slug → undefined, e.g. Esc / outside-click /
+    // close button) must NOT add a second history entry — otherwise
+    // browser-back from the closed state reopens the drawer instead of
+    // dismissing it. Asymmetric inference: PUSH on set, REPLACE on clear.
+    setLocation('view=cards&detail=kotelnica-bialczanska')
+    const pushSpy = vi.spyOn(window.history, 'pushState')
+    const replaceSpy = vi.spyOn(window.history, 'replaceState')
+    const { result } = renderHook(() => useURLState())
+    act((): void => {
+      setURLState({ detail: undefined })
+    })
+    expect(pushSpy).not.toHaveBeenCalled()
+    expect(replaceSpy).toHaveBeenCalled()
+    expect(result.current.detail).toBeUndefined()
+  })
+
+  it('uses pushState when detail switches between two slugs (PUSH key, both sides defined)', (): void => {
+    setLocation('view=cards&detail=kotelnica-bialczanska')
+    const pushSpy = vi.spyOn(window.history, 'pushState')
+    const { result } = renderHook(() => useURLState())
+    act((): void => {
+      setURLState({ detail: 'spindleruv-mlyn' })
+    })
+    expect(pushSpy).toHaveBeenCalledTimes(1)
+    expect(result.current.detail).toBe('spindleruv-mlyn')
+  })
+
   it('two same-tick setters compose serially (each transition computed against latest URL)', (): void => {
     setLocation('view=cards')
     const { result } = renderHook(() => useURLState())

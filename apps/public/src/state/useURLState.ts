@@ -84,6 +84,24 @@ function getSnapshot(): URLState {
 function inferTransition(current: URLState, next: URLState): 'push' | 'replace' {
   for (const key of PUSH_KEYS) {
     if (current[key] !== next[key]) {
+      // Asymmetric: a PUSH key being CLEARED (set → undefined) is REPLACE,
+      // not PUSH. Manually closing an overlay (Esc / outside-click / close
+      // button) calls `setURLState({ detail: undefined })`; if that pushed,
+      // browser-back from the closed state would reopen the overlay
+      // instead of dismissing it. Spec §3.3 prescribes PUSH on the OPEN
+      // transition (so back-button closes the overlay for users who
+      // landed via share-link) but is silent on the manual-close path —
+      // matching back-button semantics for overlay dismissal requires
+      // REPLACE here. `view` (the other PUSH key) is `'cards' | 'matrix'`
+      // — neither value is `undefined`, so this branch never fires for
+      // view transitions; switching between two defined detail slugs
+      // (e.g. ResortCard A → ResortCard B without closing) also keeps
+      // PUSH because `next[key]` is defined.
+      const wasSet = current[key] !== undefined
+      const isCleared = next[key] === undefined
+      if (wasSet && isCleared) {
+        return 'replace'
+      }
       return 'push'
     }
   }
