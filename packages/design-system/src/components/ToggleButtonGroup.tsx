@@ -39,13 +39,10 @@ export function ToggleButtonGroup({
   const buttonRefs = useRef<Array<HTMLButtonElement | null>>([])
 
   function focusAt(index: number): void {
-    const target = buttonRefs.current[index]
-    // Both checks required: tsconfig `noUncheckedIndexedAccess` makes
-    // array-index access return `T | undefined`, and the ref slot itself
-    // is `HTMLButtonElement | null` (set to `null` by React on unmount).
-    if (target !== null && target !== undefined) {
-      target.focus()
-    }
+    // Optional chain handles both `null` (unmounted ref slot) and `undefined`
+    // (`noUncheckedIndexedAccess` widening on out-of-range index) in a single
+    // branch — keeps coverage measurable without an unreachable defensive arm.
+    buttonRefs.current[index]?.focus()
   }
 
   function onKeyDown(
