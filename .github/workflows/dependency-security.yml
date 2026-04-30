@@ -25,7 +25,9 @@ on:
       - 'package.json'
       - 'package-lock.json'
       - 'apps/**/package.json'
+      - 'apps/**/package-lock.json'
       - 'packages/**/package.json'
+      - 'packages/**/package-lock.json'
       - '.github/workflows/dependency-security.yml'
 
 permissions:
