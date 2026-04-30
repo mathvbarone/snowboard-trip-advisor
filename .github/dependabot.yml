@@ -1,0 +1,96 @@
+# Dependabot configuration.
+#
+# Enabled per docs/superpowers/plans/2026-04-29-dependency-security-update-plan.md.
+# Bot-PR DCO conflict resolved per ADR-0009 (.github/workflows/ci.yml's dco
+# job exempts dependabot[bot] author+committer pairs from the trailer check).
+#
+# Cadence:
+# - Security advisories: Dependabot opens a PR as soon as the advisory lands,
+#   regardless of the `schedule` block. The schedule controls non-security
+#   version updates only. Triage targets are in
+#   docs/ops/dependency-policy.md (severity-based, not calendar-based).
+# - Non-security version updates: weekly, Monday 05:00 UTC.
+#
+# Two ecosystems tracked:
+# - npm: root manifest + workspaces (apps/*, packages/*) via the single
+#   root package-lock.json. `directory: "/"` covers all workspaces.
+# - github-actions: pinned action versions in .github/workflows/**.yml.
+#   Without this block, action versions silently drift and CVEs against
+#   actions wouldn't trigger PRs.
+#
+# Groupings (npm):
+# - npm-security: all severities, all update-types — Dependabot bundles
+#   simultaneous security advisories into one PR per scheduled run; advisories
+#   landing between runs cut their own PRs.
+# - npm-vitest: vitest core + @vitest/* must bump together (e.g.
+#   @vitest/coverage-v8 has to track the vitest minor). Grouping prevents the
+#   coverage tool from drifting out of sync with the runner.
+# - npm-non-security-patch-minor: one weekly PR bundling all other patch +
+#   minor non-security version bumps so reviewer noise stays low.
+# - npm-major: bundles non-security major bumps into one PR rather than fanning
+#   out one-per-dep. The plan's "upgrade one ecosystem at a time" coordination
+#   is a manual maintainer concern; this group at least caps the storm.
+#
+# Adding a new bot under .github/ requires its own ADR per CLAUDE.md
+# "Subagent Review Discipline" trigger paths and ADR-0009.
+
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "05:00"
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 10
+    versioning-strategy: "increase-if-necessary"
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "chore(deps)"
+      prefix-development: "chore(deps-dev)"
+      include: "scope"
+    groups:
+      npm-security:
+        applies-to: security-updates
+        update-types:
+          - "patch"
+          - "minor"
+          - "major"
+      npm-vitest:
+        applies-to: version-updates
+        patterns:
+          - "vitest"
+          - "@vitest/*"
+      npm-non-security-patch-minor:
+        applies-to: version-updates
+        update-types:
+          - "patch"
+          - "minor"
+        patterns:
+          - "*"
+      npm-major:
+        applies-to: version-updates
+        update-types:
+          - "major"
+        patterns:
+          - "*"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "05:00"
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "chore(actions)"
+    groups:
+      github-actions:
+        patterns:
+          - "*"

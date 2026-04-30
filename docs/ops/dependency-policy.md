@@ -42,9 +42,9 @@ Three options. Pick one before enabling any bot config:
 
 1. **Auto-amend workflow.** Add a workflow that runs on `pull_request` from `dependabot[bot]` (or equivalent) and amends each commit with `git commit --amend -s --no-edit`, then force-pushes the bot's PR branch. Pros: bot PRs work end-to-end without maintainer intervention. Cons: a workflow with `contents: write` on a bot-author branch is a non-trivial security surface.
 2. **Maintainer rebase-and-amend.** Document that the maintainer rebases bot PRs locally and amends each commit with `-s` before merging. Pros: zero new automation. Cons: every bot PR requires maintainer time; defeats most of the bot's value.
-3. **Bot-author exemption in the `dco` check.** Modify `.github/workflows/ci.yml` to skip DCO verification on commits authored by `dependabot[bot]` (and equivalent bot identities). Pros: simplest. Cons: weakens the gate (any future actor able to spoof the bot author bypasses DCO); requires a CODEOWNERS-protected ADR.
+3. **Bot-author exemption in the `dco` check.** Modify `.github/workflows/ci.yml` to skip DCO verification on commits whose author and committer email both match a known Dependabot identity. Pros: simplest. Cons: weakens the gate; spoofing requires push access to a PR branch and setting both git fields. In Phase 2 (CODEOWNER-review re-enabled on `main`) the gap closes mechanically; in Phase 1 the maintainer-self-merge path is the residual risk and is treated as out-of-threat-model (see ADR-0009 §Negative).
 
-**Decision deferred** until the first Dependabot enablement PR. Whichever option is chosen, document it here and link to the ADR (if one is needed).
+**Decision: Option 3 (bot-author exemption)** per [ADR-0009](../adr/0009-dco-exemption-for-dependabot.md). The `dco` job in `.github/workflows/ci.yml` skips DCO verification for commits whose **author AND committer** email both match a known Dependabot identity (exact-match, not substring). Requiring both fields blocks `git commit --author='dependabot[bot] <…>'` spoofing where a hostile contributor sets only the author. Adding a new bot (Renovate, Snyk, etc.) requires its own ADR plus an entry in both checks — the trust decision is not generalised silently.
 
 ## Where this fits
 
