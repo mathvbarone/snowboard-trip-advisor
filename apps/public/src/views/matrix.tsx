@@ -68,13 +68,9 @@ export default function MatrixView(): JSX.Element {
   const bySlug = new Map<string, ResortView>(
     views.map((v): readonly [string, ResortView] => [v.slug, v]),
   )
-  const resolved: ResortView[] = []
-  for (const slug of shortlist) {
-    const view = bySlug.get(slug)
-    if (view !== undefined) {
-      resolved.push(view)
-    }
-  }
+  const resolved: ReadonlyArray<ResortView> = shortlist
+    .map((slug): ResortView | undefined => bySlug.get(slug))
+    .filter((v): v is ResortView => v !== undefined)
 
   const columns: ReadonlyArray<TableColumn> = resolved.map(
     (view): TableColumn => ({ key: view.slug, label: view.name.en }),

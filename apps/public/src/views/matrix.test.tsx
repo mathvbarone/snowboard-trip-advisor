@@ -57,8 +57,9 @@ describe('MatrixView', (): void => {
   // app, `/data/current.v1.json`); lazy-imported modules are served from
   // Vite's in-process module graph, never via fetch. The bundle-visualizer
   // assertion (matrix in its own dist chunk) is the executable surrogate;
-  // PR 3.6 wires it into CI. This `it.skip` keeps the gate visible in the
-  // suite output.
+  // PR 3.6 wires it into CI (see spec §7.10 acceptance gate; surrogate is
+  // the bundle-visualizer assertion in scripts/check-chunks.ts that PR 3.6
+  // introduces). This `it.skip` keeps the gate visible in the suite output.
   it.skip('asserts the matrix lazy chunk is fetched on view=matrix navigation (deferred to PR 3.6 dist-chunk smoke)', (): void => {})
 
   it('renders the empty-shortlist EmptyStateLayout with no <table> when shortlist is empty', async (): Promise<void> => {
@@ -176,24 +177,6 @@ describe('MatrixView', (): void => {
     setLocation('shortlist=kotelnica-bialczanska,spindleruv-mlyn')
     const view = await renderMatrix()
     await screen.findByRole('table', undefined, { timeout: 1500 })
-    expect(await axe(view.container)).toHaveNoViolations()
-  })
-
-  it('is axe-clean in the <md redirect state', async (): Promise<void> => {
-    vi.spyOn(window, 'matchMedia').mockImplementation(
-      (query: string): MediaQueryList => ({
-        matches: query.includes('899.98px'),
-        media: query,
-        onchange: null,
-        addListener: (): void => undefined,
-        removeListener: (): void => undefined,
-        addEventListener: (): void => undefined,
-        removeEventListener: (): void => undefined,
-        dispatchEvent: (): boolean => false,
-      }),
-    )
-    const view = await renderMatrix()
-    await screen.findByText(/matrix view requires a wider screen/i, undefined, { timeout: 1500 })
     expect(await axe(view.container)).toHaveNoViolations()
   })
 

@@ -106,18 +106,6 @@ describe('METRIC_RENDERERS', (): void => {
     expect(METRIC_RENDERERS['lift_pass_day'](view)).toBe('€45')
     expect(METRIC_RENDERERS['lodging_sample.median_eur'](view)).toBe('€90')
   })
-
-  it('falls back to a "Mn" placeholder for out-of-range season months', (): void => {
-    const view = makeAllFresh()
-    if (view.season.state === 'fresh') {
-      view.season = {
-        ...view.season,
-        value: { start_month: 0, end_month: 13 },
-      }
-    }
-    expect(METRIC_RENDERERS['season.start_month'](view)).toBe('M0')
-    expect(METRIC_RENDERERS['season.end_month'](view)).toBe('M13')
-  })
 })
 
 describe('METRIC_LABELS', (): void => {

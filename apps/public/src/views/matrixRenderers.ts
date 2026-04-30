@@ -1,5 +1,5 @@
 import { formatMoney, formatNumber } from '@snowboard-trip-advisor/design-system'
-import type { MetricPath, ResortView } from '@snowboard-trip-advisor/schema'
+import type { FieldValue, MetricPath, ResortView } from '@snowboard-trip-advisor/schema'
 
 // Per-metric display renderer for MatrixView. Kept in a sibling module so
 // branches involving `never_fetched` fields are unit-testable against
@@ -21,48 +21,36 @@ const MONTH_LABELS: ReadonlyArray<string> = [
 ]
 
 function monthLabel(monthIndex: number): string {
-  // Months are 1-indexed in the schema (Jan=1, Dec=12); out-of-range
-  // values fall back to a positional placeholder rather than throwing
-  // — the renderer's contract is "best-effort display".
-  return MONTH_LABELS[monthIndex - 1] ?? `M${String(monthIndex)}`
+  // Months are 1-indexed in the schema (Jan=1, Dec=12). Schema validation
+  // (`validatePublishedDataset`) already pins month ∈ 1..12 before publish,
+  // so MONTH_LABELS[monthIndex - 1] is always a defined string for any
+  // ResortView that traversed loadResortDataset — no positional fallback.
+  return MONTH_LABELS[monthIndex - 1] as string
+}
+
+// Helper: collapses the recurring `never_fetched ? MISSING : formatNumber(...)`
+// shape used by every numeric metric. `get` lifts the FieldValue<T> off the
+// view; `pick` projects the numeric primitive out of T (identity for scalar
+// fields, accessor for record-valued fields like altitude_m / lifts_open).
+function numeric<TValue>(
+  get: (view: ResortView) => FieldValue<TValue>,
+  pick: (value: TValue) => number,
+): (view: ResortView) => string {
+  return (view): string => {
+    const f = get(view)
+    if (f.state === 'never_fetched') {
+      return MISSING
+    }
+    return formatNumber({ value: pick(f.value) })
+  }
 }
 
 export const METRIC_RENDERERS: Record<MetricPath, (view: ResortView) => string> = {
-  'altitude_m.min': (view): string => {
-    const f = view.altitude_m
-    if (f.state === 'never_fetched') {
-      return MISSING
-    }
-    return formatNumber({ value: f.value.min })
-  },
-  'altitude_m.max': (view): string => {
-    const f = view.altitude_m
-    if (f.state === 'never_fetched') {
-      return MISSING
-    }
-    return formatNumber({ value: f.value.max })
-  },
-  'slopes_km': (view): string => {
-    const f = view.slopes_km
-    if (f.state === 'never_fetched') {
-      return MISSING
-    }
-    return formatNumber({ value: f.value })
-  },
-  'lift_count': (view): string => {
-    const f = view.lift_count
-    if (f.state === 'never_fetched') {
-      return MISSING
-    }
-    return formatNumber({ value: f.value })
-  },
-  'skiable_terrain_ha': (view): string => {
-    const f = view.skiable_terrain_ha
-    if (f.state === 'never_fetched') {
-      return MISSING
-    }
-    return formatNumber({ value: f.value })
-  },
+  'altitude_m.min': numeric((v): FieldValue<{ min: number; max: number }> => v.altitude_m, (x): number => x.min),
+  'altitude_m.max': numeric((v): FieldValue<{ min: number; max: number }> => v.altitude_m, (x): number => x.max),
+  'slopes_km': numeric((v): FieldValue<number> => v.slopes_km, (x): number => x),
+  'lift_count': numeric((v): FieldValue<number> => v.lift_count, (x): number => x),
+  'skiable_terrain_ha': numeric((v): FieldValue<number> => v.skiable_terrain_ha, (x): number => x),
   'season.start_month': (view): string => {
     const f = view.season
     if (f.state === 'never_fetched') {
@@ -77,27 +65,9 @@ export const METRIC_RENDERERS: Record<MetricPath, (view: ResortView) => string> 
     }
     return monthLabel(f.value.end_month)
   },
-  'snow_depth_cm': (view): string => {
-    const f = view.snow_depth_cm
-    if (f.state === 'never_fetched') {
-      return MISSING
-    }
-    return formatNumber({ value: f.value })
-  },
-  'lifts_open.count': (view): string => {
-    const f = view.lifts_open
-    if (f.state === 'never_fetched') {
-      return MISSING
-    }
-    return formatNumber({ value: f.value.count })
-  },
-  'lifts_open.total': (view): string => {
-    const f = view.lifts_open
-    if (f.state === 'never_fetched') {
-      return MISSING
-    }
-    return formatNumber({ value: f.value.total })
-  },
+  'snow_depth_cm': numeric((v): FieldValue<number> => v.snow_depth_cm, (x): number => x),
+  'lifts_open.count': numeric((v): FieldValue<{ count: number; total: number }> => v.lifts_open, (x): number => x.count),
+  'lifts_open.total': numeric((v): FieldValue<{ count: number; total: number }> => v.lifts_open, (x): number => x.total),
   'lift_pass_day': (view): string => {
     const f = view.lift_pass_day
     if (f.state === 'never_fetched') {
