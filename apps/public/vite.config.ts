@@ -2,7 +2,8 @@ import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
 import react from '@vitejs/plugin-react'
-import { defineConfig, type Plugin } from 'vite'
+import { visualizer } from 'rollup-plugin-visualizer'
+import { defineConfig, type Plugin, type PluginOption } from 'vite'
 import type { InlineConfig } from 'vitest/node'
 
 import { createCspDevMiddleware } from './src/lib/csp'
@@ -87,8 +88,37 @@ function cspDevPlugin(): Plugin {
   }
 }
 
+// rollup-plugin-visualizer emits two reports during a build when
+// `ANALYZE=1` is set: `dist/stats.json` (raw-data, consumed by
+// `scripts/check-bundle-budget.cli.ts`) and `dist/stats.html` (treemap,
+// attached to PR descriptions for human review). Gated on the env var so
+// regular `npm run build` (Epic 6 prod deploy path, where `dist/` is what
+// nginx serves) doesn't ship the report artifacts. `npm run analyze` sets
+// the gate. See spec §7.12 (PR 3.6 deliverable) and §6.7 (bundle budget).
+//
+// Each `visualizer(...)` call is narrowed to vite's `Plugin` type at the
+// boundary — the package's own d.ts returns rollup's `Plugin`, which is
+// structurally a subset of vite's but tseslint's strict-type-checked
+// inference walks the cross-package type and falls back to `any[]` on
+// the array literal otherwise.
+const analyzePlugins: PluginOption[] =
+  process.env['ANALYZE'] === '1'
+    ? [
+        visualizer({
+          filename: 'dist/stats.json',
+          template: 'raw-data',
+          gzipSize: true,
+        }) as Plugin,
+        visualizer({
+          filename: 'dist/stats.html',
+          template: 'treemap',
+          gzipSize: true,
+        }) as Plugin,
+      ]
+    : []
+
 export default defineConfig({
-  plugins: [react(), datasetPlugin(), cspDevPlugin()],
+  plugins: [react(), datasetPlugin(), cspDevPlugin(), ...analyzePlugins],
   test: {
     environment: 'jsdom',
     globals: true,
