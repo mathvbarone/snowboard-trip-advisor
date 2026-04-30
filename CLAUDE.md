@@ -38,7 +38,7 @@ Load-bearing changes require an independent general-purpose subagent review befo
 - `README.md`
 - `docs/superpowers/specs/**`
 - `docs/adr/**`
-- `.github/CODEOWNERS`, `.github/workflows/**`, `.github/pull_request_template.md`, `.github/BRANCH_PROTECTION.md`
+- `.github/CODEOWNERS`, `.github/workflows/**`, `.github/pull_request_template.md`, `.github/BRANCH_PROTECTION.md`, `.github/dependabot.yml` (and any future bot-config file under `.github/` — adding a new bot also requires its own ADR per [ADR-0009](docs/adr/0009-dco-exemption-for-dependabot.md))
 - `.claude/settings.json`
 - `scripts/hooks/**`
 - `scripts/apply-branch-protection.sh`

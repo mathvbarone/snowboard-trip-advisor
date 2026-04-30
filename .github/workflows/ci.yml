@@ -34,10 +34,35 @@ jobs:
           base_sha='${{ github.event.pull_request.base.sha }}'
           head_sha='${{ github.event.pull_request.head.sha }}'
           fail=0
-          # --no-merges excludes auto-generated merge commits (weekly `git
-          # merge main` into pivot/data-transparency per spec §10.4 is not
-          # expected to carry a human DCO sign-off).
+          # --no-merges excludes auto-generated merge commits (e.g. GitHub
+          # merge-queue commits) that would not carry a human DCO trailer.
           for sha in $(git rev-list --no-merges "$base_sha".."$head_sha"); do
+            # ADR-0009: bot-author exemption. DCO is a human legal
+            # attestation and a bot is not a legal person; Dependabot
+            # commits cannot meaningfully carry the trailer. We require
+            # BOTH author and committer email to match an exempted
+            # identity — checking only author would let a hostile
+            # contributor pass via `git commit --author=...` while
+            # remaining the committer themselves. Match is exact (full
+            # email string in double-quoted `case` patterns disables
+            # glob/bracket expansion, so `[bot]` matches literally).
+            # Adding a new bot (Renovate, Snyk, etc.) requires its own
+            # ADR plus a new entry in BOTH email lists.
+            author_email="$(git show -s --format='%ae' "$sha")"
+            committer_email="$(git show -s --format='%ce' "$sha")"
+            is_bot=0
+            case "$author_email" in
+              "dependabot[bot]@users.noreply.github.com") is_bot=1 ;;
+              "49699333+dependabot[bot]@users.noreply.github.com") is_bot=1 ;;
+            esac
+            case "$committer_email" in
+              "dependabot[bot]@users.noreply.github.com") ;;
+              "49699333+dependabot[bot]@users.noreply.github.com") ;;
+              *) is_bot=0 ;;
+            esac
+            if [ "$is_bot" = "1" ]; then
+              continue
+            fi
             trailer="$(git show -s --format='%(trailers:key=Signed-off-by,valueonly)' "$sha")"
             if [ -z "$trailer" ]; then
               subject="$(git show -s --format='%s' "$sha")"
