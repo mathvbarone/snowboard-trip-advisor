@@ -52,6 +52,12 @@ describe('parsePreloadHrefs', (): void => {
       '<html><head><link rel="preload" as="font" href=""></head></html>'
     expect(parsePreloadHrefs(html)).toEqual([])
   })
+
+  it('extracts hrefs using single-quoted attribute syntax', (): void => {
+    const html =
+      "<html><head><link rel='preload' as='font' href='/assets/font.woff2'></head></html>"
+    expect(parsePreloadHrefs(html)).toEqual(['/assets/font.woff2'])
+  })
 })
 
 describe('findMissingPreloadHrefs', (): void => {
