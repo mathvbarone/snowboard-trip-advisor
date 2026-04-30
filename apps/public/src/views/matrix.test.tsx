@@ -235,6 +235,20 @@ describe('MatrixView', (): void => {
     expect(section?.hasAttribute('data-detail-open')).toBe(false)
   })
 
+  it('omits data-detail-open when &detail points to a slug NOT in the dataset (stale link)', async (): Promise<void> => {
+    // App.tsx gates DetailDrawer mount on `dataset.slugs.has(url.detail)`;
+    // the matrix's data-detail-open attribute MUST mirror that gate, or a
+    // stale share-link with detail=<removed-resort> would activate the <lg
+    // matrix-downgrade CSS while no drawer is actually open. Codex review
+    // #49 P2.
+    setLocation('shortlist=kotelnica-bialczanska,spindleruv-mlyn&detail=ghost-resort')
+    await renderMatrix()
+    await screen.findByRole('table', undefined, { timeout: 1500 })
+    const section = document.querySelector('[data-region="matrix-table"]')
+    expect(section).not.toBeNull()
+    expect(section?.hasAttribute('data-detail-open')).toBe(false)
+  })
+
   it('applies the matrix.module.css hashed class to the matrix-table section', async (): Promise<void> => {
     // CSS Modules transform `.matrix` into a build-time hashed class name
     // (vitest's CSS handling matches Vite's). The exact hash is unstable,

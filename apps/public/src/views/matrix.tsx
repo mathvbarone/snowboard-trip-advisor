@@ -89,6 +89,15 @@ export default function MatrixView(): JSX.Element {
     }),
   )
 
+  // Mirror App.tsx's drawer-mount gate: `data-detail-open` activates the
+  // <lg matrix-downgrade CSS only when the URL's detail slug actually
+  // resolves in the dataset. A stale share-link with detail=<removed-resort>
+  // must NOT trigger the layout downgrade — App.tsx wouldn't mount the
+  // drawer in that case, so the user would see the open-drawer layout with
+  // no drawer present.
+  const detailMatch =
+    url.detail !== undefined ? bySlug.get(url.detail) : undefined
+
   return (
     <section
       className={styles.matrix}
@@ -98,7 +107,7 @@ export default function MatrixView(): JSX.Element {
       // (max-width: 1279.98px). The attribute is set HERE (not on App.tsx)
       // so the CSS-module hashed class and the attribute live on the same
       // node — App.tsx's lazy-import lines stay frozen per spec §5.5.
-      data-detail-open={url.detail !== undefined ? '' : undefined}
+      data-detail-open={detailMatch !== undefined ? '' : undefined}
     >
       <Table
         caption="Resort comparison matrix"
