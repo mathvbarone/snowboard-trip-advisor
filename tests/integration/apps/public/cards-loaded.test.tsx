@@ -1,36 +1,16 @@
-import {
-  act,
-  render,
-  screen,
-  type RenderResult,
-} from '@testing-library/react'
+import { screen } from '@testing-library/react'
 import { axe } from 'jest-axe'
-import { type ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import App from '../../../../apps/public/src/App'
 import { __resetForTests as resetDataset } from '../../../../apps/public/src/state/useDataset'
 import { __resetShortlistForTests } from '../../../../apps/public/src/state/useShortlist'
+import { follows, renderAsync, setLocation } from '../../helpers'
 
 // Integration: default cards landing — both seed resorts visible, the
 // view toggle's Cards button is pressed, focus order is correct, the
 // route is axe-clean. This is the canonical happy-path App render
 // against the MSW-served seed dataset.
-
-async function renderAsync(node: ReactNode): Promise<RenderResult> {
-  let view!: RenderResult
-  await act(async (): Promise<void> => {
-    view = render(node)
-    for (let i = 0; i < 10; i += 1) {
-      await Promise.resolve()
-    }
-  })
-  return view
-}
-
-function setLocation(search: string): void {
-  window.history.replaceState({}, '', `/${search.length > 0 ? `?${search}` : ''}`)
-}
 
 describe('integration: cards route loaded against the seed dataset', (): void => {
   beforeEach((): void => {
@@ -92,13 +72,8 @@ describe('integration: cards route loaded against the seed dataset', (): void =>
     }
 
     // Document-order assertion: each later element comes after the
-    // previous in tree order. Node.compareDocumentPosition returns
-    // DOCUMENT_POSITION_FOLLOWING (4) when `arg` follows the receiver.
-    function follows(a: Node, b: Node): boolean {
-      // a follows b if (b.compareDocumentPosition(a) & FOLLOWING) is set.
-      const FOLLOWING = 4
-      return (b.compareDocumentPosition(a) & FOLLOWING) === FOLLOWING
-    }
+    // previous in tree order. `follows` (helpers.ts) wraps
+    // Node.compareDocumentPosition + masks the FOLLOWING bit.
     expect(follows(cardsBtn, skipLink)).toBe(true)
     expect(follows(matrixBtn, cardsBtn)).toBe(true)
     expect(follows(firstViewDetails, matrixBtn)).toBe(true)

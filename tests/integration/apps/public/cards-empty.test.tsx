@@ -1,17 +1,11 @@
-import {
-  act,
-  render,
-  screen,
-  waitFor,
-  type RenderResult,
-} from '@testing-library/react'
+import { screen, waitFor } from '@testing-library/react'
 import { axe } from 'jest-axe'
-import { type ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import App from '../../../../apps/public/src/App'
 import { __resetForTests as resetDataset } from '../../../../apps/public/src/state/useDataset'
 import { __resetShortlistForTests } from '../../../../apps/public/src/state/useShortlist'
+import { renderAsync, setLocation } from '../../helpers'
 
 // Integration: cards route with a stale-country URL filter that yields
 // zero rows. Asserts the spec §4.7 / §390 defence-in-depth contract:
@@ -23,21 +17,6 @@ import { __resetShortlistForTests } from '../../../../apps/public/src/state/useS
 //
 // Plan §8.3 (line 1110): cards-empty.test.ts: ?country=XX (filter yields
 // zero) → <NoResorts> renders (defence-in-depth) + axe.
-
-async function renderAsync(node: ReactNode): Promise<RenderResult> {
-  let view!: RenderResult
-  await act(async (): Promise<void> => {
-    view = render(node)
-    for (let i = 0; i < 10; i += 1) {
-      await Promise.resolve()
-    }
-  })
-  return view
-}
-
-function setLocation(search: string): void {
-  window.history.replaceState({}, '', `/${search.length > 0 ? `?${search}` : ''}`)
-}
 
 describe('integration: cards route with empty filter result', (): void => {
   beforeEach((): void => {

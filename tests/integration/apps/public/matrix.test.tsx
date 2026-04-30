@@ -1,16 +1,11 @@
-import {
-  act,
-  render,
-  screen,
-  type RenderResult,
-} from '@testing-library/react'
+import { screen } from '@testing-library/react'
 import { axe } from 'jest-axe'
-import { type ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import App from '../../../../apps/public/src/App'
 import { __resetForTests as resetDataset } from '../../../../apps/public/src/state/useDataset'
 import { __resetShortlistForTests } from '../../../../apps/public/src/state/useShortlist'
+import { follows, renderAsync, setLocation } from '../../helpers'
 
 // Integration: matrix route with both seed resorts shortlisted and the
 // snow_depth_cm row highlighted via &highlight=. Asserts the table
@@ -24,21 +19,6 @@ import { __resetShortlistForTests } from '../../../../apps/public/src/state/useS
 // matrix's <md redirect path is NOT active in tests — the table
 // renders. The redirect path is exercised at the unit level in
 // apps/public/src/views/matrix.test.tsx.
-
-async function renderAsync(node: ReactNode): Promise<RenderResult> {
-  let view!: RenderResult
-  await act(async (): Promise<void> => {
-    view = render(node)
-    for (let i = 0; i < 10; i += 1) {
-      await Promise.resolve()
-    }
-  })
-  return view
-}
-
-function setLocation(search: string): void {
-  window.history.replaceState({}, '', `/${search.length > 0 ? `?${search}` : ''}`)
-}
 
 describe('integration: matrix route with shortlist + highlight', (): void => {
   beforeEach((): void => {
@@ -104,10 +84,7 @@ describe('integration: matrix route with shortlist + highlight', (): void => {
     const skipLink = screen.getByText('Skip to main content')
     const matrixBtn = screen.getByRole('button', { name: 'Matrix', pressed: true })
 
-    function follows(a: Node, b: Node): boolean {
-      const FOLLOWING = 4
-      return (b.compareDocumentPosition(a) & FOLLOWING) === FOLLOWING
-    }
+    // `follows` (helpers.ts) wraps Node.compareDocumentPosition.
     expect(follows(matrixBtn, skipLink)).toBe(true)
     expect(follows(table, matrixBtn)).toBe(true)
   })

@@ -1,19 +1,12 @@
-import {
-  act,
-  render,
-  screen,
-  waitFor,
-  within,
-  type RenderResult,
-} from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { axe } from 'jest-axe'
-import { type ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import App from '../../../../apps/public/src/App'
 import { __resetForTests as resetDataset } from '../../../../apps/public/src/state/useDataset'
 import { __resetShortlistForTests } from '../../../../apps/public/src/state/useShortlist'
+import { renderAsync, setLocation } from '../../helpers'
 
 // Integration: cards route with the detail drawer pre-opened via
 // ?detail=<slug>. Asserts the cards still render behind the drawer,
@@ -31,21 +24,6 @@ import { __resetShortlistForTests } from '../../../../apps/public/src/state/useS
 // data-detail-trigger='kotelnica-bialczanska' and focus it BEFORE
 // rendering; the Drawer's open-edge effect then captures it and
 // restores focus to it on Escape close.
-
-async function renderAsync(node: ReactNode): Promise<RenderResult> {
-  let view!: RenderResult
-  await act(async (): Promise<void> => {
-    view = render(node)
-    for (let i = 0; i < 10; i += 1) {
-      await Promise.resolve()
-    }
-  })
-  return view
-}
-
-function setLocation(search: string): void {
-  window.history.replaceState({}, '', `/${search.length > 0 ? `?${search}` : ''}`)
-}
 
 describe('integration: detail drawer open via URL', (): void => {
   beforeEach((): void => {
