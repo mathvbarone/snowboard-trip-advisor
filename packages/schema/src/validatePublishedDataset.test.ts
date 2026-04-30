@@ -127,9 +127,8 @@ describe('validatePublishedDataset (Epic 2 PR 2.2)', (): void => {
     liftPassFs.fx.native_amount = 1
     liftPassFs.fx.rate = target
     const result = validatePublishedDataset(mutated)
-    if (!result.ok) {
-      expect(result.issues.some((i): boolean => i.code === 'fx_provenance_invalid')).toBe(false)
-    }
+    const issueCodes = result.ok ? [] : result.issues.map((i): string => i.code)
+    expect(issueCodes).not.toContain('fx_provenance_invalid')
   })
 
   it('returns metric_field_missing_source for snow_depth_cm when field_sources entry is absent', (): void => {
