@@ -37,6 +37,13 @@ export interface TableProps {
   caption: string
   columns: ReadonlyArray<TableColumn>
   rows: ReadonlyArray<TableRow>
+  /**
+   * Visually-hidden label for the leftmost (row-header) column. The corner
+   * cell carries this string so axe's empty-table-header rule stays clean,
+   * but the consumer owns the wording — a design-system primitive must not
+   * bake in domain vocabulary like "Metric".
+   */
+  rowHeaderLabel?: string
   'aria-describedby'?: string
 }
 
@@ -44,6 +51,7 @@ export function Table({
   caption,
   columns,
   rows,
+  rowHeaderLabel = 'Row',
   'aria-describedby': ariaDescribedBy,
 }: TableProps): JSX.Element {
   // Raw <table> is allowed in design-system (the apps/** ESLint ban does
@@ -53,12 +61,13 @@ export function Table({
       <caption className="sta-visually-hidden">{caption}</caption>
       <thead>
         <tr>
-          {/* Corner header — labels the row-header column (which carries
-              metric names). Visually hidden so the table looks "headless"
-              in the leftmost column while remaining axe-clean (empty <th>
-              violates the empty-table-header rule). */}
+          {/* Corner header — labels the row-header column. Visually hidden
+              so the table looks "headless" in the leftmost column while
+              remaining axe-clean (empty <th> violates the empty-table-
+              header rule). The label string is consumer-owned via the
+              `rowHeaderLabel` prop. */}
           <th scope="col">
-            <span className="sta-visually-hidden">Metric</span>
+            <span className="sta-visually-hidden">{rowHeaderLabel}</span>
           </th>
           {columns.map((col): JSX.Element => (
             <th

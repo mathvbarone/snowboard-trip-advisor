@@ -100,7 +100,12 @@ export default function MatrixView(): JSX.Element {
       // node — App.tsx's lazy-import lines stay frozen per spec §5.5.
       data-detail-open={url.detail !== undefined ? '' : undefined}
     >
-      <Table caption="Resort comparison matrix" columns={columns} rows={rows} />
+      <Table
+        caption="Resort comparison matrix"
+        columns={columns}
+        rows={rows}
+        rowHeaderLabel="Metric"
+      />
     </section>
   )
 }

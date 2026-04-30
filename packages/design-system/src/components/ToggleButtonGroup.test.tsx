@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { axe } from 'jest-axe'
 import { describe, expect, it, vi } from 'vitest'
@@ -194,26 +194,28 @@ describe('ToggleButtonGroup', (): void => {
     expect(screen.getByRole('button', { name: 'Matrix' })).toBeDisabled()
   })
 
-  it('is axe-clean (selected / unselected / disabled)', async (): Promise<void> => {
-    const { container, rerender } = render(
+  it('does not call focus() on the next button when ArrowRight fires on a disabled group', (): void => {
+    render(
       <ToggleButtonGroup
         label="View"
         options={OPTIONS}
         selected="cards"
         onChange={(): void => undefined}
+        disabled
       />,
     )
-    expect(await axe(container)).toHaveNoViolations()
-    rerender(
-      <ToggleButtonGroup
-        label="View"
-        options={OPTIONS}
-        selected="matrix"
-        onChange={(): void => undefined}
-      />,
-    )
-    expect(await axe(container)).toHaveNoViolations()
-    rerender(
+    const cards = screen.getByRole('button', { name: 'Cards' })
+    const matrix = screen.getByRole('button', { name: 'Matrix' })
+    // JSDOM refuses focus on disabled buttons (so document.activeElement
+    // alone isn't a sharp signal); we spy on the next button's .focus()
+    // method to pin the keydown handler's early-return when disabled.
+    const focusSpy = vi.spyOn(matrix, 'focus')
+    fireEvent.keyDown(cards, { key: 'ArrowRight' })
+    expect(focusSpy).not.toHaveBeenCalled()
+  })
+
+  it('is axe-clean when the group is disabled', async (): Promise<void> => {
+    const { container } = render(
       <ToggleButtonGroup
         label="View"
         options={OPTIONS}

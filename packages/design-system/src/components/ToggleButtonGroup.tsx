@@ -40,6 +40,9 @@ export function ToggleButtonGroup({
 
   function focusAt(index: number): void {
     const target = buttonRefs.current[index]
+    // Both checks required: tsconfig `noUncheckedIndexedAccess` makes
+    // array-index access return `T | undefined`, and the ref slot itself
+    // is `HTMLButtonElement | null` (set to `null` by React on unmount).
     if (target !== null && target !== undefined) {
       target.focus()
     }
@@ -49,6 +52,12 @@ export function ToggleButtonGroup({
     event: KeyboardEvent<HTMLButtonElement>,
     currentIndex: number,
   ): void {
+    // Disabled buttons are skipped by browsers' native focus-cycling AND
+    // we refuse to drive focus into them via arrow keys — every option
+    // shares the same `disabled` flag, so navigation has no valid target.
+    if (disabled === true) {
+      return
+    }
     if (event.key === 'ArrowRight') {
       event.preventDefault()
       const nextIndex = (currentIndex + 1) % options.length

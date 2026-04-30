@@ -49,6 +49,27 @@ describe('Table', (): void => {
     expect(dataHeaders[1]).toHaveTextContent('Špindlerův')
   })
 
+  it('uses the default "Row" label on the visually-hidden corner cell', (): void => {
+    const { container } = render(
+      <Table caption="Resort comparison" columns={COLUMNS} rows={ROWS} />,
+    )
+    const corner = container.querySelector('thead th[scope="col"]')
+    expect(corner?.querySelector('.sta-visually-hidden')).toHaveTextContent('Row')
+  })
+
+  it('overrides the corner-cell label when rowHeaderLabel is supplied', (): void => {
+    const { container } = render(
+      <Table
+        caption="Resort comparison"
+        columns={COLUMNS}
+        rows={ROWS}
+        rowHeaderLabel="Metric"
+      />,
+    )
+    const corner = container.querySelector('thead th[scope="col"]')
+    expect(corner?.querySelector('.sta-visually-hidden')).toHaveTextContent('Metric')
+  })
+
   it('renders one <th scope="row"> per row (leftmost cell)', (): void => {
     render(<Table caption="Resort comparison" columns={COLUMNS} rows={ROWS} />)
     const rowHeaders = screen.getAllByRole('rowheader')
