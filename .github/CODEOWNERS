@@ -15,6 +15,7 @@
 /.github/pull_request_template.md        @mathvbarone
 /.github/BRANCH_PROTECTION.md            @mathvbarone
 /.github/workflows/**                    @mathvbarone
+/.github/dependabot.yml                  @mathvbarone
 /.claude/settings.json                   @mathvbarone
 /scripts/hooks/**                        @mathvbarone
 /scripts/pre-commit                      @mathvbarone
