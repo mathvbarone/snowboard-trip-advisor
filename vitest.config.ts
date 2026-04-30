@@ -23,6 +23,24 @@ declare module 'vite' {
 // and friends are undefined.
 export default defineConfig({
   test: {
+    // Vitest 4 replaces the standalone `vitest.workspace.ts` with the
+    // `projects` field on the root config. Each entry is a workspace's
+    // directory whose `vite.config.ts` defines its own test environment +
+    // setup; coverage thresholds + include / exclude live here so the
+    // 100% gate is evaluated once across the merged tree.
+    projects: [
+      'apps/public',
+      'apps/admin',
+      'packages/schema',
+      'packages/design-system',
+      'packages/integrations',
+      'tests/integration',
+      // Root project — runs only `scripts/**/*.test.ts` and `config/**/*.test.ts`
+      // (see `test.include` below). Lets `scripts/generate-tokens.test.ts`
+      // participate in the global coverage gate without belonging to a
+      // package workspace.
+      '.',
+    ],
     include: ['scripts/**/*.test.ts', 'config/**/*.test.ts'],
     coverage: {
       provider: 'v8',
@@ -38,6 +56,13 @@ export default defineConfig({
         '**/test-setup.ts',
         '**/*.test.{ts,tsx}',
         '**/*.d.ts',
+        // Vitest 4's v8 coverage walks every file matched by `include` as a
+        // potential coverage target, which now includes JSON config files
+        // colocated in workspaces. Exclude them explicitly — they have no
+        // executable code so they always report 0/0 and drag coverage off
+        // 100%. (Vitest 2 didn't pick these up; the discovery rules tightened.)
+        '**/package.json',
+        '**/tsconfig.json',
         // Per-workspace `vite.config.ts` files are configuration, not
         // production source. They aren't picked up under `apps/*/src/**`
         // or `packages/*/src/**`, but `tests/integration/**` is broader
