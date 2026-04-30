@@ -7,7 +7,7 @@ import {
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { axe } from 'jest-axe'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { __resetShortlistForTests } from '../state/useShortlist'
 
@@ -148,10 +148,37 @@ describe('ResortCard', (): void => {
     expect(screen.getByText('€60')).toBeInTheDocument()
   })
 
-  it('renders a star <IconButton> that carries data-detail-trigger=<slug>', (): void => {
+  it('renders a "View details" Button that carries data-detail-trigger=<slug>', (): void => {
+    // Per UX-1 fold: the drawer-open trigger is the "View details" button
+    // below the region label, NOT the star (which remains the shortlist
+    // toggle). data-detail-trigger moved off the star and onto this
+    // button so Drawer focus-restore lands on the View-details control.
+    render(<ResortCard resort={makeKotelnica()} />)
+    const trigger = screen.getByRole('button', { name: 'View details' })
+    expect(trigger).toHaveAttribute('data-detail-trigger', 'kotelnica-bialczanska')
+  })
+
+  it('the star <IconButton> no longer carries data-detail-trigger', (): void => {
+    // Negative regression: ensure the drawer-open trigger has fully migrated
+    // off the star. Two elements with the same data-detail-trigger would
+    // make Drawer focus-restore non-deterministic (querySelector returns
+    // the first match in document order).
     render(<ResortCard resort={makeKotelnica()} />)
     const star = screen.getByRole('button', { name: /add to shortlist/i })
-    expect(star).toHaveAttribute('data-detail-trigger', 'kotelnica-bialczanska')
+    expect(star).not.toHaveAttribute('data-detail-trigger')
+  })
+
+  it('clicking "View details" pushes &detail=<slug> via history.pushState (PUSH transition)', async (): Promise<void> => {
+    // `detail` is in PUSH_KEYS (apps/public/src/lib/urlState.ts line 47),
+    // so opening the drawer must register as a history entry — back-button
+    // should close the drawer rather than leave the SPA. Spy on
+    // history.pushState to confirm the PUSH transition.
+    const pushSpy = vi.spyOn(window.history, 'pushState')
+    const user = userEvent.setup()
+    render(<ResortCard resort={makeKotelnica()} />)
+    await user.click(screen.getByRole('button', { name: 'View details' }))
+    expect(pushSpy).toHaveBeenCalled()
+    expect(window.location.search).toContain('detail=kotelnica-bialczanska')
   })
 
   it('star reflects aria-pressed=false when slug is NOT in URL shortlist', (): void => {
