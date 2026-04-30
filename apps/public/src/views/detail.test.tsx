@@ -74,16 +74,16 @@ describe('DetailDrawer', (): void => {
     expect(screen.getByRole('dialog')).toHaveAccessibleName('Kotelnica Białczańska')
   })
 
-  // Two h2 surfaces are intentional — see detail.tsx for the rationale.
-  // The body heading (the one carrying the BCP 47 lang attribute) is
-  // class-namespaced as .sta-detail-drawer__name so tests can pick
-  // it out without relying on text-equality alone.
+  // The body <h2 lang={lang} aria-hidden="true"> is intentionally hidden
+  // from the a11y tree (DialogTitle owns the dialog's accessible name —
+  // see detail.tsx for the SR-double-read rationale). `getByRole` would
+  // therefore exclude it; we select via the class hook instead.
   function getBodyHeading(): HTMLElement {
-    const headings = screen.getAllByRole('heading', { level: 2 })
-    const tagged = headings.find(
-      (h): boolean => h.classList.contains('sta-detail-drawer__name'),
+    const dialog = screen.getByRole('dialog')
+    const tagged = dialog.querySelector<HTMLHeadingElement>(
+      'h2.sta-detail-drawer__name',
     )
-    if (tagged === undefined) {
+    if (tagged === null) {
       throw new Error('body heading (.sta-detail-drawer__name) not rendered')
     }
     return tagged
@@ -101,6 +101,19 @@ describe('DetailDrawer', (): void => {
     const heading = getBodyHeading()
     expect(heading.textContent).toBe('Špindlerův Mlýn')
     expect(heading.getAttribute('lang')).toBe('cs')
+  })
+
+  it('hides the body-level heading from the a11y tree (single SR read via DialogTitle)', async (): Promise<void> => {
+    // DialogTitle is the dialog's accessible name (Radix sets
+    // aria-labelledby automatically). The body <h2> carries the visual
+    // heading + the BCP 47 lang attribute for browser-level hints, but
+    // is aria-hidden so screen readers announce the resort name once,
+    // not twice. See the comment block in detail.tsx for the trade-off.
+    await renderDrawer(KOTELNICA_SLUG)
+    const heading = getBodyHeading()
+    expect(heading.getAttribute('aria-hidden')).toBe('true')
+    // DialogTitle continues to carry the dialog's accessible name.
+    expect(screen.getByRole('dialog')).toHaveAccessibleName('Kotelnica Białczańska')
   })
 
   it('clears &detail=… from the URL when the drawer closes', async (): Promise<void> => {

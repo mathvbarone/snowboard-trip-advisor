@@ -108,6 +108,33 @@ export type SetURLStatePartial =
   & { [K in RequiredKeys<URLState>]?: URLState[K] }
 
 /**
+ * Apply a partial URL-state update. The single state-write entry point
+ * for the SPA — every URL transition (view switch, drawer open/close,
+ * shortlist toggle, sort change, …) flows through here.
+ *
+ * Why `SetURLStatePartial` (not `Partial<URLState>`): with
+ * `exactOptionalPropertyTypes: true`, plain `Partial<URLState>` rejects
+ * an explicit `undefined` for keys that are already optional in
+ * `URLState` (e.g. `detail?: string`). DetailDrawer's close handler
+ * needs `setURLState({ detail: undefined })` to clear `&detail=` from
+ * the URL; the widening adds "set to undefined" exactly for those
+ * already-optional keys. Required keys (view, sort, country, shortlist)
+ * keep their non-undefined value types — clearing them is not a
+ * meaningful operation.
+ *
+ * Why a separate `clearURLKey(k)` helper was rejected: `setURLState` is
+ * the only state-write entry point. A parallel API would split the call
+ * surface, risk drift between the two, and force compound transitions
+ * ("set X, clear Y" in the same tick — e.g. switching view AND closing
+ * the drawer) to call two functions instead of one. Single-call
+ * atomicity preserves the invariant that one URL transition = one
+ * subscriber notification.
+ *
+ * Merge contract (see `mergeURLState`): required keys use
+ * `partial.X ?? current.X` (override-or-preserve); optional keys use an
+ * explicit `'X' in partial` guard so "explicitly undefined → clear"
+ * stays distinct from "absent → preserve current".
+ *
  * @warning Never invoke `setURLState` inside React 19's `startTransition`.
  * The synchronous DOM write (history.pushState/replaceState) would race the
  * deferred render — see spec §10.5.

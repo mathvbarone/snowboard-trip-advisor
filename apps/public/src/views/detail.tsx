@@ -91,18 +91,27 @@ export default function DetailDrawer({ slug }: DetailDrawerProps): JSX.Element |
       title={resort.name.en}
       position="right"
     >
-      {/* The Radix Drawer title renders as an <h2> for the dialog's
-          accessible name (Radix's `title` prop is a plain string — no
-          `lang` attribute control). The body-level heading below
-          carries the BCP 47 lang attribute per §6.6. Two surfaces:
-            - Drawer title (.sta-drawer__title) — accessible name.
-            - Body heading (.sta-detail-drawer__name) — language-tagged
-              display copy so screen readers announce the resort name
-              with the right pronunciation rules.
-          Rendered as <h2> with the language tag — the duplication is
-          intentional and matches §5.5's lang-tagged-heading contract;
-          tests disambiguate via the `lang` attribute. */}
-      <h2 className="sta-detail-drawer__name" lang={lang}>
+      {/* DialogTitle is the dialog's accessible name (Radix wires
+          `aria-labelledby` automatically from the `title` prop). Without
+          `aria-hidden` here, the body <h2> would surface as a second
+          heading inside the same dialog, causing screen readers to
+          announce the resort name TWICE consecutively (once via
+          DialogTitle, once via this h2). We hide the body h2 from the
+          a11y tree with `aria-hidden="true"` so the SR announcement is
+          single-pass.
+          The visual <h2 lang={lang}> is retained for two reasons:
+            1. Visual heading hierarchy — sighted users see the resort
+               name as a body-level heading inside the drawer.
+            2. The BCP 47 `lang` attribute hints browser-level
+               hyphenation, font-fallback, and (non-SR) pronunciation
+               rules for the resort's locale.
+          Trade-off: SR users lose the per-heading `lang` context. The
+          cleaner long-term fix is extending the design-system Drawer
+          primitive with an optional `titleLang?: string` (or
+          `titleNode?: ReactNode`) prop so DialogTitle itself carries
+          `lang=`. Deferred to a follow-up — touching the Drawer surface
+          falls under design-system CODEOWNERS. */}
+      <h2 className="sta-detail-drawer__name" lang={lang} aria-hidden="true">
         {resort.name.en}
       </h2>
       <p className="sta-detail-drawer__region">{resort.region.en}</p>
