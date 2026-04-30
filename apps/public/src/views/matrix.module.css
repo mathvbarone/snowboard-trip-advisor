@@ -1,0 +1,33 @@
+/* MatrixView module styles.
+ *
+ * The drawer-on-matrix downgrade rule (spec §3.3): when the detail drawer
+ * is open on `view=matrix` AND the viewport is `<lg` (1280), the matrix
+ * layout downgrades to a single-column flow under the drawer because the
+ * remaining width (≈30%) is unreadable.
+ *
+ * Convention: App.tsx (or a parent layout element) sets the
+ * `data-detail-open` attribute on the matrix section root when `&detail=`
+ * is in the URL. This rule scopes its downgrade to that attribute under
+ * the <lg breakpoint.
+ *
+ * Distinct from the <md (900) matrix-redirect — at <md, MatrixView
+ * renders an EmptyState redirect message regardless of `&detail=`, so
+ * this rule never fires below 900px.
+ *
+ * JSDOM does not evaluate @media; the matching unit test asserts text-
+ * presence of the rule against this file's source. Full media-query
+ * firing is verified in Epic 6 Playwright (spec §7.11).
+ */
+
+@media (max-width: 1279.98px) {
+  .matrix[data-detail-open] {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  .matrix[data-detail-open] :global(.sta-table) {
+    display: block;
+    width: 100%;
+  }
+}
