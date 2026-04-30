@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   findMissingPreloadHrefs,
   parsePreloadHrefs,
+  parseRuntimeAssetHrefs,
 } from './check-preload-hrefs'
 
 describe('parsePreloadHrefs', (): void => {
@@ -57,6 +58,61 @@ describe('parsePreloadHrefs', (): void => {
     const html =
       "<html><head><link rel='preload' as='font' href='/assets/font.woff2'></head></html>"
     expect(parsePreloadHrefs(html)).toEqual(['/assets/font.woff2'])
+  })
+})
+
+describe('parseRuntimeAssetHrefs', (): void => {
+  it('returns an empty array for an empty bundle', (): void => {
+    expect(parseRuntimeAssetHrefs('')).toEqual([])
+  })
+
+  it('extracts a /assets/*.woff2 URL from a double-quoted JS string', (): void => {
+    const js = 'var u="/assets/dm-sans-latin-ext-400-normal-BtiwyxMk.woff2";'
+    expect(parseRuntimeAssetHrefs(js)).toEqual([
+      '/assets/dm-sans-latin-ext-400-normal-BtiwyxMk.woff2',
+    ])
+  })
+
+  it('extracts a /assets/*.woff URL from a single-quoted JS string', (): void => {
+    const js =
+      "var u='/assets/jetbrains-mono-latin-500-normal-CJOVTJB7.woff';"
+    expect(parseRuntimeAssetHrefs(js)).toEqual([
+      '/assets/jetbrains-mono-latin-500-normal-CJOVTJB7.woff',
+    ])
+  })
+
+  it('extracts URLs from backtick template literals (esbuild minified output)', (): void => {
+    const js =
+      'var C=`/assets/dm-sans-latin-ext-400-normal-BtiwyxMk.woff2`,w=`/assets/jetbrains-mono-latin-ext-500-normal-Cut-4mMH.woff2`;'
+    expect(parseRuntimeAssetHrefs(js).sort()).toEqual([
+      '/assets/dm-sans-latin-ext-400-normal-BtiwyxMk.woff2',
+      '/assets/jetbrains-mono-latin-ext-500-normal-Cut-4mMH.woff2',
+    ])
+  })
+
+  it('extracts multiple distinct asset URLs', (): void => {
+    const js =
+      'var a="/assets/a.woff2",b="/assets/b-CJOVTJB7.woff";console.log(a,b);'
+    expect(parseRuntimeAssetHrefs(js).sort()).toEqual([
+      '/assets/a.woff2',
+      '/assets/b-CJOVTJB7.woff',
+    ])
+  })
+
+  it('deduplicates the same URL referenced multiple times', (): void => {
+    const js = 'var a="/assets/font.woff2";var b="/assets/font.woff2";'
+    expect(parseRuntimeAssetHrefs(js)).toEqual(['/assets/font.woff2'])
+  })
+
+  it('ignores non-woff URLs (woff2/woff scope only)', (): void => {
+    const js =
+      'var a="/assets/index.js";var b="/assets/style.css";var c="/assets/img.png";'
+    expect(parseRuntimeAssetHrefs(js)).toEqual([])
+  })
+
+  it('ignores asset URLs that are not under /assets/', (): void => {
+    const js = 'var a="/fonts/font.woff2";var b="./local.woff2";'
+    expect(parseRuntimeAssetHrefs(js)).toEqual([])
   })
 })
 
