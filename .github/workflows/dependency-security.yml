@@ -76,8 +76,10 @@ jobs:
               echo "⚠ \`npm audit --audit-level=high\` reported high or critical advisories."
               echo "Remediate via a Dependabot PR or a follow-up dependency-update PR; see"
               echo "\`docs/ops/dependency-policy.md\` for the triage process."
-            else
+            elif [ "${AUDIT_OUTCOME}" = "success" ]; then
               echo "✓ \`npm audit --audit-level=high\` reported no high or critical advisories."
+            else
+              echo "ℹ \`npm audit\` did not run (a prior step failed, was skipped, or the run was cancelled). See the job log."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
