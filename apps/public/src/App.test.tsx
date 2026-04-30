@@ -90,14 +90,16 @@ describe('App', (): void => {
     expect(document.getElementById('main')).toHaveFocus()
   })
 
-  it('selects MatrixView when ?view=matrix is set (boundary catches the stub throw)', async (): Promise<void> => {
-    // matrix.tsx is a frozen stub that throws on render until PR 3.4. This
-    // test only exercises the App.tsx ternary that picks MatrixView vs
-    // CardsView; the boundary catches the stub throw and we assert the alert
-    // appears.
+  it('selects MatrixView when ?view=matrix is set', async (): Promise<void> => {
+    // matrix.tsx is a real route as of PR 3.4 (previously a stub-throw). With
+    // an empty shortlist, the empty-state copy is the SR-detectable evidence
+    // that App.tsx routed to MatrixView rather than CardsView (which renders
+    // the Hero <h1> instead).
     window.history.replaceState({}, '', '/?view=matrix')
     await renderAsync(<App />)
-    expect(await screen.findByRole('alert')).toBeInTheDocument()
+    expect(
+      await screen.findByText(/add resorts to compare/i),
+    ).toBeInTheDocument()
   })
 
   it('wires useDocumentMeta into AppContent so title + canonical track URL state', async (): Promise<void> => {
