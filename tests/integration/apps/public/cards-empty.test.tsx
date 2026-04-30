@@ -89,6 +89,34 @@ describe('integration: cards route with empty filter result', (): void => {
     ).toBeTruthy()
   })
 
+  it('exposes the "Clear filters" recovery affordance after the empty-state heading + body', async (): Promise<void> => {
+    // Codex PR 53 P1: the recovery affordance must be reachable in the
+    // App-shell render. Click flow + URL-mutation behaviour belongs to
+    // the unit test (cards.test.tsx). This integration assertion locks
+    // its placement: after the last FilterBar chip and after the empty
+    // heading — EmptyStateLayout's `cta` slot renders below heading +
+    // body, so a screen-reader user reads "No resorts to show / Try
+    // adjusting your filters" first and then lands on the recovery
+    // button. The trailing-cta order is the EmptyStateLayout default
+    // and shared with DatasetUnavailable's Retry button.
+    await renderAsync(<App />)
+    await screen.findByRole('heading', {
+      level: 1,
+      name: /compare european ski resorts/i,
+    })
+    const plChip = screen.getByRole('button', { name: 'PL' })
+    const clearBtn = screen.getByRole('button', { name: /clear filters/i })
+    const emptyHeading = screen.getByText('No resorts to show')
+    expect(
+      plChip.compareDocumentPosition(clearBtn) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    expect(
+      emptyHeading.compareDocumentPosition(clearBtn) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+  })
+
   it('is axe-clean on the empty-state route', async (): Promise<void> => {
     const view = await renderAsync(<App />)
     await screen.findByRole('heading', {

@@ -199,6 +199,70 @@ describe('CardsView', (): void => {
     expect(screen.getByRole('button', { name: 'CZ' })).toBeInTheDocument()
   })
 
+  it('clicking "Clear filters" inside <NoResorts> restores the grid (?country=XX → /)', async (): Promise<void> => {
+    // Codex PR 53 P1: single-country deployments hide FilterBar's country
+    // chips, which would strand users on a stale `?country=XX` link with
+    // no in-UI recovery path. NoResorts now exposes the recovery directly
+    // — clicking it must clear url.country AND reset the private price
+    // bucket, so any combination of active filters resolves cleanly.
+    setLocation('country=XX')
+    await renderCardsView()
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'No resorts to show' }),
+    ).toBeInTheDocument()
+
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: /clear filters/i }))
+
+    // URL country filter cleared.
+    expect(window.location.search).not.toContain('country')
+    // Both seed cards back.
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'Kotelnica Białczańska' }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'Špindlerův Mlýn' }),
+    ).toBeInTheDocument()
+  })
+
+  it('clicking "Clear filters" also resets the private price bucket', async (): Promise<void> => {
+    // Active price-bucket alone empties the grid. NoResorts must surface
+    // its recovery affordance, and the click must reset the bucket back to
+    // 'any' so the grid re-populates without the user re-touching the
+    // <Select>.
+    await renderCardsView()
+    const user = userEvent.setup()
+    await user.selectOptions(
+      screen.getByRole('combobox', { name: /price/i }),
+      'lo',
+    )
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'No resorts to show' }),
+    ).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /clear filters/i }))
+
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'Kotelnica Białczańska' }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'Špindlerův Mlýn' }),
+    ).toBeInTheDocument()
+    // Bucket selector reflects the reset. `combobox` query already returns
+    // an HTMLSelectElement here (the `<Select>` from design-system renders
+    // a native <select>), so no cast is needed.
+    expect(screen.getByRole('combobox', { name: /price/i })).toHaveValue('any')
+  })
+
+  it('does not render the "Clear filters" button when no filters are active (default landing)', async (): Promise<void> => {
+    // The recovery affordance must NOT appear in the happy path — only
+    // when filters reduce the grid to zero AND filters are non-default.
+    await renderCardsView()
+    expect(
+      screen.queryByRole('button', { name: /clear filters/i }),
+    ).toBeNull()
+  })
+
   it('price-bucket Select filters cards by lift_pass_day amount (private filter UX)', async (): Promise<void> => {
     await renderCardsView()
     const user = userEvent.setup()
