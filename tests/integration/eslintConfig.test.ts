@@ -48,10 +48,17 @@ describe('eslint design-system discipline', (): void => {
     // type-aware parser can resolve it normally; this fixture asserts the
     // apps-only `no-restricted-syntax` block does not bleed into the
     // design-system workspace.
+    //
+    // 15s timeout: this is the only test in the file that hits a real path,
+    // which forces @typescript-eslint's `projectService` to bootstrap the
+    // TS language service for the workspace. On CI cold-start the bootstrap
+    // routinely exceeds vitest's default 5s timeout (especially under vitest
+    // 4's stricter test isolation). Local runs finish in <1s; the bump only
+    // lifts the ceiling to absorb CI variance.
     const src = "export const c = '#ff0000'\n"
     const ids = await violations('packages/design-system/src/tokens.ts', src)
     expect(ids).not.toContain('no-restricted-syntax')
-  })
+  }, 15_000)
 
   it("does NOT fire on hex-shaped strings that aren't CSS colors (e.g. SHA prefixes)", async (): Promise<void> => {
     const src = "export const sha = '#deadbeef-1234'\n"
