@@ -173,27 +173,50 @@ describe('CardsView', (): void => {
     ).toBeInTheDocument()
   })
 
-  it('silently no-ops a stale ?country= URL whose code is absent from the dataset', async (): Promise<void> => {
+  it('renders <NoResorts> when ?country= filters the grid to zero rows (defence-in-depth)', async (): Promise<void> => {
     // 'XX' is a syntactically valid ISO-2 string per CountrySchema and is
-    // preserved through parseURL, but no seed resort uses it. With the
-    // stale-URL guard in filterViews, a country code that doesn't match
-    // any view in the dataset is treated as a no-op so the grid is never
-    // empty with no in-UI control to clear (chips for XX would not exist).
+    // preserved through parseURL, but no seed resort uses it. Strict
+    // country filtering returns []; per spec §390, <NoResorts> ships as
+    // defence-in-depth for views.length === 0. FilterBar must remain
+    // mounted above NoResorts so the user can recover by toggling chips.
     setLocation('country=XX')
     await renderCardsView()
-    expect(screen.queryAllByRole('heading', { level: 2 })).toHaveLength(2)
+    // No resort cards render. The only <h2> in the subtree is the
+    // <NoResorts> empty-state heading from EmptyStateLayout.
+    expect(
+      screen.queryByRole('heading', { level: 2, name: 'Kotelnica Białczańska' }),
+    ).toBeNull()
+    expect(
+      screen.queryByRole('heading', { level: 2, name: 'Špindlerův Mlýn' }),
+    ).toBeNull()
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'No resorts to show' }),
+    ).toBeInTheDocument()
+    expect(screen.getByText('Try adjusting your filters.')).toBeInTheDocument()
+    // FilterBar (with country chips for the dataset countries) is still
+    // visible — that's the recovery affordance.
+    expect(screen.getByRole('button', { name: 'PL' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'CZ' })).toBeInTheDocument()
   })
 
   it('price-bucket Select filters cards by lift_pass_day amount (private filter UX)', async (): Promise<void> => {
     await renderCardsView()
     const user = userEvent.setup()
     // 'lo' bucket is ≤ €40; both seed resorts (€51, €60) are above, so the
-    // grid empties.
+    // grid empties and <NoResorts> renders.
     await user.selectOptions(
       screen.getByRole('combobox', { name: /price/i }),
       'lo',
     )
-    expect(screen.queryAllByRole('heading', { level: 2 })).toHaveLength(0)
+    expect(
+      screen.queryByRole('heading', { level: 2, name: 'Kotelnica Białczańska' }),
+    ).toBeNull()
+    expect(
+      screen.queryByRole('heading', { level: 2, name: 'Špindlerův Mlýn' }),
+    ).toBeNull()
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'No resorts to show' }),
+    ).toBeInTheDocument()
     // The price bucket is private — never serialized to URL (spec §3.1).
     expect(window.location.search).not.toContain('price')
   })
@@ -215,7 +238,16 @@ describe('CardsView', (): void => {
       screen.getByRole('combobox', { name: /price/i }),
       'hi',
     )
-    expect(screen.queryAllByRole('heading', { level: 2 })).toHaveLength(0)
+    expect(
+      screen.queryByRole('heading', { level: 2, name: 'Kotelnica Białczańska' }),
+    ).toBeNull()
+    expect(
+      screen.queryByRole('heading', { level: 2, name: 'Špindlerův Mlýn' }),
+    ).toBeNull()
+    // <NoResorts> takes over (spec §4.7 / §390 defence-in-depth).
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'No resorts to show' }),
+    ).toBeInTheDocument()
   })
 
   it('exposes a <main>-shaped landmark with the cards grid', async (): Promise<void> => {
@@ -230,6 +262,13 @@ describe('CardsView', (): void => {
 
   it('is axe-clean (default landing)', async (): Promise<void> => {
     const view = await renderCardsView()
+    expect(await axe(view.container)).toHaveNoViolations()
+  })
+
+  it('is axe-clean when <NoResorts> is rendered for ?country=XX', async (): Promise<void> => {
+    setLocation('country=XX')
+    const view = await renderCardsView()
+    expect(screen.getByText('No resorts to show')).toBeInTheDocument()
     expect(await axe(view.container)).toHaveNoViolations()
   })
 })

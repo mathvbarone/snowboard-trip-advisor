@@ -11,12 +11,12 @@ import type { PriceBucket } from './FilterBar'
 // view-level test driven by the MSW seed cannot cover them in isolation.
 //
 // Filter-then-sort semantics (mirrored in CardsView):
-//   1. Country filter — intersect URL country set with dataset countries
-//      first; if the intersection is empty (or no countries selected),
-//      keep everything. Without this stale-URL guard, a shared link like
-//      `?country=DE` against a PL+CZ dataset, or any country code in a
-//      single-country deployment where the chip group is hidden, would
-//      empty the grid with no in-UI control to clear the filter.
+//   1. Country filter — strict. If countries.length > 0, only resorts
+//      whose country is in the URL list survive. A stale URL like
+//      `?country=XX` against a PL+CZ dataset returns an empty array,
+//      which CardsView then renders as <NoResorts> (per spec §4.7
+//      defence-in-depth) — FilterBar remains rendered above so the user
+//      can recover by clearing chips. Empty `countries` is no-op.
 //   2. Price bucket filter — keep resorts whose `lift_pass_day.value.amount`
 //      lands in the bucket. `never_fetched` is excluded from any non-`any`
 //      bucket because the bucket cannot be evaluated.
@@ -30,13 +30,8 @@ export function filterViews(
   countries: ReadonlyArray<string>,
   bucket: PriceBucket,
 ): ReadonlyArray<ResortView> {
-  const available = new Set<string>()
-  for (const v of views) {
-    available.add(v.country)
-  }
-  const effective = countries.filter((c): boolean => available.has(c))
   return views.filter((v): boolean => {
-    if (effective.length > 0 && !effective.includes(v.country)) {
+    if (countries.length > 0 && !countries.includes(v.country)) {
       return false
     }
     return matchesBucket(v.lift_pass_day, bucket)

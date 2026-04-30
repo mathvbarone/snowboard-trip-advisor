@@ -99,30 +99,27 @@ describe('filterViews', (): void => {
     expect(filterViews([A, B, C], ['PL', 'AT'], 'hi').map((v): string => v.slug)).toEqual(['c'])
   })
 
-  // Stale-URL guard: if a shared link carries a country code that's not
-  // present in the current dataset (e.g. `?country=DE` against a PL-only
-  // dataset, or any 1-country deployment that hides the chip group), the
-  // filter must silently no-op so the grid is not empty with no in-UI
-  // control to clear it. Valid values in the URL still filter normally.
-  it('silently no-ops when every URL country is absent from the dataset', (): void => {
-    // Dataset is PL + CZ; URL says ?country=DE — DE has no chip to clear.
-    expect(
-      filterViews([A, B], ['DE'], 'any').map((v): string => v.slug),
-    ).toEqual(['a', 'b'])
+  // Strict country filter: a URL country code that is absent from the
+  // dataset returns an empty array. Spec §390 ("The `<NoResorts />`
+  // component still ships as defence-in-depth for `views.length === 0`")
+  // requires the empty state to be reachable; the previous stale-URL
+  // no-op guard hid it. The recovery affordance is the FilterBar (still
+  // rendered alongside <NoResorts>) — the user clears the country query
+  // by toggling the country chips.
+  it('returns [] when every URL country is absent from the dataset', (): void => {
+    // Dataset is PL + CZ; URL says ?country=DE — strict filter yields zero.
+    expect(filterViews([A, B], ['DE'], 'any')).toEqual([])
   })
 
-  it('silently no-ops when every URL country is absent (single-country dataset)', (): void => {
-    // Single-country dataset (chip group hidden); URL still carries a
-    // mismatch like ?country=PL. Without this guard the grid would be
-    // empty.
-    expect(
-      filterViews([B], ['PL'], 'any').map((v): string => v.slug),
-    ).toEqual(['b'])
+  it('returns [] when every URL country is absent (single-country dataset)', (): void => {
+    // Single-country dataset (chip group hidden); URL says ?country=PL
+    // (B is CZ). Strict filter yields zero; <NoResorts> takes over.
+    expect(filterViews([B], ['PL'], 'any')).toEqual([])
   })
 
   it('intersects URL countries with dataset countries (mixed valid + invalid)', (): void => {
     // Dataset is PL + CZ + AT; URL says DE + PL — only PL is valid, and
-    // only PL views survive.
+    // only PL views survive (DE is silently ignored because PL is present).
     expect(
       filterViews([A, B, C, D], ['DE', 'PL'], 'any').map((v): string => v.slug),
     ).toEqual(['a', 'd'])
