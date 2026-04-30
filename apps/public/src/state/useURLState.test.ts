@@ -97,6 +97,61 @@ describe('useURLState', (): void => {
     expect(removeSpy).toHaveBeenCalledWith('popstate', expect.any(Function))
   })
 
+  // mergeURLState branches — exactOptionalPropertyTypes-safe merge.
+  // PR 3.5 added explicit-undefined clearing so DetailDrawer can call
+  // `setURLState({ detail: undefined })` to close the drawer. The
+  // merge function preserves untouched optional keys and clears the
+  // ones the caller explicitly nulls.
+
+  it('clears detail when partial sets detail: undefined explicitly', (): void => {
+    setLocation('detail=kotelnica-bialczanska')
+    const { result } = renderHook(() => useURLState())
+    expect(result.current.detail).toBe('kotelnica-bialczanska')
+    act((): void => {
+      setURLState({ detail: undefined })
+    })
+    expect(result.current.detail).toBeUndefined()
+    expect(window.location.search).not.toContain('detail=')
+  })
+
+  it('preserves detail when partial does not include the detail key', (): void => {
+    setLocation('detail=kotelnica-bialczanska&sort=name')
+    const { result } = renderHook(() => useURLState())
+    act((): void => {
+      // sort change must not blow away an unrelated detail key.
+      setURLState({ sort: 'price_asc' })
+    })
+    expect(result.current.detail).toBe('kotelnica-bialczanska')
+  })
+
+  it('sets highlight from partial when partial.highlight is defined', (): void => {
+    setLocation('')
+    const { result } = renderHook(() => useURLState())
+    act((): void => {
+      setURLState({ highlight: 'snow_depth_cm' })
+    })
+    expect(result.current.highlight).toBe('snow_depth_cm')
+  })
+
+  it('clears highlight when partial sets highlight: undefined explicitly', (): void => {
+    setLocation('highlight=snow_depth_cm')
+    const { result } = renderHook(() => useURLState())
+    expect(result.current.highlight).toBe('snow_depth_cm')
+    act((): void => {
+      setURLState({ highlight: undefined })
+    })
+    expect(result.current.highlight).toBeUndefined()
+  })
+
+  it('preserves highlight when partial does not include the highlight key', (): void => {
+    setLocation('highlight=snow_depth_cm&sort=name')
+    const { result } = renderHook(() => useURLState())
+    act((): void => {
+      setURLState({ sort: 'price_asc' })
+    })
+    expect(result.current.highlight).toBe('snow_depth_cm')
+  })
+
   it('serializes a default-only state to a clean pathname URL (no query string)', (): void => {
     setLocation('sort=price_asc')
     renderHook(() => useURLState())

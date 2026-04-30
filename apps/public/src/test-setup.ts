@@ -23,6 +23,20 @@ vi.stubGlobal(
   }),
 )
 
+// jsdom does not implement ResizeObserver. Radix's react-popper (used by
+// FieldValueRenderer's Tooltip) calls `new ResizeObserver(...)` inside a
+// useLayoutEffect when its content/arrow refs populate. ShortlistDrawer
+// did not trigger this branch (no FieldValueRenderer inside the drawer);
+// DetailDrawer composes FieldValueRenderer inside the Drawer's Portal,
+// which is the first place in apps/public's tests that hits the popper
+// ResizeObserver path. Mirrors the design-system test-setup stub.
+class ResizeObserverStub {
+  observe(): void {}
+  unobserve(): void {}
+  disconnect(): void {}
+}
+vi.stubGlobal('ResizeObserver', ResizeObserverStub)
+
 expect.extend(toHaveNoViolations)
 
 beforeAll((): void => {

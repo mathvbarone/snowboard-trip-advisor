@@ -90,14 +90,31 @@ function inferTransition(current: URLState, next: URLState): 'push' | 'replace' 
   return 'replace'
 }
 
+// Setter input — like `Partial<URLState>` but optional URL keys (the
+// ones whose value type is already `T | undefined` in URLState — i.e.
+// `detail?: string` and `highlight?: MetricPath`) accept an explicit
+// `undefined` so callers can *clear* them (e.g.
+// `setURLState({ detail: undefined })` closes the detail drawer). With
+// `exactOptionalPropertyTypes: true`, plain `Partial<URLState>` accepts
+// only "omit or set"; this widening adds "set to undefined" for keys
+// already typed as optional. The required keys (view, sort, country,
+// shortlist) keep their non-undefined value types — clearing them is
+// not a meaningful operation. `serializeURL` already drops undefined
+// values from the URL, so the runtime semantics are unchanged.
+type OptionalKeys<T> = { [K in keyof T]-?: undefined extends T[K] ? K : never }[keyof T]
+type RequiredKeys<T> = Exclude<keyof T, OptionalKeys<T>>
+export type SetURLStatePartial =
+  & { [K in OptionalKeys<URLState>]?: URLState[K] | undefined }
+  & { [K in RequiredKeys<URLState>]?: URLState[K] }
+
 /**
  * @warning Never invoke `setURLState` inside React 19's `startTransition`.
  * The synchronous DOM write (history.pushState/replaceState) would race the
  * deferred render — see spec §10.5.
  */
-export function setURLState(partial: Partial<URLState>): void {
+export function setURLState(partial: SetURLStatePartial): void {
   const current = getSnapshot()
-  const next: URLState = { ...current, ...partial }
+  const next = mergeURLState(current, partial)
   const search = serializeURL(next)
   const url = search.length > 0 ? `?${search}` : window.location.pathname
   const transition = inferTransition(current, next)
@@ -108,6 +125,43 @@ export function setURLState(partial: Partial<URLState>): void {
   }
   cachedSearch = null
   notify()
+}
+
+// Merge `partial` onto `current` with `exactOptionalPropertyTypes`-safe
+// semantics: a `partial` key explicitly set to `undefined` *clears* the
+// corresponding optional URLState key (omits it from `next`); a key set
+// to a defined value overrides; a key absent from `partial` leaves
+// `current`'s value untouched. Required keys (view, sort, country,
+// shortlist) cannot be cleared by SetURLStatePartial's type, so the
+// per-key handling for them is "override or leave alone". Building the
+// next object key-by-key (rather than spread + delete) avoids the
+// no-dynamic-delete lint rule.
+function mergeURLState(current: URLState, partial: SetURLStatePartial): URLState {
+  const next: URLState = {
+    view: partial.view ?? current.view,
+    sort: partial.sort ?? current.sort,
+    country: partial.country ?? current.country,
+    shortlist: partial.shortlist ?? current.shortlist,
+  }
+  // `partial.detail === undefined` means "clear" — leave `next.detail`
+  // omitted. The `'detail' in partial` check distinguishes "explicitly
+  // set to undefined (clear)" from "not present in partial (preserve
+  // current.detail)".
+  if ('detail' in partial) {
+    if (partial.detail !== undefined) {
+      next.detail = partial.detail
+    }
+  } else if (current.detail !== undefined) {
+    next.detail = current.detail
+  }
+  if ('highlight' in partial) {
+    if (partial.highlight !== undefined) {
+      next.highlight = partial.highlight
+    }
+  } else if (current.highlight !== undefined) {
+    next.highlight = current.highlight
+  }
+  return next
 }
 
 export function useURLState(): URLState {
