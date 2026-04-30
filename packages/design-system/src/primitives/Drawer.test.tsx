@@ -212,6 +212,28 @@ describe('Drawer', (): void => {
     expect(screen.getByRole('dialog', { name: 'Shortlist' })).toBeInTheDocument()
   })
 
+  it('does not call onOpenChange(true) when defaultOpen=true and open is already true', (): void => {
+    // Defensive guard: if the parent passes both `defaultOpen` and
+    // `open={true}` on first render, the open-on-mount effect must
+    // detect the already-open state and skip the redundant
+    // `onOpenChange(true)` call (otherwise a parent reducer with side
+    // effects would fire spuriously). Exercise the `if (!open)` guard's
+    // open=true branch.
+    const onOpenChange = vi.fn()
+    render(
+      <Drawer
+        open={true}
+        onOpenChange={onOpenChange}
+        title="Shortlist"
+        defaultOpen
+      >
+        <p>Body</p>
+      </Drawer>,
+    )
+    expect(screen.getByRole('dialog', { name: 'Shortlist' })).toBeInTheDocument()
+    expect(onOpenChange).not.toHaveBeenCalled()
+  })
+
   it('focuses the initialFocus ref on open', (): void => {
     function FocusHarness(): JSX.Element {
       const focusRef = useRef<HTMLButtonElement>(null)
