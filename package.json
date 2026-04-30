@@ -23,7 +23,7 @@
     "test:hooks": "./scripts/hooks/test-hooks.sh",
     "tokens:generate": "tsx scripts/generate-tokens.cli.ts",
     "tokens:check": "npm run tokens:generate && git diff --exit-code packages/design-system/tokens.css",
-    "qa": "npm run lint && npm run typecheck && npm run coverage && npm run tokens:check && npm run test:hooks",
+    "qa": "npm run lint && npm run typecheck && npm run coverage && npm run tokens:check && npm run test:hooks && npm run test:integration",
     "setup": "cp scripts/pre-commit \"$(git rev-parse --git-path hooks)/pre-commit\" && chmod +x \"$(git rev-parse --git-path hooks)/pre-commit\" && npm run tokens:generate"
   },
   "devDependencies": {
