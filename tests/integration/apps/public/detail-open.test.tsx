@@ -122,18 +122,22 @@ describe('integration: detail drawer open via URL', (): void => {
   })
 
   it('is axe-clean on the drawer-open container', async (): Promise<void> => {
-    const view = await renderAsync(<App />)
+    await renderAsync(<App />)
     await screen.findByRole('dialog', { name: 'Kotelnica Białczańska' })
-    // Run axe against the RTL view.container (the cards subtree)
-    // rather than the document body. The drawer renders inside a Radix
-    // Portal that mounts as a sibling of view.container in <body>, and
-    // Radix's popper-content-wrapper trips axe's `region` rule because
-    // it is not contained by a landmark — that's a primitive-level
-    // structural artifact, not an integration-route concern. The drawer
-    // panel itself is verified for axe-cleanness in the design-system
-    // Drawer.test.tsx unit suite. The integration value here is the
-    // axe-cleanness of the cards-behind-the-drawer subtree.
-    expect(await axe(view.container)).toHaveNoViolations()
+    // Scan the full document (including the Radix Portal subtree where
+    // the drawer body mounts) so real a11y issues inside the drawer
+    // (DialogTitle, body copy, deep-link CTAs) are caught. The
+    // popper-content-wrapper Radix uses for the Tooltip primitive
+    // sits outside any landmark and trips axe's `region` rule — a
+    // primitive-level structural artifact, not an integration-route
+    // concern (the Tooltip primitive itself is unit-tested in the
+    // design-system suite). Disable ONLY that rule. The narrower
+    // axe(view.container) scope previously used here masked the
+    // drawer-body subtree, which IS integration content and must be
+    // covered by this test.
+    expect(
+      await axe(document.body, { rules: { region: { enabled: false } } }),
+    ).toHaveNoViolations()
     // Sanity: the drawer is in the document while we're asserting; the
     // within(body) guard catches a regression where the drawer fails to
     // mount and the integration assertion silently no-ops.
