@@ -30,10 +30,9 @@ export default function DroppedSlugsBanner(): JSX.Element | null {
   if (dropped.size === 0) {
     return null
   }
-  const count = dropped.size
-  const message = count === 1
+  const message = dropped.size === 1
     ? '1 requested resort not found in dataset.'
-    : `${String(count)} requested resorts not found in dataset.`
+    : `${String(dropped.size)} requested resorts not found in dataset.`
   return (
     <div
       role="status"
