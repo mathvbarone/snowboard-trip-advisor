@@ -369,14 +369,15 @@ Auto-memory at `~/.claude/projects/-Users-matheusbarone-Projects-snowboard-trip-
 
 ## End-of-session state summary
 
-- **Epic 3:** shipped (PRs #14–#55 merged).
-- **Agent-discipline migration:** 4-PR stack (#59-#62) open, all subagent-reviewed and folded; awaiting maintainer merge in dependency order.
-- **ADRs 0011 + 0012:** open (#63, #64); independent of the spec PR; merge-order doesn't matter.
-- **Epic 4 spec:** open (#65); REQUEST CHANGES from spec-document-reviewer; 9 P0 + 8 P1 folds authorized but NOT YET applied.
-- **PR #57:** open; possibly phantom-merged (verify origin/main HEAD); the analyze job's actual-on-main status is the question to answer.
-- **PR #58:** open; doc-prune; subagent-reviewed and folded; awaiting maintainer merge.
+> **Updated post-#66.** The original session's snapshot listed PRs #57–#62 as open / awaiting merge; all of those have since landed. This summary now reflects the actual `main` state at the time this handoff became tracked. The original snapshot is preserved in [`2026-05-01-post-epic-3.md`](./2026-05-01-post-epic-3.md) and the PR #66 description for the audit trail.
+
+- **Epic 3:** shipped on `main` (PRs #14–#55 merged).
+- **PR #57** (`quality-gate / analyze` CI job): merged on `main`. The analyze job runs informationally after `qa`; not on the required-status set yet (Epic 6 deferral).
+- **Agent-discipline migration:** DONE on `main` via PR #66 (single squash-merge of the consolidated content; original 4-PR stack #58→#62 phantom-merged into chained branches without reaching `main`). Subagent-review folds and Codex-review folds all integrated. See [`2026-05-01-post-epic-3.md`](./2026-05-01-post-epic-3.md) "Audit deferrals" for the phantom-merge incident write-up + reachability-check lesson.
+- **ADRs 0011 + 0012:** still open (#63, #64); independent of the spec PR; merge-order doesn't matter.
+- **Epic 4 spec:** still open (#65); REQUEST CHANGES from spec-document-reviewer; 9 P0 + 8 P1 folds authorized below but NOT YET applied. **This is the next agent's primary work surface.**
 - **Implementation:** has not started. First implementation PR is 4.1a, after the spec merges and `superpowers:writing-plans` produces the plan.
 
-Total open PRs at handover: **10** (excluding the closed #54).
+Total open PRs at the time this handoff became tracked: **3** (#63, #64, #65) plus any Dependabot bumps.
 
-The maintainer was reviewing PRs #58–#62 in parallel during this session. They explicitly directed: "another agent is reviewing the PR — lets brainstorm epic 4". So the next agent should NOT touch PRs #58-#62 — those are someone else's review surface. Focus on Epic 4 spec folds + the writing-plans transition.
+Focus on Epic 4 spec folds + the `superpowers:writing-plans` transition. The agent-discipline stack PRs that the original snapshot warned not to touch are now closed (content landed via #66); they don't need attention.
