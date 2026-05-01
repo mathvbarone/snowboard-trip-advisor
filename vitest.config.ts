@@ -99,6 +99,13 @@ export default defineConfig({
         // an awkward "spawn a subprocess from a unit test" pattern just to
         // cover three lines.
         'scripts/generate-tokens.cli.ts',
+        // `scripts/check-*.cli.ts` are side-effect entry points run only via
+        // `npm run analyze` (PR 3.6 — spec §7.12 / §6.7 / §10.2 / §10.7). The
+        // pure logic each wraps lives in the matching `scripts/check-*.ts`
+        // and carries 100% unit coverage. Same rationale as
+        // `generate-tokens.cli.ts` above — running the CLI under vitest would
+        // require spawning subprocesses to cover ~10 lines per file.
+        'scripts/check-*.cli.ts',
       ],
       thresholds: {
         lines: 100,

@@ -24,6 +24,7 @@
   "devDependencies": {
     "@types/jest-axe": "^3.5.9",
     "jest-axe": "^10.0.0",
-    "msw": "^2.13.6"
+    "msw": "^2.13.6",
+    "rollup-plugin-visualizer": "^7.0.1"
   }
 }
