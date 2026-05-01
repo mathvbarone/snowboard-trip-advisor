@@ -286,7 +286,7 @@ describe('checkBotsHaveAdrs', (): void => {
     )
   })
 
-  it('passes when an unfamiliar bot has its own ADR', (): void => {
+  it('passes when an unfamiliar bot has its own ADR (and Dependabot ADR is also present, since the file presence still requires it)', (): void => {
     const inputs: DriftCheckInputs = {
       ...HAPPY_INPUTS,
       dependabot:
@@ -297,6 +297,22 @@ describe('checkBotsHaveAdrs', (): void => {
       ],
     }
     expect(checkBotsHaveAdrs(inputs)).toEqual([])
+  })
+
+  it('always requires a Dependabot ADR when dependabot.yml is present, even when other bot emails are mentioned', (): void => {
+    // Regression test for the Codex P2 finding: previously, the canonical
+    // Dependabot identity was only added to `seen` when no other bot email
+    // was matched. A stray comment like `renovate[bot]...` would suppress
+    // the Dependabot-ADR requirement entirely → false negative.
+    const inputs: DriftCheckInputs = {
+      ...HAPPY_INPUTS,
+      dependabot: '# author: renovate[bot]@users.noreply.github.com',
+      adrBasenames: ['0042-dco-exemption-for-renovate.md'],
+    }
+    const issues = checkBotsHaveAdrs(inputs)
+    expect(issues.some((i): boolean => i.message.includes('dependabot'))).toBe(
+      true,
+    )
   })
 
   it('rejects an ADR that documents a bot REMOVAL — the exemption is no longer in force', (): void => {

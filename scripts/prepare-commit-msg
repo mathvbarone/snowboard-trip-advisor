@@ -14,12 +14,18 @@
 #   - merge / squash : trailers are managed by git itself
 #   - commit (amend) : preserve the original commit's trailer; user can re-sign
 #                      explicitly via `git commit --amend -s`
-#   - template       : respect explicit user-supplied templates
 #
-# Empty $2 (the normal commit path) is the only case that triggers auto-sign.
+# `template` is intentionally NOT skipped: git sets $2=template both for
+# explicit `git commit -t <file>` AND for any commit when `commit.template`
+# is configured globally (a common ergonomic setup). Skipping the template
+# case would silently strip DCO trailers from every normal commit by users
+# with `commit.template` set, breaking the required CI dco gate.
+#
+# Empty $2 (the normal commit path with no commit.template) is the other
+# case that triggers auto-sign.
 
 case "${2:-}" in
-  merge|squash|commit|template) exit 0 ;;
+  merge|squash|commit) exit 0 ;;
 esac
 
 NAME=$(git config user.name)

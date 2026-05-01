@@ -274,11 +274,12 @@ export const checkBotsHaveAdrs: DriftCheck = (
   }
   // The presence of `.github/dependabot.yml` is itself the signal that
   // GitHub Dependabot is configured for this repo — the file content
-  // doesn't typically carry the bot's author email. If no other bot
-  // email was matched, fall back to the canonical Dependabot identity.
-  if (seen.size === 0) {
-    seen.add('dependabot[bot]@users.noreply.github.com')
-  }
+  // doesn't typically carry the bot's author email. ALWAYS include the
+  // canonical Dependabot identity when the file is present (regardless
+  // of whether other bot emails were matched, e.g. a comment mentioning
+  // a future Renovate migration). Otherwise a stray bot reference would
+  // suppress the Dependabot-ADR requirement entirely — false negative.
+  seen.add('dependabot[bot]@users.noreply.github.com')
   const issues: DriftIssue[] = []
   for (const bot of seen) {
     // bot is guaranteed to contain '[bot]' (BOT_AUTHOR_REGEX matches it,
