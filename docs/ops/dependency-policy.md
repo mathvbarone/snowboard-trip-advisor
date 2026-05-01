@@ -1,6 +1,6 @@
 # Dependency Policy
 
-Operational policy for keeping the monorepo's npm dependencies current and secure. Companion to [`docs/superpowers/plans/2026-04-29-dependency-security-update-plan.md`](../superpowers/plans/2026-04-29-dependency-security-update-plan.md) and [ADR-0008](../adr/0008-dependency-security-ci-gate.md).
+Operational policy for keeping the monorepo's npm dependencies current and secure. Companion to [ADR-0008](../adr/0008-dependency-security-ci-gate.md). The original one-shot rollout plan was deleted in the post-Epic-3 doc-prune after delivery; see ADR-0008 for the implementation history.
 
 ## Supported Node / npm versions
 
@@ -48,7 +48,6 @@ Three options. Pick one before enabling any bot config:
 
 ## Where this fits
 
-- **Plan** (one-shot rollout): [`2026-04-29-dependency-security-update-plan.md`](../superpowers/plans/2026-04-29-dependency-security-update-plan.md)
-- **ADR** (CI-gate decision): [`0008-dependency-security-ci-gate.md`](../adr/0008-dependency-security-ci-gate.md)
+- **ADR** (CI-gate decision): [`0008-dependency-security-ci-gate.md`](../adr/0008-dependency-security-ci-gate.md) — also captures the original rollout-plan provenance.
 - **Runbook** (registry / advisory failures): [`dependency-registry-access.md`](./dependency-registry-access.md)
 - **Policy** (this file): supported versions, triage, exceptions, bot DCO.
