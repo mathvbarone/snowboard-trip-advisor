@@ -57,9 +57,9 @@ Concretely:
 
 - Admin app is **not feature-complete** at Epic 4 close; the gap is documented in the Epic 4 post-milestone handoff.
 - Future agents reading parent §3.6 / §8.4.1 in isolation could expect Test / Sync to exist in `apps/admin` after Epic 4. Mitigated by:
-  - This ADR's existence and its cross-reference from the Epic 4 spec.
-  - The Epic 4 spec's `Out of Scope` section explicitly listing Test / Sync + endpoints 4-5 as Epic 5.
-  - The drift checker (`scripts/check-agent-discipline-sync`) does NOT mechanise this — the deferral is documented but not gated.
+  - This ADR's existence (lands with this PR on `main`).
+  - The Epic 4 spec ([PR #65](https://github.com/mathvbarone/snowboard-trip-advisor/pull/65), still open at this ADR's draft time) cross-references this ADR and adds an `Out of Scope` entry explicitly listing Test / Sync + endpoints 4-5 as Epic 5. **Both this ADR and PR #65 must land on `main` for the mitigation to be complete** — until #65 merges, the parent spec §3.6 / §8.4.1 carries an unaccompanied Test / Sync mention without the explicit deferral note. Maintainer should land them in the same review window.
+  - The drift checker (`scripts/check-agent-discipline-sync.ts`, landed on `main` via [PR #66](https://github.com/mathvbarone/snowboard-trip-advisor/pull/66)) does NOT mechanise this specific deferral — its `agents-section-coverage` check enforces AGENTS.md structural integrity, not Epic 4 scope decisions. The deferral remains documented-but-not-gated.
 - The `ModeToggle` in Epic 4 has only a single useful mode (`MANUAL`) since `AUTO` mode displays last-known stub data with no refresh action. The toggle's UI exists; its `AUTO` half is read-only-with-stale-data until Epic 5 lands. This is acceptable for Phase 1 (loopback admin, single analyst, the usefulness is in MANUAL mode anyway); it would not be acceptable for a multi-user production admin.
 
 **Lift conditions:**
