@@ -33,7 +33,7 @@ Concretely:
 1. **Epic 4 omits endpoints 9 + 10** from the `packages/schema/api/*.ts` Zod surface and from `apps/admin/server/*.ts` handler registration. The corresponding rows in §8.4.1 are documented as a post-Epic-4 follow-up in the Epic 4 spec.
 2. **Epic 4 ships the admin workspace storage layer.** `data/admin-workspace/<slug>.json` lands with a Resort-only initial schema (durable + live workspace state). The file format is **forward-compatible**: a future `notes` field added at the top level does not break existing files. Schema validation in Epic 4 uses Zod's `.passthrough()` or equivalent to permit forward compatibility, OR the schema is explicitly written as `Resort & Partial<{ notes: AnalystNotes }>` so the missing `notes` field does not fail parse.
 3. **The follow-up PR (post-Epic-4)** adds: the `AnalystNotes` Zod schema (per-field-key string-keyed Markdown source), the workspace file format extension to include `notes`, endpoints 9 + 10 in `packages/schema/api/`, handler implementations in `apps/admin/server/`, the sanitizer dependency (deferred to that PR), ADR-0013 for the sanitizer choice, and the per-field UI affordance on the Resort editor.
-4. **The post-Epic-4 follow-up's PR sizing target:** ≤8 files, ≤300 LOC excluding the test files. If the sanitizer choice + the per-field UI together exceed those caps, split into two stacked PRs (sanitizer-and-API-first, UI-second).
+4. **The post-Epic-4 follow-up's PR sizing target:** the [AGENTS.md PR Sizing Discipline](../../AGENTS.md) ceilings apply unchanged — ≤300 LOC added (excluding generated files / lockfiles only; test files count toward the cap), ≤5 commits, ≤8 files. The sanitizer choice + per-field UI + endpoint handlers + tests will almost certainly exceed those ceilings as one PR; per AGENTS.md "Stacked PRs over bundled PRs", split into stacked PRs ahead of opening any branch — e.g., (a) `AnalystNotes` Zod schema + workspace file format extension, (b) sanitizer dependency + ADR-0013 for the sanitizer choice + endpoints 9 + 10 in `packages/schema/api/` + handlers in `apps/admin/server/`, (c) per-field UI affordance on the Resort editor.
 
 ## Consequences
 
@@ -48,8 +48,8 @@ Concretely:
 
 - Admin app is **not feature-complete** at Epic 4 close. The gap (no analyst notes) is documented in the Epic 4 post-milestone handoff alongside the Test / Sync deferral from ADR-0011.
 - Future agents reading parent §3.9 / §8.4.1 in isolation could expect analyst notes to exist in `apps/admin` after Epic 4. Mitigated by:
-  - This ADR's existence and its cross-reference from the Epic 4 spec.
-  - The Epic 4 spec's `Out of Scope` section explicitly listing analyst notes + endpoints 9-10 as a post-Epic-4 follow-up.
+  - This ADR's existence (lands with this PR on `main`).
+  - The Epic 4 spec ([PR #65](https://github.com/mathvbarone/snowboard-trip-advisor/pull/65), still open at this ADR's draft time) cross-references this ADR and adds an `Out of Scope` entry explicitly listing analyst notes + endpoints 9-10 as a post-Epic-4 follow-up. **Both this ADR and PR #65 must land on `main` for the mitigation to be complete** — until #65 merges, the parent spec §3.9 / §8.4.1 carries an unaccompanied analyst-notes mention without the explicit deferral note. Maintainer should land them in the same review window.
   - The post-Epic-4 follow-up PR is small enough to land within days of Epic 4 close — short window of incompleteness.
 - A maintainer using the admin app between Epic 4 close and the follow-up PR cannot record per-field reasoning. Workaround for the brief window: the workspace file is checked into a separate git branch under the maintainer's control (loopback-only Phase 1, single maintainer); free-form per-field commentary can live in commit messages on that branch.
 
