@@ -16,7 +16,7 @@ Epic 4 ships `apps/admin`, a loopback-only Vite SPA + in-process API middleware 
 - **Navigation** (PRs 4.2 / 4.3) — Dashboard health cards + Resorts table.
 - **Editor** (PRs 4.4a/4.4b) — Resort editor split on the read-vs-write axis: 4.4a ships GET + workspace read + render-only durable + live panels with StatusPill wiring; 4.4b ships ModeToggle + MANUAL edit form + PUT + workspace atomic-write + integration round-trip.
 - **Publish** (PR 4.5) — POST publish + publish history + Toast wired to publish success/failure.
-- **Polish** (PRs 4.6a/4.6b) — keyboard shortcuts + responsive read-only-below-md affordance; integration tests + Dockerfile prod-build guard.
+- **Polish** (PRs 4.6a/4.6b) — keyboard shortcuts + responsive read-only-below-md affordance; integration tests. The Dockerfile prod-build guard is **deferred to Epic 6** alongside the Dockerfile rewrite (the existing `Dockerfile` is broken — see §10.7).
 
 **What does NOT ship in Epic 4** (out of scope; documented per ADR / parent spec):
 
@@ -61,7 +61,7 @@ The admin's `/api/*` wire contract is the **stable portability line** across Pha
 
 ```
 packages/
-  schema/                  (leaf — Resort, ResortLiveSignal, validatePublishedDataset, publishDataset, ResortView, FieldStateFor<T>)
+  schema/                  (leaf — Resort, ResortLiveSignal, validatePublishedDataset, publishDataset, ResortView; FieldStateFor<T> + toFieldValue<T> are net-new in Epic 4 — land in PR 4.1a)
     api/                   (NEW in Epic 4 — Zod request/response surface for the admin /api/*)
   design-system/           (← schema; extends in PR 4.1c with Sidebar, StatusPill, Tabs, Popover, DropdownMenu; Toast lands in 4.5)
   integrations/            (← schema; stub adapters only — Test/Sync not consumed in Epic 4 per ADR-0011)
@@ -83,7 +83,7 @@ Cross-layer imports remain blocked by `eslint.config.js` `no-restricted-imports`
 
 - `index.ts` — barrel re-export of every schema pair below.
 - `listResorts.ts` — `ListResortsQuery` + `ListResortsResponse` (endpoint 1).
-- `resortDetail.ts` — `ResortSlugParam` + `ResortDetailResponse` (endpoint 2; full durable + latest live + per-field state via `FieldStateFor<T>`).
+- `resortDetail.ts` — `ResortSlugParam` + `ResortDetailResponse` (endpoint 2; full durable + latest live + per-field state via `FieldStateFor<T>`, which is itself added to `packages/schema/src/resortView.ts` in this same PR — see §7.5).
 - `resortUpsert.ts` — `ResortUpsertBody` + reuses `ResortDetailResponse` (endpoint 3).
 - `publish.ts` — `PublishBody` + `PublishResponse` (endpoint 6; version id, archive path).
 - `listPublishes.ts` — `ListPublishesQuery` + `ListPublishesResponse` (endpoint 7; version history).
@@ -163,7 +163,7 @@ apps/admin/
 
 Plugin scope: only on `apps/admin/`'s Vite dev server. `apps/public/`'s Vite server has no admin-api middleware — the public app reads the published file via `fetch('/data/current.v1.json')` per Epic 3 spec §10.2.
 
-The plugin is **not** built into a production container image. The Dockerfile guard test (PR 4.6b) verifies the prod build does not include `apps/admin/`.
+The plugin is **not** built into a production container image. Mechanical Dockerfile-build verification of this is **deferred to Epic 6** (see §10.7 for the deferral rationale and lift conditions); Phase 1 relies on the CODEOWNERS-triggered Subagent Review Discipline on `Dockerfile` to catch any PR that introduces `COPY apps/admin` or equivalent.
 
 CSP: admin is dev-only in Phase 1; no production CSP is generated. The admin's `index.html` does NOT carry a `<meta http-equiv="Content-Security-Policy">` — the dev server doesn't emit a nonce header, and the prod-image guard prevents the file from ever shipping. Phase 2's Hono service ships its own CSP per the admin product surface there.
 
@@ -222,7 +222,7 @@ Server / SPA boundary discipline: the `eslint.config.js` `no-restricted-imports`
 
 `apps/admin` is **never** built into the production container image. Per parent §3.1.
 
-The Dockerfile guard (PR 4.6b) is a CI smoke test: build the prod image (or simulate the multi-stage build steps); assert the resulting image does NOT contain any `apps/admin/dist/*` files. Implementation detail in §10.7.
+A mechanical Dockerfile guard (CI smoke test asserting the prod image does NOT contain any `apps/admin/dist/*` files) is **deferred to Epic 6** alongside the Dockerfile rewrite — the existing `Dockerfile` is broken (lines 3-13: "DEFERRED — DO NOT BUILD UNTIL EPIC 6"), so a `docker build`-driven guard cannot ship in Epic 4. See §10.7 for deferral rationale + lift conditions.
 
 The admin's `npm run build --workspace=@snowboard-trip-advisor/admin-app` exists for development verification (does the SPA tree-shake, does the typed `apiClient` compile against the schemas) but its `dist/` is never copied into the prod image.
 
@@ -240,9 +240,20 @@ Six endpoints in Epic 4 (rows 1, 2, 3, 6, 7, 8 of parent §8.4.1). Endpoints 4-5
 
 **Handler logic** (`apps/admin/server/listResorts.ts`):
 - Read all workspace files (`data/admin-workspace/*.json`); fall back to published `current.v1.json` for resorts without workspace files (i.e., never edited).
-- Compute `stale_field_count` / `failed_field_count` per resort using `ResortView` projection's `FieldStateFor<T>` (already in `packages/schema/src/`).
+- Compute `stale_field_count` / `failed_field_count` per resort using `ResortView` projection's `FieldStateFor<T>` (lands in PR 4.1a — see §2.1 / §7).
 - Apply filter + page.
 - Respond.
+
+### 4.1.1 Draft resort handling (endpoint 1)
+
+A "draft resort" is a resort with a workspace file (`data/admin-workspace/<slug>.json`) but no entry in published `current.v1.json` — i.e., a new resort being staged for inclusion in the next publish.
+
+`GET /api/resorts` includes draft resorts in the response. Drafts are tagged via `publish_state: 'draft'` in the response (per `Resort.publish_state` enum from parent §3.8). The handler:
+
+1. Read all workspace files; collect `slug + Resort + last_modified` per file.
+2. Read published `current.v1.json`; collect any slugs not represented in workspace.
+3. Union the two sets. For workspace-only entries, emit `publish_state: 'draft'`. For published-and-workspace entries, the workspace state takes precedence (it's the staged change). For published-only entries, emit `publish_state: 'published'` from the published file.
+4. Apply filter + page; respond.
 
 ### 4.2 Endpoint 2 — `GET /api/resorts/:slug`
 
@@ -255,6 +266,10 @@ Six endpoints in Epic 4 (rows 1, 2, 3, 6, 7, 8 of parent §8.4.1). Endpoints 4-5
 - Else read `data/published/current.v1.json` and project the requested resort.
 - Build `field_states` via the `ResortView` projection helpers.
 - Respond.
+
+### 4.2.1 Draft resort handling (endpoint 2)
+
+`GET /api/resorts/:slug` returns `200` for draft slugs (workspace-only), populating `ResortDetailResponse` from the workspace file alone. `live_signal` is `null` for drafts (no live data until the resort is published and signals start flowing). `404` is returned only when neither the workspace file nor the published doc has the slug.
 
 ### 4.3 Endpoint 3 — `PUT /api/resorts/:slug`
 
@@ -271,6 +286,19 @@ Six endpoints in Epic 4 (rows 1, 2, 3, 6, 7, 8 of parent §8.4.1). Endpoints 4-5
 
 **Note: full `validatePublishedDataset` is NOT run on PUT** — that runs only on publish (endpoint 6). Per-field PUT is permitted to pass through partial / staging states (e.g., a field marked `failed` but not yet replaced with a manual value); the publish gate enforces the full invariants.
 
+### 4.3.1 Pre-publish blocking-state surface
+
+PUT (endpoint 3) does NOT run full `validatePublishedDataset` — it only validates the resort schema (per-document `Resort` / `ResortLiveSignal` parse). Per-field provenance violations (missing `field_sources` entry, malformed `upstream_hash`) are caught only at publish time.
+
+To surface blocking state to the user **before** they click Publish:
+
+- The `<PublishDialog>` (PR 4.5b deliverables) reads from `GET /api/health` (endpoint 8) to display:
+  - Number of workspace files with at least one field in `Failed` state.
+  - Number of workspace files missing required `field_sources` entries.
+  - Total number of would-publish resorts.
+- Client-side re-validation is **explicitly NOT done** — the SPA does not import `validatePublishedDataset`. Server-side health is the single source of truth.
+- Publish disabled-state: the dialog's confirm button is `disabled` when `health.resorts_with_failed_fields > 0`; tooltip explains "fix failures or switch fields to MANUAL before publishing."
+
 ### 4.4 Endpoint 6 — `POST /api/resorts/:slug/publish`
 
 **Request:** `PublishBody` — `{ confirm: true }`. The boolean is a guard against accidental publish; the SPA's confirm dialog sets it.
@@ -286,13 +314,15 @@ Six endpoints in Epic 4 (rows 1, 2, 3, 6, 7, 8 of parent §8.4.1). Endpoints 4-5
 - On success: respond with the version metadata.
 - On `validatePublishedDataset` failure: respond `400 publish-validation-failed` with the issue list in `details`.
 
+**Draft resort inclusion in publish:** the publish handler reads ALL workspace files (drafts + edited-published), runs `validatePublishedDataset` against the composed envelope. A draft missing required fields (per `Resort` schema or `field_sources` invariants) fails the publish with `400 publish-validation-failed`. This is the intended UX: drafts must be complete before they can publish.
+
 ### 4.5 Endpoint 7 — `GET /api/publishes`
 
 **Request:** `ListPublishesQuery` — `{ page?: { offset, limit } }`. Default `{ offset: 0, limit: 20 }`.
 
 **Response:** `ListPublishesResponse` — `{ items: PublishMetadata[], page: { ... } }`. `PublishMetadata` includes `version_id`, `published_at`, `archive_path`, `resort_count`, `published_by` (Phase 1: hostname fingerprint per spec §4.5.1's `manifest.generated_by`).
 
-**Handler logic:** read the archive directory under `data/published/archive/` (the directory `publishDataset` writes archives into); list versions newest-first; respond.
+**Handler logic:** read the history directory under `data/published/history/` (the directory `publishDataset` writes archived versions into; see `packages/schema/src/publishDataset.ts:30` — `HISTORY_DIR_NAME = 'history'`); list versions newest-first; respond.
 
 ### 4.6 Endpoint 8 — `GET /api/health`
 
@@ -373,6 +403,8 @@ Mirrors Epic 3's pattern (one hook per concern; `__resetForTests` exports for is
 - `usePublishes()` — wraps `apiClient.listPublishes()`.
 - `useHealth()` — wraps `apiClient.getHealth()`.
 
+**`apps/admin/src/lib/urlState.ts` is a pure helper module, not a hook** (per F3 P1 fold) — exports a `parseURL(search: string): RouteState` parser and a `serializeURL(state: RouteState): string` serializer. State hooks (`useResortList`, `useResortDetail`) call these helpers directly; the helpers themselves carry no React state. This matches Epic 3's pattern (`apps/public/src/lib/urlState.ts`).
+
 ### 6.2 Theme
 
 Inherits semantic tokens from `packages/design-system/tokens.css`. No theme-toggle UI in Phase 1 (parent §6.5 of pivot spec — Phase 2 concern). Admin uses dark-by-default OR follows `prefers-color-scheme` — same posture as the public app per Epic 3 [ADR-0005](../../adr/0005-css-theme-no-js.md).
@@ -397,7 +429,7 @@ Same Epic 3 patterns:
 
 ### 7.1 TDD discipline
 
-Tests-first ordering enforced by deliverable lists in §7.5–§7.14. Each PR's "Tests added" subsection lists test files BEFORE implementation files. Per AGENTS.md / CLAUDE.md TDD Workflow.
+Tests-first ordering enforced by deliverable lists in §7.5–§7.16. Each PR's "Files" subsection lists test files BEFORE implementation files. Per AGENTS.md / CLAUDE.md TDD Workflow.
 
 ### 7.2 Subagent-review trigger matrix
 
@@ -405,64 +437,90 @@ PRs touching these paths require an independent subagent review per AGENTS.md:
 
 | PR | Triggered paths |
 |---|---|
-| 4.1a | `packages/schema/**` (Zod surface), `eslint.config.js` (extending no-restricted-imports), `package.json` (new test script) |
+| 4.1a | `packages/schema/**` (Zod surface + `FieldStateFor<T>` / `toFieldValue<T>` additions in `resortView.ts`), `eslint.config.js` (extending no-restricted-imports) |
 | 4.1b | `apps/admin/vite.config.ts` (binding), `apps/admin/vite-plugin-admin-api.ts` |
 | 4.1c | `packages/design-system/**` (component additions) |
-| 4.4a, 4.4b | `packages/schema/**` (workspace file format), `apps/admin/server/**` (handler additions, Phase 2 portability surface) |
-| 4.5 | `apps/admin/server/publish.ts` (publish pipeline gate), `packages/schema/**` (touches `publishDataset` consumer) |
-| 4.6b | `Dockerfile`, `.github/workflows/quality-gate.yml` (adding the prod-build guard CI step) |
+| 4.4a | `apps/admin/server/**` (handler additions; Phase 2 portability surface) |
+| 4.4b | (none — UI components only) |
+| 4.4c | `apps/admin/server/**` (atomic-write semantics must match `packages/schema/src/publishDataset.ts:162-211` byte-for-byte; PUT validation contract) |
+| 4.4d | (none — UI interaction only) |
+| 4.5a | `apps/admin/server/publish.ts` (publish pipeline gate), `packages/schema/**` (touches `publishDataset` consumer) |
+| 4.5b | `packages/design-system/**` (Toast component addition) |
+| 4.6 | (none — Dockerfile guard deferred to Epic 6 per §10.7 / C4; no other CODEOWNERS-protected paths) |
 
 ### 7.3 Cross-cutting assignments (every PR)
 
 - **TDD** per the deliverable ordering.
-- **README evaluation** — admin app is internal-only and not user-facing, so README updates are minimal. PRs 4.5 (publish) and 4.6b (integration tests + Dockerfile guard) MAY warrant a README mention of the admin app's existence + how to start it; lower-numbered PRs may skip with a one-line note in the PR description.
+- **README evaluation** — admin app is internal-only and not user-facing, so README updates are minimal. PRs 4.5b (publish UI) and 4.6b (integration tests) MAY warrant a README mention of the admin app's existence + how to start it; lower-numbered PRs may skip with a one-line note in the PR description.
 - **DCO sign-off** on every commit (`git commit -s`, or auto-added by `prepare-commit-msg` once stack-2 of the agent-discipline migration lands).
 - **Subagent Review Discipline** — per the §7.2 matrix.
 - **Pre-commit `npm run qa`** — runs before each commit.
 
 ### 7.4 Dependency graph + rollback
 
+12 PRs total per the maintainer-authorized restructure (4.4 quad-split, 4.5 dual-split, 4.1c bundled with Epic-3-PR-3.2 precedent justification, 4.6 closing PR bundles polish + integration tests). Dockerfile prod-build guard deferred to Epic 6 per §10.7.
+
 ```
-4.1a (Foundation) ─┐
-4.1b (Vite middleware) ─┼─→ 4.2 (Dashboard)
-4.1c (DS additions) ─┘   │
-                          ├─→ 4.3 (Resorts table) ─→ 4.4a (Editor read)
-                          │                              │
-                          │                              ↓
-                          │                          4.4b (Editor write) ─→ 4.5 (Publish) ─→ 4.6a (Polish) ─→ 4.6b (Integration + Dockerfile)
-                          ↓
-                       (4.4a depends on 4.1a's apiClient + 4.1c's Tabs/StatusPill;
-                        4.4b depends on 4.4a's editor shell)
+4.1a (Foundation: schema/api + apiClient + FieldStateFor) ─┐
+4.1b (Vite middleware skeleton) ───────────────────────────┼─→ 4.2 (Dashboard)
+4.1c (DS additions: 5 components, Epic-3-3.2 precedent) ───┘     │
+                                                                  ↓
+                                                              4.3 (Resorts table)
+                                                                  │
+                                                                  ↓
+                                                              4.4a (Server read)
+                                                                  │
+                                                                  ↓
+                                                              4.4b (Editor view, read-only)
+                                                                  │
+                                                                  ↓
+                                                              4.4c (Server write + atomic-write)
+                                                                  │
+                                                                  ↓
+                                                              4.4d (Edit interactive)
+                                                                  │
+                                                                  ↓
+                                                              4.5a (Publish handler)
+                                                                  │
+                                                                  ↓
+                                                              4.5b (Publish UI + Toast)
+                                                                  │
+                                                                  ↓
+                                                              4.6  (Polish + integration tests, closing PR)
 ```
 
-Rollback policy mirrors Epic 3 spec §10.1: `git revert` on the integration branch, no force-push, downstream worktrees rebase.
+**Cross-tier notes** (per A2 P1 fold):
 
-### 7.5 PR 4.1a — Foundation: schema surface + apiClient + contract snapshot
+- 4.4a depends on 4.1a's `apiClient` + the new `FieldStateFor<T>` projection helpers; 4.4b depends on 4.4a + 4.1c's `Tabs` / `StatusPill` primitives.
+- 4.4a's row-click navigation uses the route schema introduced in 4.3, but the route shape is shared, so the maintainer may opt to land 4.4a in parallel with 4.3 if the route schema is finalized first. The graph as drawn keeps the linear dependency for clarity.
 
-**Goal.** No app code yet. Ship the typed wire contract (Zod schemas), the `apiClient` generator, and the contract-snapshot test that pins the surface.
+Rollback is `git revert <merge-sha>` directly on `main`, per parent spec §10.4 ("Phase 1 ships feature branches directly to `main`; no integration branch") and the PreToolUse hook (`scripts/hooks/deny-dangerous-git.sh`) that blocks force-push. Worktrees with downstream work (e.g., a stacked PR whose base just got reverted) rebase against post-revert `main`. DCO sign-off applies to revert commits per [ADR-0009](../../adr/0009-dco-exemption-for-dependabot.md).
+
+### 7.5 PR 4.1a — Foundation: schema/api + apiClient + FieldStateFor + contract snapshot
+
+**Goal.** No app code yet. Ship the typed wire contract (Zod schemas), the `apiClient` generator, the contract-snapshot test that pins the surface, AND the net-new admin-side projection types `FieldStateFor<T>` + `toFieldValue<T>` that the editor will consume in 4.4a/b/c/d.
 
 **Branch:** `epic-4/pr-4.1a-foundation`. **README:** skip (no user-visible surface).
 
-**Files:**
+**Files (tests first per TDD; implementation listed after):**
 
-- Create `packages/schema/api/index.ts` + 6 schema files (listResorts, resortDetail, resortUpsert, publish, listPublishes, health) + `errorEnvelope.ts`.
-- Create `packages/schema/api/contract.test.ts` (snapshot test; updates `__snapshots__/contract.snap`).
-- Create `packages/schema/src/workspaceFile.ts` (`WorkspaceFile` Zod schema with `.passthrough()`).
+- Create / extend `packages/schema/src/resortView.test.ts` — cases for `FieldStateFor<T>` (4-state discriminated union: `Live` | `Stale` | `Failed` | `Manual`) + `toFieldValue<T>` (admin → public mapper).
 - Create `packages/schema/src/workspaceFile.test.ts`.
-- Modify `packages/schema/src/index.ts` to barrel-export `WorkspaceFile` and `WorkspaceFileSchema`.
-- Modify `eslint.config.js` to:
+- Create `packages/schema/api/contract.test.ts` (snapshot test; pins every export from `packages/schema/api/index.ts`; updates `__snapshots__/contract.snap`).
+- Create `apps/admin/src/lib/apiClient.test.ts` — MSW-backed unit tests for each endpoint's happy + error paths.
+- Modify `packages/schema/src/resortView.ts` — implement `FieldStateFor<T>` + `toFieldValue<T>` per the test cases; remove the existing "DEFERRED to Epic 4 PR 4.4" comment block (`resortView.ts` lines 2-5).
+- Create `packages/schema/src/workspaceFile.ts` (`WorkspaceFile` Zod schema with `.passthrough()` per §10.2).
+- Create `packages/schema/api/index.ts` + 6 schema files (`listResorts.ts`, `resortDetail.ts`, `resortUpsert.ts`, `publish.ts`, `listPublishes.ts`, `health.ts`) + `errorEnvelope.ts` + `rateLimitClass.ts` (per §10.5 + C3 P1 fold — exports `RATE_LIMIT_CLASS = { listResorts: 'read', resortDetail: 'read', resortUpsert: 'write', publish: 'write', listPublishes: 'read', health: 'read' } as const`; schemas reference it via `.describe()` annotations so Phase 2 can wire enforcement without re-shaping the schemas).
+- Modify `packages/schema/src/index.ts` to barrel-export `WorkspaceFile` and the new `resortView` additions.
+- Modify `eslint.config.js`:
   - Allow `apps/admin/src/**` to import `@snowboard-trip-advisor/schema/api`.
   - Ban `apps/admin/src/**` from importing `@snowboard-trip-advisor/schema/node` (Node-only; mirrors public app's restriction).
   - Ban `apps/admin/src/**` from raw `fetch(` references (must use `apiClient`).
-- Create `apps/admin/src/lib/apiClient.ts` — typed client. Each endpoint is one async function: `listResorts(q): Promise<ListResortsResponse>`, etc. Generated from the schemas: each function calls `fetch('/api/...')`, parses response through the response schema, and returns the typed result.
-- Create `apps/admin/src/lib/apiClient.test.ts` — unit tests with MSW for each endpoint's happy + error paths.
-- Modify root `package.json`:
-  - Add `test:contract-snap` npm script that runs only the contract snapshot test.
-  - Wire `test:contract-snap` into `npm run qa`.
+- Create `apps/admin/src/lib/apiClient.ts` — typed client. Each endpoint is one async function (`listResorts(q): Promise<ListResortsResponse>`, etc.). Per B4 P1 fold: `publish()` takes **no slug arg** in Phase 1 — the route's `:slug` is ignored because Phase 1 publish is all-or-nothing. Document this convention in the apiClient module comment so future Phase 2 maintenance does not accidentally promote the slug to a meaningful argument.
 
-**Subagent review trigger:** YES — `packages/schema/**`, `eslint.config.js`, `package.json` (qa wiring).
+**Subagent review trigger:** YES — `packages/schema/**`, `eslint.config.js`.
 
-**Acceptance gate:** `npm run qa` green; contract snapshot present; apiClient unit tests pass; ESLint rules block illegal imports.
+**Acceptance gate:** `npm run qa` green; contract snapshot present (the snapshot test lives at `packages/schema/api/contract.test.ts` and is picked up by `npm run coverage` automatically — no separate `test:contract-snap` script per F1 P1 fold); apiClient unit tests pass; ESLint rules block illegal imports; `FieldStateFor<T>` + `toFieldValue<T>` exported and tested.
 
 ### 7.6 PR 4.1b — Vite middleware skeleton + admin Shell composition
 
@@ -489,7 +547,9 @@ Rollback policy mirrors Epic 3 spec §10.1: `git revert` on the integration bran
 
 ### 7.7 PR 4.1c — Design-system additions: Sidebar, StatusPill, Tabs, Popover, DropdownMenu
 
-**Goal.** Five new design-system components ship with full TDD + axe + variant-matrix coverage. Toast is **deferred** to PR 4.5 (first real consumer is publish success/failure).
+**Goal.** Five new design-system components ship with full TDD + axe + variant-matrix coverage. Toast is **deferred** to PR 4.5b (first real consumer is publish success/failure).
+
+**PR sizing acknowledgment.** This PR ships 5 design-system components (~12 files including tests, barrel re-export, and Shell wiring), exceeding the standard ≤8-files / ≤300-lines target from AGENTS.md. **Epic 3 PR 3.2 precedent applies:** that PR shipped 9 components / 66 files in one PR with explicit "design-system fan-out is one concern" justification — same pattern here. Splitting these 5 components into 5 separate PRs would multiply CI cost and review fragmentation without improving reviewability (each component is small and independent within the PR; reviewers can scan component-by-component within the diff). Keeping 4.1c bundled is the maintainer-authorized path.
 
 **Branch:** `epic-4/pr-4.1c-design-system`. **Depends on:** 4.1b merged. **README:** evaluation only.
 
@@ -545,121 +605,152 @@ Rollback policy mirrors Epic 3 spec §10.1: `git revert` on the integration bran
 
 **Acceptance gate:** Resorts table renders; sort + filter work; clicking a row updates URL state (transition to editor route lands in 4.4a).
 
-### 7.10 PR 4.4a — Resort editor read path
+### 7.10 PR 4.4a — Server read path (resortDetail + workspace read helpers)
 
-**Goal.** Editor route renders durable + live panels read-only; ModeToggle visible (disabled — adapter actions are Epic 5); StatusPill per field.
+**Goal.** Wire the read-side API: `GET /api/resorts/:slug` returns the workspace state (or fallback to published projection) with field states. No UI yet — the editor view lands in 4.4b.
 
-**Branch:** `epic-4/pr-4.4a-editor-read`. **Depends on:** 4.3 merged. **README:** skip.
+**Branch:** `epic-4/pr-4.4a-server-read`. **Depends on:** 4.3 merged. **README:** skip.
 
-**Files:**
+**Files (tests first):**
 
-- Implement `apps/admin/server/resortDetail.ts` — replace 501 stub. Read workspace file or fall back to published; build `field_states` via `ResortView` projection; respond.
-- Create `apps/admin/server/__tests__/resortDetail.test.ts`.
-- Implement `apps/admin/server/workspace.ts` — read helpers for `data/admin-workspace/<slug>.json`. Atomic-write helper deferred to 4.4b.
-- Create `apps/admin/server/__tests__/workspace.test.ts` (read paths only).
-- Create `apps/admin/src/state/useResortDetail.ts` + `.test.ts`.
-- Create `apps/admin/src/views/ResortEditor.tsx` (composition shell) + `.test.tsx`.
-- Create `apps/admin/src/views/ResortEditor/DurablePanel.tsx` + `.test.tsx`.
-- Create `apps/admin/src/views/ResortEditor/LivePanel.tsx` + `.test.tsx`.
-- Create `apps/admin/src/views/ResortEditor/FieldRow.tsx` + `.test.tsx` — render-only mode (StatusPill + value display + SourceBadge); no edit affordance yet.
-- Create `apps/admin/src/views/ResortEditor/ModeToggle.tsx` + `.test.tsx` — render-only AUTO/MANUAL toggle visible but disabled (no PUT yet, so toggling has no effect; lands in 4.4b).
-- Modify `apps/admin/src/lib/urlState.ts` — extend with `resort/:slug` route.
+- Create `apps/admin/server/__tests__/resortDetail.test.ts` (happy path + draft-slug 200 per §4.2.1 + missing-slug 404).
+- Create `apps/admin/server/__tests__/workspace.test.ts` (read paths only — atomic-write tests land in 4.4c).
+- Create `apps/admin/src/state/useResortDetail.test.ts`.
+- Implement `apps/admin/server/resortDetail.ts` — replace 4.1b's 501 stub. Read workspace file or fall back to published; build `field_states` via the new `FieldStateFor<T>` projection helpers from 4.1a; respond per §4.2 / §4.2.1.
+- Implement `apps/admin/server/workspace.ts` — read helpers for `data/admin-workspace/<slug>.json`. Atomic-write helper deferred to 4.4c.
+- Create `apps/admin/src/state/useResortDetail.ts` — wraps `apiClient.getResort(slug)`, Suspense-friendly via React 19 `use()` (same pattern + rejected-promise pinning as Epic 3's `useDataset` per [ADR-0010](../../adr/0010-usedataset-rejected-promise-pinning.md)).
+
+**Subagent review trigger:** YES — `apps/admin/server/**` is the Phase 2 portability surface; review verifies wire-contract conformance and that draft slugs are handled per §4.2.1. Per D1 P1 fold, the `apps/admin/server/**` justification is sufficient on its own; no need to also cite indirect schema-touch.
+
+**Acceptance gate:** `npm run qa` green; server-handler unit tests + state-hook tests pass; both seed-dataset slugs respond correctly; draft-slug 200 verified.
+
+### 7.11 PR 4.4b — Editor view (read-only)
+
+**Goal.** Editor route renders durable + live panels read-only; ModeToggle visible but disabled (no PUT yet — adapter actions are Epic 5; interactive ModeToggle lands in 4.4d); StatusPill per field.
+
+**Branch:** `epic-4/pr-4.4b-editor-view`. **Depends on:** 4.4a merged. **README:** skip.
+
+**Files (tests first):**
+
+- Create `apps/admin/src/views/ResortEditor.test.tsx`.
+- Create `apps/admin/src/views/ResortEditor/DurablePanel.test.tsx`.
+- Create `apps/admin/src/views/ResortEditor/LivePanel.test.tsx`.
+- Create `apps/admin/src/views/ResortEditor/FieldRow.test.tsx` (render-only mode).
+- Create `apps/admin/src/views/ResortEditor/ModeToggle.test.tsx` (disabled visible state).
 - Create `tests/integration/apps/admin/resort-editor-read.test.tsx` — verifies editor opens, both panels render with sample data, StatusPill states correct.
+- Create `apps/admin/src/views/ResortEditor.tsx` (composition shell).
+- Create `apps/admin/src/views/ResortEditor/DurablePanel.tsx`.
+- Create `apps/admin/src/views/ResortEditor/LivePanel.tsx`.
+- Create `apps/admin/src/views/ResortEditor/FieldRow.tsx` — render-only mode (StatusPill + value display + SourceBadge); no edit affordance yet.
+- Create `apps/admin/src/views/ResortEditor/ModeToggle.tsx` — render-only AUTO/MANUAL toggle visible but disabled (interactive in 4.4d).
+- Modify `apps/admin/src/lib/urlState.ts` — extend with `resort/:slug` route.
 
-**Subagent review trigger:** YES — `packages/schema/**` is touched indirectly (workspace.ts reads workspace files via the schema; the schema itself was added in 4.1a but the read path is exercised here).
+**Subagent review trigger:** NO (UI components only; design-system primitives already shipped under 4.1c review).
 
 **Acceptance gate:** Editor renders for both seed-dataset slugs; durable + live panels show all fields with correct StatusPill states; integration test passes.
 
-### 7.11 PR 4.4b — Resort editor write path
+### 7.12 PR 4.4c — Server write path + workspace atomic-write
 
-**Goal.** ModeToggle becomes interactive; MANUAL mode exposes edit input; PUT writes to workspace; integration test round-trips.
+**Goal.** Wire the write-side API: `PUT /api/resorts/:slug` validates and atomically writes a workspace file. Adds the atomic-write helper to `workspace.ts`.
 
-**Branch:** `epic-4/pr-4.4b-editor-write`. **Depends on:** 4.4a merged. **README:** skip.
+**Branch:** `epic-4/pr-4.4c-server-write`. **Depends on:** 4.4b merged. **README:** skip.
 
-**Files:**
+**Files (tests first):**
 
-- Implement `apps/admin/server/resortUpsert.ts` — replace 501 stub. Read existing workspace; merge incoming partial; per-resort schema validation; atomic-write workspace file.
-- Create `apps/admin/server/__tests__/resortUpsert.test.ts` (validation failures + happy path + idempotency).
-- Modify `apps/admin/server/workspace.ts` — add atomic-write helper (temp file + rename per §10.3); add atomic-write tests in `__tests__/workspace.test.ts`.
-- Create `apps/admin/src/state/useWorkspaceState.ts` + `.test.ts` — local UI state for in-flight edits with debounced PUT (default debounce: 500ms).
-- Create `apps/admin/src/state/useModeToggle.ts` + `.test.ts` — per-field AUTO/MANUAL state.
+- Create `apps/admin/server/__tests__/resortUpsert.test.ts` — validation failures + happy path + idempotency + assertion that `modified_at` is set to `new Date().toISOString()` before the atomic write (per G3 P1 fold).
+- Extend `apps/admin/server/__tests__/workspace.test.ts` — add atomic-write helper tests asserting all four steps from §10.3 (write tmp → fsync(fd) → rename → fsync(parent_dir)) and the macOS APFS `EBADF` tolerance.
+- Create `apps/admin/src/state/useWorkspaceState.test.ts`.
+- Implement `apps/admin/server/resortUpsert.ts` — replace 4.1b's 501 stub. Read existing workspace; merge incoming partial; per-resort schema validation; set `modified_at` to current ISO datetime; atomic-write workspace file.
+- Modify `apps/admin/server/workspace.ts` — add atomic-write helper matching `packages/schema/src/publishDataset.ts:162-211` (`atomicWriteText`) byte-for-byte (§10.3).
+- Create `apps/admin/src/state/useWorkspaceState.ts` — local UI state for in-flight edits with debounced PUT (default debounce: 500ms).
+
+**Subagent review trigger:** YES — `apps/admin/server/**` (validation contract + atomic-write semantics; review verifies the atomic-write helper matches `publishDataset.ts:162-211` byte-for-byte and that PUT validation agrees in spirit with the full publish-time `validatePublishedDataset` gate).
+
+**Acceptance gate:** `npm run qa` green; PUT round-trip verified in unit tests; atomic-write semantics verified (tmp file cleanup, parent-dir fsync EBADF tolerance on macOS APFS).
+
+### 7.13 PR 4.4d — Editor edit interaction
+
+**Goal.** ModeToggle becomes interactive; MANUAL mode exposes edit input; integration test round-trips MANUAL edit → PUT → workspace state.
+
+**Branch:** `epic-4/pr-4.4d-editor-write`. **Depends on:** 4.4c merged. **README:** skip.
+
+**Files (tests first):**
+
+- Create `apps/admin/src/state/useModeToggle.test.ts`.
+- Create `tests/integration/apps/admin/resort-editor-write.test.tsx` — verifies ModeToggle flips, MANUAL edit triggers PUT (asserted via MSW request log), workspace state mirrors response, page reload preserves the workspace state.
+- Create `apps/admin/src/state/useModeToggle.ts` — per-field AUTO/MANUAL state.
 - Modify `apps/admin/src/views/ResortEditor/FieldRow.tsx` — add edit input affordance in MANUAL mode; debounced auto-save via `useWorkspaceState`.
 - Modify `apps/admin/src/views/ResortEditor/ModeToggle.tsx` — interactive (AUTO ↔ MANUAL).
-- Create `tests/integration/apps/admin/resort-editor-write.test.tsx` — verifies ModeToggle flips, MANUAL edit triggers PUT (asserted via MSW request log), workspace state mirrors response, page reload preserves the workspace state.
 - Modify `apps/admin/src/test-setup.ts` if needed for the workspace-file test fixture loading.
 
-**Subagent review trigger:** YES — `packages/schema/**` (workspace file write semantics), `apps/admin/server/**` (publish pipeline portability surface — validation must agree with publish's full validation).
+**Subagent review trigger:** NO (the schema + write surface already shipped under review in 4.1a + 4.4c).
 
 **Acceptance gate:** End-to-end MANUAL edit → PUT → workspace file written. Integration test passes; per-field round-trip verified.
 
-### 7.12 PR 4.5 — Publish workflow + Toast
+### 7.14 PR 4.5a — Publish handler + listPublishes handler
 
-**Goal.** Publish dialog confirms; POST runs `publishDataset()`; success / failure surfaces via Toast; PublishHistory list shows past versions.
+**Goal.** Server-side publish + history endpoints. POST publish runs `publishDataset()`; GET publishes lists `data/published/history/`.
 
-**Branch:** `epic-4/pr-4.5-publish`. **Depends on:** 4.4b merged. **README:** evaluation — admin app is now functional end-to-end; consider mentioning in README.
+**Branch:** `epic-4/pr-4.5a-publish-handler`. **Depends on:** 4.4d merged. **README:** skip.
 
-**Files:**
+**Files (tests first):**
 
-- Implement `apps/admin/server/publish.ts` — replace 501 stub. Read all workspace files; compose `PublishedDataset`; call `publishDataset()`; respond.
-- Create `apps/admin/server/__tests__/publish.test.ts` — happy path + `validatePublishedDataset` failure (assert error envelope + status 400).
-- Implement `apps/admin/server/listPublishes.ts` — replace 501 stub.
-- Create `apps/admin/server/__tests__/listPublishes.test.ts`.
-- Create `apps/admin/src/state/usePublish.ts` + `.test.ts`.
-- Create `apps/admin/src/state/usePublishes.ts` + `.test.ts`.
-- Create `apps/admin/src/views/PublishDialog.tsx` + `.test.tsx`.
-- Create `apps/admin/src/views/PublishHistory.tsx` + `.test.tsx`.
-- Create `packages/design-system/src/components/Toast.tsx` + `.test.tsx` — first real consumer is here. Variant matrix: `info`, `success`, `error`. Auto-dismiss timing prop.
-- Modify `packages/design-system/src/index.ts` — re-export Toast.
-- Wire Toast into `apps/admin/src/views/Shell.tsx` (top-level `<ToastProvider>`).
-- Modify HeaderBar to surface a "Publish" button that opens PublishDialog.
+- Create `apps/admin/server/__tests__/publish.test.ts` — happy path + `validatePublishedDataset` failure (assert error envelope + status 400 with code `publish-validation-failed` per §4.4).
+- Create `apps/admin/server/__tests__/listPublishes.test.ts` — verifies history-dir entries returned newest-first.
+- Create `apps/admin/src/state/usePublish.test.ts`.
+- Create `apps/admin/src/state/usePublishes.test.ts`.
+- Implement `apps/admin/server/publish.ts` — replace 4.1b's 501 stub. Read all workspace files; compose `PublishedDataset`; call `publishDataset()`; respond per §4.4 (drafts must be complete before they can publish).
+- Implement `apps/admin/server/listPublishes.ts` — replace 4.1b's 501 stub. Read `data/published/history/`; respond per §4.5.
+- Create `apps/admin/src/state/usePublish.ts`.
+- Create `apps/admin/src/state/usePublishes.ts`.
+
+**Subagent review trigger:** YES — `apps/admin/server/publish.ts` is the publish gate; review verifies it does NOT bypass `validatePublishedDataset` and DOES correctly compose the `PublishedDataset` envelope. Also touches `packages/schema/**` (the `publishDataset` consumer surface).
+
+**Acceptance gate:** `npm run qa` green; publish handler validates + writes through `publishDataset()`; listPublishes returns history-dir entries newest-first.
+
+### 7.15 PR 4.5b — Publish UI + Toast
+
+**Goal.** PublishDialog + PublishHistory views; first real Toast consumer (publish success / failure surfaces via Toast). PublishDialog reads `useHealth()` to populate the pre-publish blocking-state surface per §4.3.1.
+
+**Branch:** `epic-4/pr-4.5b-publish-ui`. **Depends on:** 4.5a merged. **README:** evaluation — admin app is now functional end-to-end; consider mentioning in README.
+
+**Files (tests first):**
+
+- Create `packages/design-system/src/components/Toast.test.tsx` (variants: `info`, `success`, `error`; auto-dismiss timing prop).
+- Create `apps/admin/src/views/PublishDialog.test.tsx` — verifies confirm button is `disabled` when `health.resorts_with_failed_fields > 0` per §4.3.1; tooltip text is correct.
+- Create `apps/admin/src/views/PublishHistory.test.tsx`.
 - Create `tests/integration/apps/admin/publish-flow.test.tsx`.
+- Create `packages/design-system/src/components/Toast.tsx` — first real consumer is here. Variant matrix: `info`, `success`, `error`. Auto-dismiss timing prop.
+- Modify `packages/design-system/src/index.ts` — re-export Toast.
+- Create `apps/admin/src/views/PublishDialog.tsx` — reads `useHealth()` to render the pre-publish blocking-state surface (§4.3.1).
+- Create `apps/admin/src/views/PublishHistory.tsx`.
+- Wire Toast into `apps/admin/src/views/Shell.tsx` (top-level `<ToastProvider>`); modify HeaderBar to surface a "Publish" button that opens PublishDialog.
 
-**Subagent review trigger:** YES — `apps/admin/server/publish.ts` is the publish gate; review verifies it does NOT bypass `validatePublishedDataset` and DOES correctly compose the `PublishedDataset` envelope.
+**Subagent review trigger:** YES — `packages/design-system/**` (Toast component addition).
 
-**Acceptance gate:** End-to-end publish flow works — open dialog, confirm, see Toast, archive directory grows, PublishHistory updates.
+**Acceptance gate:** End-to-end publish flow works — open dialog, confirm, see Toast, history directory (`data/published/history/`) grows, PublishHistory updates; pre-publish blocking-state UX exercised in integration test.
 
-### 7.13 PR 4.6a — Keyboard shortcuts + responsive read-only-below-md
+### 7.16 PR 4.6 — Polish (keyboard shortcuts + responsive read-only-below-md) + integration tests
 
-**Goal.** Per parent §3.10 (keyboard shortcuts) and §3.2 (responsive policy).
+**Goal.** Closing PR for Epic 4. Per parent §3.10 (keyboard shortcuts) and §3.2 (responsive policy); plus the final integration suite covering the full admin workflow. The Dockerfile prod-build guard that originally lived here is **deferred to Epic 6** per §10.7 / C4.
 
-**Branch:** `epic-4/pr-4.6a-polish`. **Depends on:** 4.5 merged. **README:** skip.
+**Branch:** `epic-4/pr-4.6-polish-and-integration`. **Depends on:** 4.5b merged. **README:** consider mentioning admin app's `npm run dev:admin` entrypoint.
 
-**Files:**
+**PR sizing acknowledgment.** This PR bundles polish + integration tests as one closing-quality concern: "ship Epic 4's closing quality gate." Splitting these into two separate PRs would land integration tests against a partial-polish state and then polish into an already-passing-tests state — fragmenting the closing review without reducing diff complexity. Epic 3 PR 3.2 precedent (multi-component "one concern" justification) applies analogously: the closing-gate is one concern.
 
-- Create `apps/admin/src/lib/shortcuts.ts` + `.test.ts` — global keyboard shortcut handler (`/` focuses search, `g r` → resorts, `g i` → integrations placeholder, `mod+enter` saves in editor, `esc` closes modals).
-- Create `apps/admin/src/views/Shell.responsive.css.ts` (or modify existing CSS) — at viewport `< md` (900px), edit controls receive `tabindex={-1}` and inputs/selects have `disabled aria-readonly`. Implementation per parent §3.2: edit controls must be **removed from tab order**, not merely visually hidden.
-- Modify `apps/admin/src/views/ResortEditor/FieldRow.tsx` — gate the edit input rendering on viewport via `useMediaQuery`; below md, render a read-only span instead.
-- Tests: assert keyboard shortcuts via `vitest` userEvent; assert tabindex via DOM assertions.
+**Files (tests first):**
 
-**Subagent review trigger:** NO.
-
-**Acceptance gate:** Keyboard shortcuts test green; responsive test asserts tab-order at simulated `md`-1 viewport.
-
-### 7.14 PR 4.6b — Integration tests + Dockerfile prod-build guard
-
-**Goal.** Final integration suite; Dockerfile guard CI step.
-
-**Branch:** `epic-4/pr-4.6b-integration`. **Depends on:** 4.6a merged. **README:** consider mentioning admin app's `npm run dev:admin` entrypoint.
-
-**Files:**
-
-- Create / extend `tests/integration/apps/admin/dashboard.test.tsx`, `resorts-table.test.tsx` (these may have landed in earlier PRs; this PR completes coverage).
+- Create `apps/admin/src/lib/shortcuts.test.ts` — assert `/` focuses search, `g r` → resorts, `g i` → integrations placeholder, `mod+enter` saves in editor, `esc` closes modals (via `vitest` userEvent).
+- Create / extend `tests/integration/apps/admin/dashboard.test.tsx` (may have landed earlier; this PR completes coverage).
+- Create / extend `tests/integration/apps/admin/resorts-table.test.tsx`.
 - Create `tests/integration/apps/admin/full-flow.test.tsx` — composite: open admin → navigate to Resorts → click row → MANUAL edit → save → publish → see in history.
-- Create `scripts/check-admin-not-in-prod.ts` (+ `.cli.ts` + `.test.ts`) — CI helper that scans the prod-image build output for any `apps/admin/` artifact. Fails the workflow if found.
-- Modify `.github/workflows/quality-gate.yml` — add a `dockerfile-guard` job that builds the prod image stages and runs `check-admin-not-in-prod.ts`.
-- Modify `Dockerfile` if needed — verify the multi-stage build's COPY paths exclude `apps/admin/dist/`.
+- Create `apps/admin/src/lib/shortcuts.ts` — global keyboard shortcut handler implementing the test cases.
+- Create / modify `apps/admin/src/views/Shell.responsive.css.ts` — at viewport `< md` (900px), edit controls receive `tabindex={-1}` and inputs/selects have `disabled aria-readonly`. Implementation per parent §3.2: edit controls must be **removed from tab order**, not merely visually hidden.
+- Modify `apps/admin/src/views/ResortEditor/FieldRow.tsx` — gate the edit input rendering on viewport via `useMediaQuery`; below md, render a read-only span instead.
 
-**Subagent review trigger:** YES — `Dockerfile` and `.github/workflows/quality-gate.yml`.
+**Subagent review trigger:** NO (no CODEOWNERS-protected paths; the original Dockerfile guard is deferred to Epic 6 per §10.7).
 
-**Acceptance gate:** All integration tests green; the new `dockerfile-guard` CI job passes; `npm run qa` green.
-
-### 7.15 Cross-cutting (every PR)
-
-- TDD enforced via deliverable ordering — tests first, implementation after.
-- README evaluation — admin app is internal; PRs 4.5 + 4.6b MAY warrant a README mention; lower-numbered PRs skip with a one-line PR-description note.
-- Subagent Review Discipline — per the §7.2 trigger matrix.
-- DCO sign-off on every commit (auto via `prepare-commit-msg` once stack-2 of agent-discipline migration lands).
-- Pre-commit `npm run qa` runs before each commit.
+**Acceptance gate:** All integration tests green; keyboard shortcuts test green; responsive test asserts tab-order at simulated `md`-1 viewport; `npm run qa` green.
 
 ---
 
@@ -690,6 +781,7 @@ If new architectural decisions emerge during implementation (e.g., a sanitizer-e
 - **i18n translation framework** — Phase 2; Phase 1 admin is `en` only.
 - **`prefers-reduced-motion`** beyond what design-system primitives already enforce — Epic 6 polish.
 - **Visual regression testing** for admin (Playwright + Storybook) — Epic 6 (parallels Epic 3's deferral per parent §6.5).
+- **Publish-time diff preview** (per-field diff between current workspace state and last-published state, shown inline in `<PublishDialog>`) — Phase 2 concern; per parent §3.7's eventual UX, but not in Phase 1's `<PublishDialog>`. Phase 1's PublishDialog shows aggregate counts only (per §4.3.1's pre-publish blocking-state surface); per-field diff preview is a Phase 2 admin enhancement.
 
 ---
 
@@ -704,11 +796,17 @@ Parent §3.11 + §8.4 lock this decision: **one Node process** serves the SPA AN
 - The rate-limit bucket (parent §7.4) lives in-memory in the Vite dev-server process; there is no cross-process contention because the Phase 1 CLI does NOT fetch adapters (parent §7.9).
 - Role checks (parent §8.4.1's "Role (P2)" column) are no-ops in Phase 1; the role column is populated in Zod schemas so Phase 2 can flip them on without schema churn.
 - The middleware is **only** registered on `apps/admin`'s Vite dev server. `apps/public`'s dev server has no admin-api middleware.
-- The middleware is **not bundled** into any container image; the Dockerfile guard (§10.7 + PR 4.6b) verifies this.
+- The middleware is **not bundled** into any container image; mechanical Dockerfile-build verification of this is deferred to Epic 6 per §10.7.
 
 **Phase 2 lift path:**
 
 The `/api/*` wire contract is the stability line. Phase 2 replaces the Vite middleware with a Hono service over Postgres/Drizzle (parent §8.2). The SPA's `apiClient.ts` does NOT change — it imports the same Zod schemas from `packages/schema/api/*` and still calls `fetch('/api/...')`. Only the server implementation differs.
+
+**Alternatives considered (and rejected)** — per C1 P1 fold:
+
+- **(a) Separate Express / Hono process for `/api/*` in Phase 1.** Rejected — adds inter-process communication overhead and a second deployment surface (a second Node process to start, monitor, restart) without buying anything for Phase 1's loopback / single-analyst topology. Phase 2 will introduce a separate service anyway, but only when a real backing store + auth justify the additional surface area.
+- **(b) Vite SSR-only with a separate API endpoint.** Rejected — admin is a dev-only SPA in Phase 1; SSR adds rendering complexity that the public app already chose to avoid (parent spec §6.5). The admin's Phase 2 path goes through Hono, not Vite SSR.
+- **(c) Worker thread for the `/api/*` handlers.** Rejected — sharing the rate-limit bucket (and any future in-memory state) across a worker boundary is awkward without `SharedArrayBuffer` and requires explicit serialization; the same-process middleware is simpler and reads the same files the SPA's tests can fixture, which keeps the Phase-1 admin-app testable end-to-end without a worker harness.
 
 ### 10.2 Workspace file format and forward-compat
 
@@ -726,21 +824,35 @@ const WorkspaceFile = z.object({
 
 The `.passthrough()` permits unknown top-level fields. The post-Epic-4 analyst-notes follow-up adds a `notes` field (a `Record<string, AnalystNote>` keyed by metric path); existing workspace files written without `notes` continue to parse.
 
+**`notes` is pinned as a top-level workspace key** (per B2 P1 fold) to keep it collision-free with `Resort.field_sources` and any future per-field provenance addition. The post-Epic-4 follow-up's `WorkspaceFile` shape is therefore:
+
+```ts
+{
+  schema_version: 1,
+  slug: ResortSlug,
+  resort: Resort,
+  live_signal: ResortLiveSignal | null,
+  modified_at: ISODateTimeString,
+  notes?: { [metricPath: string]: AnalystNote },  // added by post-Epic-4 follow-up
+}
+```
+
+`notes` is keyed by `metricPath` (the same path used in `Resort.field_sources` keys), values are `AnalystNote` records (Markdown-sanitized text + author + timestamp). Pinning `notes` at the top level — rather than nesting under `resort.notes` or `field_sources[].notes` — keeps the analyst-notes follow-up purely additive: no Resort-schema changes required, and no risk of colliding with provenance keys.
+
 **Why this is admin-internal and NOT under `published.schema_version`:** workspace files are never shipped to `apps/public`. They live under `data/admin-workspace/`, never enter `data/published/`, and the publish pipeline reads them, validates against the published-doc schema, and writes a fresh `current.v1.json`. The workspace `schema_version` is a separate evolution track from the published one. A workspace `schema_version` bump would be needed if the workspace SHAPE changes incompatibly (e.g., merging `resort` and `live_signal` into a single `RecordEntry`); additive fields like `notes` are backwards-compatible by design.
 
 ### 10.3 Atomic-write semantics
 
-Workspace files (`data/admin-workspace/<slug>.json`) and the published file (`data/published/current.v1.json`) both use the **temp file + rename** pattern:
+Both workspace files (`data/admin-workspace/<slug>.json`) and the published file (`data/published/current.v1.json`) use the **4-step atomic-write pattern** from `packages/schema/src/publishDataset.ts:162-211` (`atomicWriteText`):
 
-```
-1. Write to <target>.<random-suffix>.tmp
-2. fsync the temp file
-3. rename(<target>.<random-suffix>.tmp, <target>)  // POSIX-atomic
-```
+1. Write contents to `<target>.<random-suffix>.tmp`.
+2. `fsync(fd)` on the temp file's file-descriptor — flushes the file's data + metadata to disk.
+3. `rename(<target>.<random-suffix>.tmp, <target>)` — POSIX-atomic at the inode level.
+4. `fsync(parent_dir)` — flushes the **directory entry** (the rename's effect is otherwise NOT crash-consistent on POSIX without this). On macOS APFS / HFS+, `fs.open(dir, 'r').sync()` returns `EBADF`; the existing `publishDataset.ts` handles this by ignoring `EBADF` and re-throwing all other errors (APFS guarantees the rename is durable without an explicit dir-fsync).
 
-`publishDataset()` from `@snowboard-trip-advisor/schema/node` already implements this for the published file (Epic 2). The admin workspace write helper (`apps/admin/server/workspace.ts`, PR 4.4b) implements the same pattern.
+`publishDataset()` already implements this pattern. The admin workspace write helper (`apps/admin/server/workspace.ts`, PR 4.4c — see §7's PR breakdown) MUST use the same pattern; subagent review on 4.4c verifies this byte-for-byte against `atomicWriteText`'s structure.
 
-**Lock semantics:** Phase 1 is single-process (one Vite dev server, one analyst). No cross-process locks needed. If a future Phase 1 use case introduces concurrent writes (multiple admin instances on the same workspace dir — unlikely given loopback), the existing `publishDataset` lock-timeout approach (`packages/schema/src/publishDataset.lockTimeout.test.ts`) is the reference. Phase 2 ships proper distributed locking when admin moves to a real service.
+**Lock semantics:** Phase 1 is single-process. `strictPort: true` on the dev server (§3.1, §2.5) blocks two-instance startup, so concurrent workspace writes are not a concern. If a future Phase 1 use case introduces concurrent writes, see `packages/schema/src/publishDataset.lockTimeout.test.ts` for the lock-timeout pattern reference. Phase 2 ships proper distributed locking when admin moves to a real service.
 
 ### 10.4 Publish pipeline reuse
 
@@ -764,13 +876,23 @@ Admin is never built into a production container image. The Vite dev server is t
 
 When Phase 2 ships the Hono service, the admin's `index.html` will be served by Hono with a Phase-2-appropriate CSP. Until then, no CSP bookkeeping in Epic 4. This is a **deliberate divergence** from Epic 3's CSP discipline (Epic 3's public app ships dev + prod CSP per spec §6.4) — admin's loopback-only Phase 1 posture justifies the divergence.
 
-### 10.7 Dockerfile prod-build guard
+### 10.7 Dockerfile prod-build guard — DEFERRED to Epic 6
 
-Per parent §3.1: "`apps/admin` is **never** built into the production container image." The Dockerfile guard (PR 4.6b) verifies this mechanically:
+Per parent §3.1: "`apps/admin` is **never** built into the production container image." Mechanical enforcement of this invariant is **deferred to Epic 6**.
 
-- A new CI workflow step (`dockerfile-guard`) runs as part of `quality-gate.yml`. The job builds the prod image (or its multi-stage equivalent locally with `docker buildx build --target <prod-stage>`) and asserts the resulting image / staged filesystem does NOT contain any `apps/admin/dist/*` files.
-- The check is implemented as `scripts/check-admin-not-in-prod.{ts,cli.ts,test.ts}` mirroring the Epic 3 `check-*` pattern.
-- If the check fails, the PR is blocked. Required-status adoption is deferred to Epic 6's branch-protection rebuild (same cadence as Epic 3's `analyze` check).
+**Why deferred:** the existing `Dockerfile` at the repo root is explicitly marked "DEFERRED — DO NOT BUILD UNTIL EPIC 6" (Dockerfile lines 3-13) with broken `COPY /app/dist` paths that pre-date the Epic 1 workspace pivot. `docker build` against the current Dockerfile fails. A guard that depends on `docker build` cannot ship until Epic 6 rewrites the Dockerfile for the post-pivot per-workspace `apps/*/dist/` layout.
+
+**Phase 1 protection (non-mechanical):**
+
+- The CODEOWNERS surface flags `Dockerfile` and `.github/workflows/**` as load-bearing; any PR introducing `COPY apps/admin` or equivalent triggers the Subagent Review Discipline.
+- The Epic 4 post-milestone handoff calls out this gap explicitly so the next post-Epic-4 / Epic 5 / Epic 6 agent inherits awareness.
+- Manual review by the maintainer at Epic 6 kickoff verifies the Dockerfile rewrite + the guard land together.
+
+**Lift conditions:**
+
+- Epic 6 PR rewrites `Dockerfile` for the post-pivot workspace layout.
+- Same PR (or its stacked successor) ships `scripts/check-admin-not-in-prod.{ts,cli.ts,test.ts}` — either as a static grep of Dockerfile source for `apps/admin` references (no `docker build` required), or as a real multi-stage build assertion once the Dockerfile actually builds.
+- Required-status adoption follows the same Epic 6 branch-protection rebuild path as `quality-gate / analyze`.
 
 ### 10.8 Test fixtures for workspace files
 
@@ -782,6 +904,7 @@ When the analyst-notes follow-up PR adds the `notes` field, it adds NEW fixtures
 
 ## 11. Verification & next steps
 
+0. **ADR cross-ref dependency.** This spec cites [ADR-0011](../../adr/0011-defer-test-sync-ux-to-epic-5.md) and [ADR-0012](../../adr/0012-defer-analyst-notes-to-post-epic-4-followup.md) extensively. Both ADRs are in flight as standalone PRs ([#63](https://github.com/mathvbarone/snowboard-trip-advisor/pull/63) and [#64](https://github.com/mathvbarone/snowboard-trip-advisor/pull/64)) at spec-write time. The cross-references resolve once both ADRs land on `main`; merge order does not matter (sibling decisions, not stacked). This spec PR is independent of the ADR PRs (all three based on `origin/main`); merging this spec first is acceptable as long as the ADR PRs land before any Epic 4 implementation PR opens.
 1. This spec is committed to `docs/superpowers/specs/2026-05-01-epic-4-admin-app-design.md` on branch `docs/epic-4-admin-app-spec`.
 2. A spec-document-reviewer subagent runs against this doc; findings folded into the same branch before maintainer review.
 3. Maintainer reviews the committed spec.
