@@ -15,6 +15,7 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import {
+  ensureExecutable,
   installHooks,
   type HookInstallSpec,
   type ReadFileFn,
@@ -39,13 +40,24 @@ const REPO_ROOT = resolve(SCRIPT_DIR, '..')
 // or from a linked worktree. Do NOT assume a literal `.git/hooks` path — in a
 // linked worktree, `.git` is a file, and the hooks dir lives in the common
 // `.git/` of the main checkout.
-const HOOKS_DIR = resolve(
-  REPO_ROOT,
-  execFileSync('git', ['rev-parse', '--git-path', 'hooks'], {
-    cwd: REPO_ROOT,
-    encoding: 'utf-8',
-  }).trim(),
-)
+let HOOKS_DIR: string
+try {
+  HOOKS_DIR = resolve(
+    REPO_ROOT,
+    execFileSync('git', ['rev-parse', '--git-path', 'hooks'], {
+      cwd: REPO_ROOT,
+      encoding: 'utf-8',
+    }).trim(),
+  )
+} catch (err) {
+  const reason = err instanceof Error ? err.message : String(err)
+  process.stderr.write(
+    `install-git-hooks: failed to resolve hooks directory via 'git rev-parse'.\n` +
+      `  Reason: ${reason}\n` +
+      `  Run 'npm run setup' from a git checkout (not a tarball or non-git directory).\n`,
+  )
+  process.exit(1)
+}
 
 await mkdir(HOOKS_DIR, { recursive: true })
 
@@ -74,22 +86,7 @@ const write: WriteFileFn = async (
 
 const results = await installHooks(specs, read, write)
 
-// Defence-in-depth against executable-bit drift: re-assert `0o755` on every
-// successfully-resolved target, regardless of whether the content was just
-// installed or was already byte-identical. Without this, a contributor who
-// did `chmod -x` on an installed hook would see `unchanged` on the next
-// `npm run setup` run while the hook silently fails to fire.
-for (const spec of specs) {
-  const result = results.find((r): boolean => r.hook === spec.name)
-  if (
-    result === undefined ||
-    result.status === 'source_missing' ||
-    result.status === 'write_failed'
-  ) {
-    continue
-  }
-  await chmod(spec.targetPath, 0o755)
-}
+await ensureExecutable(specs, results, chmod)
 
 let failureCount = 0
 for (const result of results) {

@@ -2,10 +2,13 @@
 # scripts/prepare-commit-msg — auto-add a DCO Signed-off-by trailer if not
 # already present from any author.
 #
-# Idempotent: presence-check is a substring match against `Signed-off-by:`,
-# not the exact identity, so a co-authored commit (where another author's
-# `-s` already added a trailer) doesn't get a duplicate trailer with the
-# local identity.
+# Uses `git interpret-trailers` for proper trailer-block handling. That tool:
+#   - inserts a blank line between the body and the trailer block when needed
+#     (avoids producing a single paragraph that fails CI's trailer parser);
+#   - is comment-aware (a `# Signed-off-by:` line in the comment block does
+#     NOT count as an existing trailer);
+#   - deduplicates via `--if-exists addIfDifferent` (a different author's
+#     existing trailer is preserved; ours is added only if missing).
 #
 # Skip cases (per git's prepare-commit-msg hook contract, $2 is the source):
 #   - merge / squash : trailers are managed by git itself
@@ -22,16 +25,15 @@ esac
 NAME=$(git config user.name)
 EMAIL=$(git config user.email)
 if [ -z "$NAME" ] || [ -z "$EMAIL" ]; then
-  printf '\n!!! prepare-commit-msg: SKIPPING DCO sign-off — user.name and/or user.email not set !!!\n' >&2
-  printf '!!! Configure with: git config user.name "Your Name" && git config user.email you@example.com !!!\n' >&2
-  printf '!!! CI dco check will fail this commit; fix locally to avoid the round-trip !!!\n\n' >&2
-  exit 0
+  printf '\n!!! prepare-commit-msg: ABORTING commit — user.name and/or user.email not set !!!\n' >&2
+  printf '!!! Configure with:\n' >&2
+  printf '!!!   git config user.name "Your Name" && git config user.email you@example.com\n' >&2
+  printf '!!! Failing locally avoids the CI dco round-trip.\n\n' >&2
+  exit 1
 fi
 
-# Substring match: skip if ANY Signed-off-by trailer is already present.
-# Avoids duplicating trailers on commits that already have one (e.g. co-authored).
-if grep -qiE '^Signed-off-by:' "$1"; then
-  exit 0
-fi
-
-printf '\nSigned-off-by: %s <%s>\n' "$NAME" "$EMAIL" >> "$1"
+git interpret-trailers \
+  --in-place \
+  --if-exists addIfDifferent \
+  --trailer "Signed-off-by: $NAME <$EMAIL>" \
+  -- "$1"

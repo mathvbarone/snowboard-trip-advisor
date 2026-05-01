@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import {
+  ensureExecutable,
   installHook,
   installHooks,
+  type ChmodFn,
+  type HookInstallResult,
   type HookInstallSpec,
 } from './install-git-hooks'
 
@@ -197,5 +200,76 @@ describe('installHooks', (): void => {
     expect(results.length).toBe(2)
     expect(results[0]?.status).toBe('source_missing')
     expect(results[1]?.status).toBe('installed')
+  })
+})
+
+describe('ensureExecutable', (): void => {
+  const noopChmod: ChmodFn = (): Promise<void> => Promise.resolve()
+
+  it('chmods 0o755 on installed targets', async (): Promise<void> => {
+    const chmod = vi.fn(noopChmod)
+    const results: readonly HookInstallResult[] = [
+      { hook: 'pre-commit', status: 'installed' },
+    ]
+
+    await ensureExecutable([SPEC_A], results, chmod)
+
+    expect(chmod).toHaveBeenCalledTimes(1)
+    expect(chmod).toHaveBeenCalledWith(SPEC_A.targetPath, 0o755)
+  })
+
+  it('chmods 0o755 on unchanged targets — drift defence', async (): Promise<void> => {
+    const chmod = vi.fn(noopChmod)
+    const results: readonly HookInstallResult[] = [
+      { hook: 'pre-commit', status: 'unchanged' },
+    ]
+
+    await ensureExecutable([SPEC_A], results, chmod)
+
+    expect(chmod).toHaveBeenCalledWith(SPEC_A.targetPath, 0o755)
+  })
+
+  it('skips source_missing targets — no reliable target path', async (): Promise<void> => {
+    const chmod = vi.fn(noopChmod)
+    const results: readonly HookInstallResult[] = [
+      { hook: 'pre-commit', status: 'source_missing', reason: 'ENOENT' },
+    ]
+
+    await ensureExecutable([SPEC_A], results, chmod)
+
+    expect(chmod).not.toHaveBeenCalled()
+  })
+
+  it('skips write_failed targets — write may have been partial or absent', async (): Promise<void> => {
+    const chmod = vi.fn(noopChmod)
+    const results: readonly HookInstallResult[] = [
+      { hook: 'pre-commit', status: 'write_failed', reason: 'EACCES' },
+    ]
+
+    await ensureExecutable([SPEC_A], results, chmod)
+
+    expect(chmod).not.toHaveBeenCalled()
+  })
+
+  it('skips defensively when result is missing for a spec', async (): Promise<void> => {
+    const chmod = vi.fn(noopChmod)
+
+    await ensureExecutable([SPEC_A], [], chmod)
+
+    expect(chmod).not.toHaveBeenCalled()
+  })
+
+  it('processes multiple specs, applying or skipping each per its result status', async (): Promise<void> => {
+    const chmod = vi.fn(noopChmod)
+    const results: readonly HookInstallResult[] = [
+      { hook: 'pre-commit', status: 'installed' },
+      { hook: 'prepare-commit-msg', status: 'source_missing', reason: 'ENOENT' },
+    ]
+
+    await ensureExecutable([SPEC_A, SPEC_B], results, chmod)
+
+    expect(chmod).toHaveBeenCalledTimes(1)
+    expect(chmod).toHaveBeenCalledWith(SPEC_A.targetPath, 0o755)
+    expect(chmod).not.toHaveBeenCalledWith(SPEC_B.targetPath, 0o755)
   })
 })

@@ -23,9 +23,35 @@ export interface HookInstallResult {
 
 export type ReadFileFn = (path: string) => Promise<string>
 export type WriteFileFn = (path: string, content: string) => Promise<void>
+export type ChmodFn = (path: string, mode: number) => Promise<void>
 
 function reasonFromError(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
+}
+
+const HOOK_MODE = 0o755
+
+// Re-assert the executable bit on every successfully-resolved target.
+// Defence-in-depth against drift: a contributor who ran `chmod -x` on an
+// installed hook would otherwise see `unchanged` on the next `npm run setup`
+// while the hook silently fails to fire. Skips targets where the source was
+// missing or the write failed (no reliable target path to chmod).
+export async function ensureExecutable(
+  specs: readonly HookInstallSpec[],
+  results: readonly HookInstallResult[],
+  chmod: ChmodFn,
+): Promise<void> {
+  for (const spec of specs) {
+    const result = results.find((r): boolean => r.hook === spec.name)
+    if (
+      result === undefined ||
+      result.status === 'source_missing' ||
+      result.status === 'write_failed'
+    ) {
+      continue
+    }
+    await chmod(spec.targetPath, HOOK_MODE)
+  }
 }
 
 export async function installHook(
