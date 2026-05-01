@@ -36,7 +36,8 @@ npm run setup
 
 The rules in this file are not suggestions. They are backed by mechanical gates that fire before content lands in git:
 
-- **CI required status check `quality-gate / qa`** — runs `npm run qa` (lint → typecheck → coverage → tokens:check → test:hooks → test:integration) on every PR. PR cannot merge if red.
+- **CI required status check `quality-gate / qa`** — runs `npm run qa` (lint → check:agent-discipline-sync → typecheck → coverage → tokens:check → test:hooks → test:integration) on every PR. PR cannot merge if red.
+- **Drift checker `check:agent-discipline-sync`** (active, in `qa` chain) — `scripts/check-agent-discipline-sync.cli.ts` verifies AGENTS.md / CLAUDE.md authority symmetry, the AGENTS.md required-section set is intact (catches the closed-PR-#54 silent-section-removal failure mode), no defer-then-override claim in CLAUDE.md, and every bot author in `.github/dependabot.yml` has a matching policy ADR. Exits 0 (clean) / 1 (drift, fix the docs) / 2 (checker bug, fix the script). Runs as the second qa step (after `lint`) so cheap drift detection fails fast before the slow test suite.
 - **CI required status check `dco`** — verifies every commit in the PR carries a `Signed-off-by:` trailer. Missing trailer fails the PR.
 - **CI status check `quality-gate / analyze`** — runs `npm run analyze` (build + bundle-budget warn + preload-hrefs error + dist-dataset error). Not yet on the required-status set; adoption deferred to Epic 6 branch-protection rebuild.
 - **Pre-commit hook** — `npm run qa` runs before every local commit (`scripts/pre-commit`, installed by `npm run setup`).
@@ -125,11 +126,12 @@ npm run qa
 This runs in sequence and fails fast:
 
 1. `npm run lint`
-2. `npm run typecheck`
-3. `npm run coverage`
-4. `npm run tokens:check` (drift check on the generated `packages/design-system/tokens.css`)
-5. `npm run test:hooks` (`scripts/hooks/test-hooks.sh` — both `node --test` unit tests and bash integration tests for the hook scripts)
-6. `npm run test:integration` (workspace-scoped integration tests)
+2. `npm run check:agent-discipline-sync` (AGENTS.md ↔ CLAUDE.md drift; required-section coverage; bot/ADR pairing — see Enforcement Layers above)
+3. `npm run typecheck`
+4. `npm run coverage`
+5. `npm run tokens:check` (drift check on the generated `packages/design-system/tokens.css`)
+6. `npm run test:hooks` (`scripts/hooks/test-hooks.sh` — both `node --test` unit tests and bash integration tests for the hook scripts)
+7. `npm run test:integration` (workspace-scoped integration tests)
 
 Rules:
 

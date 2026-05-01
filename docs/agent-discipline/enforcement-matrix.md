@@ -13,7 +13,7 @@ This file is the authoritative inventory of every mechanical gate that protects 
 
 | Gate | Status | Surface | What it enforces |
 |---|---|---|---|
-| `quality-gate / qa` | active (required) | `.github/workflows/quality-gate.yml` (jobs.qa) calling `npm run qa` | Lint → typecheck → 100% coverage → tokens.css drift → hook scripts (`scripts/hooks/test-hooks.sh`) → workspace integration tests |
+| `quality-gate / qa` | active (required) | `.github/workflows/quality-gate.yml` (jobs.qa) calling `npm run qa` | Lint → drift checker (AGENTS↔CLAUDE / section-coverage / bot-ADR pairing) → typecheck → 100% coverage → tokens.css drift → hook scripts (`scripts/hooks/test-hooks.sh`) → workspace integration tests |
 | `quality-gate / analyze` | active (informational) | `.github/workflows/quality-gate.yml` (jobs.analyze, `needs: qa`) calling `npm run analyze` | Build apps/public with `ANALYZE=1`; bundle-budget warn; preload-hrefs error; dist-dataset envelope error. Not yet on the required-status set; adoption deferred to Epic 6 branch-protection rebuild. |
 | `dco` | active (required) | `.github/workflows/ci.yml` (jobs.dco) | Every non-merge commit in the PR carries a `Signed-off-by:` trailer. ADR-0009 exempts `dependabot[bot]` author + committer (exact email match). |
 | `audit (informational)` | active (informational) | `.github/workflows/dependency-security.yml` | `npm audit --audit-level=high`. Non-blocking per ADR-0008. |
@@ -59,13 +59,20 @@ These fire only when an agent runs against this repository through Claude Code l
 | `--no-verify` ban | active (mechanical, multi-surface) | PreToolUse hook (local) + pre-commit hook itself runs qa unconditionally | The flag is mechanically blocked at the local-runtime level for Claude; for non-Claude agents the contributor cannot skip qa locally and `dco` catches it at PR time. |
 | ADR-required-on-new-bot rule | active (discipline) | AGENTS.md Subagent Review Discipline + ADR-0009 precedent | Adding a new bot author (Renovate / Snyk / etc.) to `.github/dependabot.yml` requires its own ADR matching the ADR-0009 pattern. Drift checker (`scripts/check-agent-discipline-sync.{ts,mjs}` — planned) will mechanize this. |
 
-## Drift-checker (planned)
+## Drift-checker (active)
 
-`scripts/check-agent-discipline-sync.{ts,mjs}` and the `npm run check:agent-discipline-sync` script land in a separate stacked PR. Once shipped, the checker is wired into `npm run qa` and verifies:
+`scripts/check-agent-discipline-sync.{ts,cli.ts}` is wired into `npm run qa` as the second step (after `lint`) and runs on every CI PR via the `quality-gate / qa` job. The checker verifies:
 
-- Symmetric authority claim: `AGENTS.md` asserts canonical AND `CLAUDE.md` points back to AGENTS.md.
-- CI required-status-set vs `quality-gate.yml` jobs do not drift.
-- Every bot author in `.github/dependabot.yml` has a matching ADR file.
-- This enforcement matrix (the file you're reading) lists every CI job, hook, and branch-protection rule that actually exists.
+- **Authority symmetry:** AGENTS.md asserts canonical AND CLAUDE.md points back to AGENTS.md as authoritative AND no defer-then-override phrasing in CLAUDE.md (catches "AGENTS.md is canonical BUT the rules below override it").
+- **AGENTS.md required-section coverage:** every load-bearing H2 in `REQUIRED_AGENTS_SECTIONS` (in the script source) is present. Catches silent removal — the closed PR #54 failure mode.
+- **Shim acknowledgement:** AGENTS.md names CLAUDE.md as a compatibility shim.
+- **Bot/ADR pairing:** every bot author in `.github/dependabot.yml` has an ADR whose filename contains the bot name + a positive policy keyword (`dco` / `exempt` / `policy` / `integration`) AND no negative keyword (`removed` / `deprecated` / `sunset`). A removal-documenting ADR does not satisfy.
 
-Until the drift checker ships, the matrix is maintained by hand; the maintainer reads it as part of any subagent-review-triggered PR.
+Exit codes: `0` clean, `1` drift detected (fix the docs), `2` internal checker error (fix the script).
+
+Deferred (need yaml-parsing infrastructure that hasn't shipped yet):
+
+- CI required-status-set vs `quality-gate.yml` jobs drift — needs `gh api branch-protection` + workflow yaml parse.
+- Enforcement-matrix.md content vs reality — needs cross-validation against `.claude/settings.json` / `quality-gate.yml` / branch-protection state.
+
+The matrix is otherwise maintained by hand; the maintainer reads it as part of any subagent-review-triggered PR.

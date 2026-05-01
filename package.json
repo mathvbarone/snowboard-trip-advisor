@@ -25,7 +25,7 @@
     "tokens:check": "npm run tokens:generate && git diff --exit-code packages/design-system/tokens.css",
     "check:agent-discipline-sync": "tsx scripts/check-agent-discipline-sync.cli.ts",
     "analyze": "ANALYZE=1 npm run --workspace=@snowboard-trip-advisor/public-app build && tsx scripts/check-bundle-budget.cli.ts apps/public/dist/stats.json && tsx scripts/check-preload-hrefs.cli.ts apps/public/dist && tsx scripts/check-dist-dataset.cli.ts apps/public/dist",
-    "qa": "npm run lint && npm run typecheck && npm run coverage && npm run tokens:check && npm run test:hooks && npm run test:integration && npm run check:agent-discipline-sync",
+    "qa": "npm run lint && npm run check:agent-discipline-sync && npm run typecheck && npm run coverage && npm run tokens:check && npm run test:hooks && npm run test:integration",
     "setup": "tsx scripts/install-git-hooks.cli.ts && npm run tokens:generate"
   },
   "devDependencies": {
