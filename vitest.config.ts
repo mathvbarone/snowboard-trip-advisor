@@ -106,6 +106,15 @@ export default defineConfig({
         // `generate-tokens.cli.ts` above — running the CLI under vitest would
         // require spawning subprocesses to cover ~10 lines per file.
         'scripts/check-*.cli.ts',
+        // `scripts/install-git-hooks.cli.ts` — side-effect entry that resolves
+        // the worktree's hooks dir via `git rev-parse --git-path hooks` and
+        // writes the hook files. Same exclusion rationale as the other `*.cli.ts`
+        // files above; the pure orchestrator at `scripts/install-git-hooks.ts`
+        // carries 100% unit coverage with injected fs.
+        'scripts/install-git-hooks.cli.ts',
+        // `scripts/prepare-commit-msg` — shell script installed into the worktree
+        // hooks dir by `npm run setup`; auto-adds the DCO `Signed-off-by:` trailer.
+        'scripts/prepare-commit-msg',
       ],
       thresholds: {
         lines: 100,

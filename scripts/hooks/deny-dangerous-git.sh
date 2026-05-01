@@ -13,7 +13,7 @@
 #
 # What gets blocked:
 #   - `--no-verify` as a command-line flag (bypasses the pre-commit hook
-#     that enforces `npm run qa`; forbidden by CLAUDE.md).
+#     that enforces `npm run qa`; forbidden by AGENTS.md).
 #   - Force-push to `main` or `master`, detected by ANY of:
 #       * `--force`, `--force-with-lease`, or `-f` (incl. clustered short
 #         flags like `-fu`, `-uf`, `-fuv`)
@@ -70,7 +70,7 @@ lower="$(printf '%s' "$cmd" | tr '[:upper:]' '[:lower:]')"
 
 # --- Rule 1: block --no-verify used as an argument flag ---
 if printf '%s' "$lower" | grep -qE '(^|[[:space:]])--no-verify([[:space:]]|=|$)'; then
-  block "--no-verify bypasses the pre-commit quality gate (CLAUDE.md: forbidden)"
+  block "--no-verify bypasses the pre-commit quality gate (AGENTS.md: forbidden)"
 fi
 
 # --- Rule 2: block dangerous git push variants ---
@@ -133,7 +133,7 @@ explicit_refspec="$(node -e '
 
 if [ "$has_git_push" = "1" ] && [ "$has_force" = "1" ]; then
   if [ "$targets_protected" = "1" ]; then
-    block "force-push to main/master is forbidden (CLAUDE.md git safety protocol)"
+    block "force-push to main/master is forbidden (AGENTS.md git safety protocol)"
   elif [ "$explicit_refspec" = "no" ]; then
     block "force-push without an explicit refspec is forbidden — the implicit target is the current branch, which could be main/master. Specify the target ref explicitly (e.g. 'git push --force origin <branch>')."
   fi

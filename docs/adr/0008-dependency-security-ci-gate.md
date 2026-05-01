@@ -4,12 +4,12 @@
 - **Date:** 2026-04-29
 - **Deciders:** @mathvbarone
 - **Related spec:** [`docs/superpowers/specs/2026-04-22-product-pivot-design.md`](../superpowers/specs/2026-04-22-product-pivot-design.md)
-- **Related plan:** [`docs/superpowers/plans/2026-04-29-dependency-security-update-plan.md`](../superpowers/plans/2026-04-29-dependency-security-update-plan.md)
 - **Related policy:** [`docs/ops/dependency-policy.md`](../ops/dependency-policy.md)
+- **Original plan:** the one-shot rollout plan (`docs/superpowers/plans/2026-04-29-dependency-security-update-plan.md`) was deleted in the post-Epic-3 doc-prune after delivery via PRs #25 (security plan + ADR-0008 + policy + runbook), #27 (DCO bot exemption per ADR-0009), #28 (Dependabot config), #29-#34 (dep upgrades + coverage hardening), #35 (informational dependency-security workflow). The strategy is durable; the rollout history lives in `git log`.
 
 ## Context
 
-The dependency-security plan (link above) proposes a `dependency-security` GitHub Actions workflow that runs `npm audit --audit-level=high` on a daily schedule and on PRs touching `package.json` / `package-lock.json` files. The decision in scope here is **how strict the gate is** — specifically whether `npm audit` failures hard-block PR merge, and whether the workflow registers as a required status check in branch protection.
+The dependency-security plan (now superseded; see "Original plan" above) proposed a `dependency-security` GitHub Actions workflow that runs `npm audit --audit-level=high` on a daily schedule and on PRs touching `package.json` / `package-lock.json` files. The decision in scope here is **how strict the gate is** — specifically whether `npm audit` failures hard-block PR merge, and whether the workflow registers as a required status check in branch protection.
 
 The repo currently has two required status checks (`quality-gate / qa` and `dco`) declared as merge blockers via branch protection (see [`CLAUDE.md`](../../CLAUDE.md#enforcement-layers)). Adding a third required check is a non-trivial change because:
 
