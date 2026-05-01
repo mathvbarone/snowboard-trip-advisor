@@ -28,7 +28,7 @@
 // predictable. The end-to-end `npm run analyze` run against the real
 // dist/ is the integration check that the regexes still match.
 
-import { resolve } from 'node:path'
+import { relative, resolve } from 'node:path'
 
 const PRELOAD_TAG_PATTERN = /<link\s[^>]*\brel=(?:"preload"|'preload')[^>]*>/gi
 const HREF_ATTR_PATTERN = /\bhref=(?:"([^"]*)"|'([^']*)')/
@@ -75,10 +75,17 @@ export async function findMissingPreloadHrefs(
   hrefs: readonly string[],
   exists: FileExistsCheck,
 ): Promise<string[]> {
+  const distRoot = resolve(distDir)
   const missing: string[] = []
   for (const href of hrefs) {
     const trimmed = href.startsWith('/') ? href.slice(1) : href
-    const absolutePath = resolve(distDir, trimmed)
+    const absolutePath = resolve(distRoot, trimmed)
+    // Reject hrefs whose resolved path escapes distDir; the gate verifies
+    // assets under the build output only, not arbitrary files on disk.
+    if (relative(distRoot, absolutePath).startsWith('..')) {
+      missing.push(href)
+      continue
+    }
     if (!(await exists(absolutePath))) {
       missing.push(href)
     }

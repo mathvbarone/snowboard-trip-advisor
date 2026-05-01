@@ -163,4 +163,19 @@ describe('findMissingPreloadHrefs', (): void => {
     const exists = (): Promise<boolean> => Promise.resolve(true)
     expect(await findMissingPreloadHrefs('/dist', [], exists)).toEqual([])
   })
+
+  it('rejects hrefs that resolve outside distDir even when the escaped path exists', async (): Promise<void> => {
+    // exists() is permissive — would say "yes, this file exists" for any
+    // path. The containment guard must reject `../`-escaping hrefs before
+    // exists() is consulted; otherwise a malformed href like `/../foo`
+    // gives a false-negative on the deploy-breakage gate by validating a
+    // file outside the build output.
+    const exists = (): Promise<boolean> => Promise.resolve(true)
+    const missing = await findMissingPreloadHrefs(
+      '/dist',
+      ['/../etc/secret', '/assets/../../escape.woff2'],
+      exists,
+    )
+    expect(missing).toEqual(['/../etc/secret', '/assets/../../escape.woff2'])
+  })
 })
