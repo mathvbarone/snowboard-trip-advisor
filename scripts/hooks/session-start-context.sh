@@ -15,6 +15,9 @@ This repo enforces its rules with mechanical gates, not convention:
   → tokens:check → test:hooks → test:integration) on every PR.
 - CI required status check `dco` — verifies every commit carries a
   `Signed-off-by:` trailer. Missing trailer fails the PR.
+- CI status check `quality-gate / analyze` — bundle-budget warn +
+  preload-hrefs error + dist-dataset error (informational; not on
+  the required-status set today).
 - Pre-commit hook — `npm run qa` runs before every local commit.
 - Prepare-commit-msg hook — auto-appends a DCO `Signed-off-by:`
   trailer when git identity is configured.
