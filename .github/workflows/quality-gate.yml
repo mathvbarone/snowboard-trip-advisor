@@ -23,3 +23,60 @@ jobs:
 
       - name: Run quality gate
         run: npm run qa
+
+  # Bundle analysis — builds apps/public with rollup-plugin-visualizer and
+  # runs the three CI check scripts from PR 3.6b. Plan step 8.8, spec §7.12.
+  #
+  # Severity model:
+  #   - check-bundle-budget runs in warn mode (logs over-budget; exits 0;
+  #     never blocks merge in Phase 1; Epic 6 follow-up flips to error).
+  #   - check-preload-hrefs + check-dist-dataset run in error mode (exit 1
+  #     on failure; deploy-breakage gates per spec §10.2 + §10.7).
+  #
+  # Branch-protection adoption (adding `quality-gate / analyze` to the
+  # required-status set on `main`) is deferred to Epic 6's branch-protection
+  # script rebuild — same Phase-1 cadence as `quality-gate / qa`. Until then
+  # the analyze job runs informationally; failing-check visibility is via
+  # the PR's checks tab.
+  #
+  # Phase-1 cost note: this job re-runs `npm ci` and re-builds the public
+  # app independently of `qa` (which already ran lint/typecheck/coverage,
+  # but does not emit a build artifact). Sharing the build via
+  # `actions/upload-artifact` between `qa` and `analyze` would halve CI
+  # minutes; deferred to Epic 6 alongside the broader CI hardening pass.
+  analyze:
+    name: analyze
+    runs-on: ubuntu-latest
+    needs: qa
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run analyze (build + bundle-budget + preload-hrefs + dist-dataset)
+        run: npm run analyze
+
+      # Run on success OR failure (not cancellation) so we still upload the
+      # treemap when a check fails after the build succeeded — the report is
+      # the most useful artifact in exactly that case. `if-no-files-found:
+      # warn` (vs. `error`) avoids a confusing double-failure when an
+      # analyze run fails before the build step emits stats.html (e.g. a
+      # tsx-side import error): the original analyze failure stays the
+      # primary signal in the checks UI.
+      - name: Upload bundle visualizer report
+        if: success() || failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: bundle-visualizer
+          path: apps/public/dist/stats.html
+          if-no-files-found: warn
+          retention-days: 14
