@@ -11,13 +11,10 @@ cat <<'EOF'
 This repo enforces its rules with mechanical gates, not convention:
 
 - CI required status check `quality-gate / qa` — runs `npm run qa`
-  (lint → typecheck → coverage → tokens:check → test:hooks
-  → test:integration → check:agent-discipline-sync) on every PR.
+  (lint → check:agent-discipline-sync → typecheck → coverage
+  → tokens:check → test:hooks → test:integration) on every PR.
 - CI required status check `dco` — verifies every commit carries a
   `Signed-off-by:` trailer. Missing trailer fails the PR.
-- CI status check `quality-gate / analyze` — bundle-budget warn +
-  preload-hrefs error + dist-dataset error (informational; not on
-  the required-status set today).
 - Pre-commit hook — `npm run qa` runs before every local commit.
 - Prepare-commit-msg hook — auto-appends a DCO `Signed-off-by:`
   trailer when git identity is configured.
@@ -43,9 +40,13 @@ EOF
 # correctly handles linked worktrees (where `.git` is a file pointer, not
 # a directory) by resolving to the common-dir's hooks folder.
 hooks_dir="$(git rev-parse --git-path hooks 2>/dev/null || printf '.git/hooks')"
-if [ ! -x "$hooks_dir/pre-commit" ] || [ ! -x "$hooks_dir/prepare-commit-msg" ]; then
+missing=""
+[ ! -x "$hooks_dir/pre-commit" ]         && missing="$missing pre-commit"
+[ ! -x "$hooks_dir/prepare-commit-msg" ] && missing="$missing prepare-commit-msg"
+if [ -n "$missing" ]; then
   printf '\n'
-  printf '⚠ Local git hooks are not fully installed. Run: npm run setup\n'
+  printf '⚠ Local git hook(s) not installed:%s\n' "$missing"
+  printf '  Run: npm run setup\n'
 fi
 
 # Surface branch + dirty-state so the agent has current git context.
