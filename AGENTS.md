@@ -38,7 +38,7 @@ The rules in this file are not suggestions. They are backed by mechanical gates 
 
 - **CI required status check `quality-gate / qa`** — runs `npm run qa` (lint → typecheck → coverage → tokens:check → test:hooks → test:integration) on every PR. PR cannot merge if red.
 - **CI required status check `dco`** — verifies every commit in the PR carries a `Signed-off-by:` trailer. Missing trailer fails the PR.
-- **CI status check `quality-gate / analyze`** — runs `npm run analyze` (build + bundle-budget warn + preload-hrefs error + dist-dataset error). Not yet on the required-status set; adoption deferred to Epic 6 branch-protection rebuild.
+- **CI status check `quality-gate / analyze`** (planned) — would run `npm run analyze` (build + bundle-budget warn + preload-hrefs error + dist-dataset error). The job content lives on branch `ci/quality-gate-analyze-job` (PR #57 was marked MERGED on GitHub but its merge commit is not reachable from `main` — the stacked-PR phantom-merge hazard described in §"PR Sizing Discipline" below). Re-apply needed before this gate is real; until then the row exists in matrix/policy only. Required-status adoption is a separate Epic 6 branch-protection task even after re-apply.
 - **Pre-commit hook** — `npm run qa` runs before every local commit (`scripts/pre-commit`, installed by `npm run setup`).
 - **PreToolUse:Bash hook** (Claude runtime; `scripts/hooks/deny-dangerous-git.sh`) — blocks `--no-verify` anywhere and `git push --force` (or `--force-with-lease` / `-f`) to `main`/`master`. A blocked call surfaces the reason to the agent; adjust, don't retry.
 - **PostToolUse:Edit|Write hook** (Claude runtime) — runs targeted ESLint on the file just edited; violations surface while the agent is still in the loop.
@@ -220,6 +220,8 @@ React:
 - No raw HTML element imports where a design-system component exists.
 - No deep imports into design-system internals — import only from the package root.
 - No literal z-index or breakpoint px values — use tokens.
+
+**Known gap (non-blocking):** the px-literal ESLint selector (banning literal `px` values inside `style={{ }}` objects + CSS-in-JS template literals; full rule catalog in spec §6.3) is **deferred to Epic 3 PR 3.1**, when `apps/public` first uses inline styles and the rule has actual violations to validate against. Until then the rule above is enforced by reviewer discipline only.
 
 ## Admin App Rules (lands with Epic 4)
 
