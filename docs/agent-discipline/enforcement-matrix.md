@@ -14,7 +14,7 @@ This file is the authoritative inventory of every mechanical gate that protects 
 | Gate | Status | Surface | What it enforces |
 |---|---|---|---|
 | `quality-gate / qa` | active (required) | `.github/workflows/quality-gate.yml` (jobs.qa) calling `npm run qa` | Lint → typecheck → 100% coverage → tokens.css drift → hook scripts (`scripts/hooks/test-hooks.sh`) → workspace integration tests |
-| `quality-gate / analyze` | planned (phantom-merged) | Job content lives on branch `ci/quality-gate-analyze-job`; PR #57 marked MERGED on GitHub but its merge commit (`ef70ec3…`) is not reachable from `main`. `npm run analyze` script exists locally; the workflow `analyze` job does not. | Would run build apps/public with `ANALYZE=1` + bundle-budget warn + preload-hrefs error + dist-dataset envelope error. Until PR #57's content is re-applied to `main`, this row is policy-only. Required-status adoption deferred to Epic 6 even after re-apply. |
+| `quality-gate / analyze` | active (informational) | `.github/workflows/quality-gate.yml` (jobs.analyze, `needs: qa`) calling `npm run analyze` | Build apps/public with `ANALYZE=1`; bundle-budget warn; preload-hrefs error; dist-dataset envelope error. Not yet on the required-status set; adoption deferred to Epic 6 branch-protection rebuild. |
 | `dco` | active (required) | `.github/workflows/ci.yml` (jobs.dco) | Every non-merge commit in the PR carries a `Signed-off-by:` trailer. ADR-0009 exempts `dependabot[bot]` author + committer (exact email match). |
 | `audit (informational)` | active (informational) | `.github/workflows/dependency-security.yml` | `npm audit --audit-level=high`. Non-blocking per ADR-0008. |
 | `outdated report (non-blocking)` | active (informational) | `.github/workflows/dependency-security.yml` | Daily `npm outdated` snapshot uploaded as a CI artifact. |
@@ -48,7 +48,7 @@ These fire only when an agent runs against this repository through Claude Code l
 | No deletion | active | GitHub branch protection on `main` | `main` cannot be deleted by anyone, including admins. |
 | Conversation resolution required | active | GitHub branch protection on `main` | All PR review threads must be resolved before merge. |
 | Required CODEOWNER review | deferred (Phase 1) | Currently OFF on `main`; CODEOWNERS auto-requests reviewers but the gate doesn't block | Re-enables when a second maintainer joins. Re-apply via `gh api -X PUT repos/{owner}/{repo}/branches/main/protection ...` setting `required_pull_request_reviews.required_approving_review_count >= 1` and `require_code_owner_reviews: true`. Original protection JSON preserved at `/tmp/main-protection-pre-relax.json` for reference. |
-| Required `quality-gate / analyze` | planned | Not on the required-status set today; the `analyze` job itself is also not yet present on `main` (see CI-gates table above for the phantom-merge note). | Adoption deferred to Epic 6's branch-protection script rebuild — same Phase-1 cadence as `qa`. Re-apply of PR #57 must precede required-status adoption. |
+| Required `quality-gate / analyze` | planned | Not on the required-status set today; analyze runs informationally | Adoption deferred to Epic 6's branch-protection script rebuild — same Phase-1 cadence as `qa`. |
 
 ## Discipline gates (humans-and-agents — not mechanically enforced today, but documented)
 
