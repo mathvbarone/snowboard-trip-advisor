@@ -4,7 +4,7 @@
 - **Date:** 2026-05-01
 - **Deciders:** @mathvbarone
 - **Related spec:** [`docs/superpowers/specs/2026-04-22-product-pivot-design.md`](../superpowers/specs/2026-04-22-product-pivot-design.md) §3.9 (Analyst notes), §4 (note-on-analyst-notes footnote — admin-internal, persisted in `data/admin-workspace/<slug>.json`, never published), §8.4.1 (`/api/*` contract inventory rows 9 + 10)
-- **Related ADRs:** [ADR-0011](./0011-defer-test-sync-ux-to-epic-5.md) — sister scoping decision for Test / Sync deferral
+- **Related ADRs:** [ADR-0011](./0011-defer-test-sync-ux-to-epic-5.md) — sister scoping decision for Test / Sync deferral. Lands via [PR #63](https://github.com/mathvbarone/snowboard-trip-advisor/pull/63), open at this ADR's draft time. **Merge order:** PR #63 must merge to `main` before (or in the same review window as) this PR; otherwise the `Related ADRs` link above is dangling on `main` until #63 lands.
 
 ## Context
 
