@@ -28,8 +28,6 @@ The rules in this file are not suggestions. They are backed by mechanical gates 
 
 **Rule violations are reverted, not retroactively approved.** The agent that broke a rule writes a follow-up PR explaining the failure mode.
 
-**Known gap (non-blocking):** the px-literal ESLint selector (banning literal `px` values inside `style={{ }}` objects + CSS-in-JS template literals; full rule catalog in spec §6.3) is **deferred to Epic 3 PR 3.1**, when `apps/public` first uses inline styles and the rule has actual violations to validate against.
-
 ## Subagent Review Discipline
 
 Load-bearing changes require an independent general-purpose subagent review before merge. The trigger is **mechanical** — any PR that touches one of these paths qualifies:
@@ -194,7 +192,7 @@ React:
 - No inline style values that should be tokens.
 - No raw HTML element imports where a design-system component exists.
 - No deep imports into design-system internals — import only from the package root.
-- No literal z-index or breakpoint px values — use tokens. (The px-literal selector itself lands with Epic 3 PR 3.1 — see "Known gap" above.)
+- No literal z-index or breakpoint px values — use tokens.
 
 ## Admin App Rules (lands with Epic 4)
 

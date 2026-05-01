@@ -712,196 +712,46 @@ CODEOWNER review request order: `3.1a → 3.1b → 3.1c`, then concurrent group,
 
 ### 7.5 PR 3.1a — Config / CI / ADRs
 
-**Goal.** No app code. Foundational config + ADRs + the schema validator change with its test-migration sweep.
-
-**Deliverables (tests first):**
-
-- *Tests added/updated (group 1 — fixture migration to one-resort minimum):*
-  - `packages/schema/src/published.test.ts` — empty-array now fails with the new `dataset_empty` issue code; happy-path fixture switches to one resort.
-  - `packages/schema/src/publishDataset.test.ts` — fixture migrated.
-  - `packages/schema/src/publishDataset.lockTimeout.test.ts` — fixture migrated.
-  - `packages/schema/src/validatePublishedDataset.test.ts` — explicit `dataset_empty` issue code emission test.
-- *Tests added/updated (group 2 — barrel-export update for new exports):*
-  - `packages/schema/src/index.test.ts` adds **presence-by-key only** assertion for `loadResortDatasetFromObject`. (This is NOT a fixture migration — `index.test.ts` does not contain `resorts: []` and is not affected by the `min(1)` change.) This update may equivalently land in PR 3.1c when the new export ships; the spec attaches it to 3.1a only if 3.1a wants the assertion in place ahead of the export landing — recommend deferring to 3.1c so the test is non-trivial on landing.
-- *Unaffected tests (record for clarity):*
-  - `packages/schema/src/fixtures/current.v1.test.ts` is unaffected — it parses the live `current.v1.json` (2 resorts) which already satisfies `min(1)`.
-- *Tests added (CSP refactor moves to PR 3.1b):*
-  - See PR 3.1b deliverables — `config/csp.test.ts` lives there per the §7.2 trigger row.
-- *Implementation:*
-  - `packages/schema/src/published.ts` — `resorts: z.array(...).min(1, { message: 'dataset_empty' })`.
-  - `packages/schema/src/validatePublishedDataset.ts` — emit `dataset_empty` on `min: 1` failure (named issue code, not opaque `zod_parse_failed`, so Epic 4 admin can render a useful message).
-  - `eslint.config.js` — `no-restricted-imports` rule banning `loadResortDataset` from `apps/public/**`.
-  - Root `package.json` — `engines: { "node": ">=20.11" }`. Justification: `import.meta.dirname` is used in `apps/public/vite.config.ts` (PR 3.1b) for `datasetPlugin`'s SRC path resolution; the pin is required for that PR but landed up-front so all sub-PRs share the same Node baseline.
-
-  (`config/csp.ts` refactor moved to PR 3.1b per the §7.2 subagent-trigger matrix; it does not land in 3.1a.)
-- *Docs:*
-  - `docs/adr/0004-public-app-form-controls-native.md`.
-  - `docs/adr/0005-css-theme-no-js.md`.
-  - `docs/adr/0006-public-app-no-css-framework.md`.
-  - `docs/adr/0007-axe-library-jest-axe-with-vitest.md`.
-
-**Acceptance gate:** `npm run qa` green; new `dataset_empty` issue code asserted in test; ADR index reflects 0004–0007.
+Status: **DONE** — merged in [#14](https://github.com/mathvbarone/snowboard-trip-advisor/pull/14) (commit `bb58ae8`). Delivered: workspace ESLint flat-config + `engines.node ≥ 20.11` pin + `dataset_empty` Zod issue code (`packages/schema/src/published.ts` + `validatePublishedDataset.ts`) + `no-restricted-imports` ban on `loadResortDataset` from `apps/public/**` + ADRs 0004–0007.
 
 ### 7.6 PR 3.1b — Vite plugins + entry + test infra
 
-**Goal.** `apps/public` boots with CSP nonce per request, fonts preloaded, dataset served from `data/published/`. App is still a stub.
-
-**Deliverables (tests first):**
-
-- *Tests added:*
-  - `config/csp.test.ts` — both modes (dev includes `ws://localhost:*`, `wss://localhost:*`, `http://localhost:*` in `connect-src` and `'nonce-{nonce}'` in `script-src`; prod excludes all of these). Both branches assert the full directive list (`default-src`, `img-src`, `font-src`, `connect-src`, `script-src`, `style-src 'self' 'unsafe-inline'`, `frame-ancestors 'none'`, `base-uri`, `form-action`, `upgrade-insecure-requests`).
-  - `apps/public/src/lib/datasetPlugin.test.ts` — `serveDatasetMiddleware` happy + ENOENT; asserts `Content-Type: application/json; charset=utf-8` on success (matches the Epic-6 nginx contract per §10.2 — dev/prod must agree); `copyDataset` against tmpdir.
-  - `apps/public/src/lib/csp.test.ts` — `generateNonce` purity (uses `crypto.getRandomValues`, distinct values across calls), `injectNonce` purity (same input → identical output).
-  - `apps/public/src/__tests__/cspDevPlugin.test.ts` — middleware invoked twice, asserts `Content-Security-Policy` `script-src 'nonce-...'` differs across requests.
-  - `apps/public/src/lib/injectFontPreloads.test.ts` — pure; appends N `<link>` tags with correct attributes.
-- *Implementation:*
-  - `config/csp.ts` — refactor to `cspHeader({ mode, nonce? })`. Dev branch: `connect-src 'self' ws://localhost:* wss://localhost:* http://localhost:*` + `script-src 'self' 'nonce-${nonce}'`. Prod branch: dev allowances absent; `script-src 'self'`. Both keep `style-src 'self' 'unsafe-inline'` (Vite injects HMR style payloads inline; tokens.css is also a stylesheet) and `img-src 'self' data: https:` (parent §2.6).
-  - `apps/public/src/lib/{datasetPlugin,csp,injectFontPreloads}.ts`.
-  - `apps/public/vite.config.ts` — registers `datasetPlugin()` and `cspDevPlugin()` (5-line lifecycle adapters; coverage-excluded with rationale).
-  - `apps/public/index.html` — `<html lang="en">`, `<meta name="description">`, two `<meta name="theme-color">` with `media`, `<link rel="canonical">` placeholder.
-  - `apps/public/src/main.tsx` — `@fontsource` CSS + `injectFontPreloads([...])` (preload URL list — see §6.3 for `latin-ext` vs `latin` decision) + mount.
-  - `apps/public/src/App.tsx` — temporary stub returning `<main className="app-shell" />` (real composition lands in 3.1c).
-  - `apps/public/src/test-setup.ts` — `matchMedia` stub; `expect.extend({ toHaveNoViolations })`; MSW lifecycle.
-  - `apps/public/src/mocks/server.ts` — ships a default handler for `GET /data/current.v1.json` returning the seed fixture (loaded from disk at server-startup time); per-suite overrides via `server.use(...)`.
-
-**Acceptance gate:** `npm run qa` green; `npm run dev` boots; nonce-diff vitest passes; `dist/data/current.v1.json` exists after `npm run build`.
+Status: **DONE** — merged in [#15](https://github.com/mathvbarone/snowboard-trip-advisor/pull/15) (commit `80d4465`). Delivered: `cspDevPlugin` (per-request nonce) + `datasetPlugin` (dev-serve + writeBundle copy) + `injectFontPreloads` + `apps/public/index.html` shell + MSW lifecycle + `apps/public/vite.config.ts` registration + the `config/csp.ts` `cspHeader({ mode, nonce? })` refactor.
 
 ### 7.7 PR 3.1c — Foundation lib + state + states + Shell composition
 
-**Goal.** Every hook is testable in isolation; foundation states render; design-system Shell/Skeleton/EmptyStateLayout ship; the frozen DetailRoute stub lands.
-
-**Deliverables (tests first):**
-
-- *Tests added:*
-  - `packages/schema/src/loadResortDatasetFromObject.test.ts` — projection branches migrated from existing `loadResortDataset.test.ts`.
-  - `packages/schema/src/loadResortDataset.test.ts` — slim happy-path Node wrapper test.
-  - `packages/design-system/src/components/{Shell,Skeleton,EmptyStateLayout}.test.tsx` — render contract + axe per state.
-  - `packages/design-system/src/format.test.ts` — destructured-primitive formatters.
-  - `apps/public/src/lib/{urlState,router,datasetFetch,errors,deepLinks,lang}.test.ts` — pure helpers (`lang.test.ts` asserts every COUNTRY_TO_PRIMARY_LANG entry yields a valid BCP 47 tag and that unknown countries fall back to `'en'`).
-  - `apps/public/src/state/{useURLState,useLocalStorageState,useDataset,useShortlist,useMediaQuery,useDocumentMeta,useScrollReset,useDroppedSlugs}.test.ts` — each hook drives the underlying API directly.
-  - `apps/public/src/state/useDataset.test.ts` — contamination regression: two consecutive renders, independent fetch counts asserted via MSW request log (folded into the same hook test file rather than a separate `dataset.test.ts`).
-  - `apps/public/src/views/states/{DatasetLoading,DatasetUnavailable,NoResorts}.test.tsx` — render contract; `NoResorts` exercised via a test that filters all resorts out (`country=XX` with no matching resort) so `views.length === 0` is reachable post-validator-min(1).
-  - `apps/public/src/views/cards.test.tsx` (PR 3.1c placeholder) — asserts the dataset count renders; replaced wholesale in PR 3.2.
-  - `apps/public/src/views/detail.test.tsx` (PR 3.1c stub) — `expect(() => render(<DetailDrawer slug={someResortSlug} />)).toThrow('detail route stub — lands in PR 3.5')`; covers the throw line at 100% per §5.5.
-  - `apps/public/src/views/ShortlistDrawer.test.tsx` (PR 3.1c stub) — minimal render assertion; full implementation in PR 3.3.
-  - `apps/public/src/App.test.tsx` — render lifecycle order (fallback → content; fallback → error UI); both `ShellErrorBoundary` lifecycle methods tested (`static getDerivedStateFromError` returns updated state; `componentDidCatch` invokes `onDatasetError(err)` no-op once); retry via `startTransition`; skip-link focus assertion.
-- *Implementation:*
-  - `packages/schema/src/loadResortDatasetFromObject.ts` (NEW, pure).
-  - `packages/schema/src/loadResortDataset.ts` (refactored Node wrapper; existing tests stay green by virtue of the wrapper).
-  - `packages/schema/src/index.ts` — export both.
-  - `packages/design-system/src/components/{Shell,Skeleton,EmptyStateLayout}.tsx`.
-  - `packages/design-system/src/format.ts`.
-  - `packages/design-system/src/index.ts` — re-export new components.
-  - `apps/public/src/lib/{urlState,router,datasetFetch,errors,deepLinks,lang}.ts`. (Note: NO `lib/format.ts` — call sites import from design-system directly per §2.3.)
-  - `apps/public/src/state/` — all 8 hooks; `useDataset` exports `__resetForTests`.
-  - `apps/public/src/views/states/{DatasetLoading,DatasetUnavailable,NoResorts}.tsx`.
-  - `apps/public/src/views/cards.tsx` — Landing placeholder rendering `views.length` count.
-  - `apps/public/src/views/detail.tsx` — frozen interface; body throws `'detail route stub — lands in PR 3.5'`.
-  - `apps/public/src/views/ShortlistDrawer.tsx` (stub returning `null`) — full implementation in PR 3.3; stub here so `App.tsx`'s import resolves.
-  - `apps/public/src/views/DroppedSlugsBanner.tsx` (stub returning `null`) — final wiring in PR 3.6.
-  - `apps/public/src/App.tsx` — replaces 3.1b stub with the full composition: `<Shell><ShellErrorBoundary><Suspense fallback>...</Suspense></ShellErrorBoundary></Shell>` plus URL→view dispatch + lazy DetailDrawer mount + ShortlistDrawer + DroppedSlugsBanner. (No separate `components/AppShell.tsx` wrapper file per §2.3.)
-
-**Acceptance gate:** `npm run qa` green; foundation states render; nav-to-detail throws (gated by URL state, untriggered by tests); contamination regression passes.
+Status: **DONE** — merged in [#16](https://github.com/mathvbarone/snowboard-trip-advisor/pull/16) (commit `a34e6e3`). Delivered: 8 hooks (`useURLState`, `useLocalStorageState`, `useDataset`, `useShortlist`, `useMediaQuery`, `useDocumentMeta`, `useScrollReset`, `useDroppedSlugs`) — note `useScrollReset` and `useDroppedSlugs` shipped as stubs in 3.1c and were finalized in 3.6a; design-system Shell + Skeleton + EmptyStateLayout; foundation view-states (`DatasetLoading`, `DatasetUnavailable`, `NoResorts`); the frozen `DetailDrawer` stub-throw (body landed in 3.5); `App.tsx` composition with `ShellErrorBoundary` + lazy detail mount; `loadResortDatasetFromObject` pure projection in schema.
 
 ### 7.8 PR 3.2 — CardsView
 
-**Goal.** Cards landing renders the seed dataset with full filter bar (sans view toggle); per-component axe-clean.
-
-**Deliverables (tests first):**
-
-- *Tests added:*
-  - `packages/design-system/src/components/{Button,IconButton,Input,Select,Chip,Pill,Card,SourceBadge,FieldValueRenderer}.test.tsx` — variant matrix + axe per state.
-  - `packages/design-system/src/icons/{sources,ui}/*.test.tsx` — `currentColor` assertion + size-prop test.
-  - `packages/design-system/src/primitives/Tooltip.test.tsx`.
-  - `apps/public/src/views/{cards,ResortCard,Hero,FilterBar}.test.tsx` — composition + axe; **FilterBar country chip hidden on ≤1 country exercised with an in-test single-country fixture** (the seed dataset has 2 countries; the chip-hidden branch wouldn't otherwise be reachable for 100% coverage); ResortCard CTA carries `rel="noopener noreferrer"` + `referrerpolicy="no-referrer"`; ResortCard's star `<IconButton>` carries `data-detail-trigger="<slug>"` per the §5.5 frozen-interface contract; ResortCard's resort-name heading carries `lang={countryToPrimaryLang(resort.country)}` (CZ → `cs`, PL → `pl` per §6.6 — assert against both seed resorts).
-- *Implementation:*
-  - All design-system components and icons named in tests above.
-  - `packages/design-system/src/primitives/Tooltip.tsx`.
-  - `apps/public/src/views/{cards,ResortCard,Hero,FilterBar}.tsx`.
-  - `apps/public/public/hero.jpg` (self-hosted hero image; no external CDN).
-  - FilterBar accepts `slot?: ReactNode` prop; PR 3.4 fills it.
-- *Docs:* README pointer added (cards landing is product-facing).
-
-**Acceptance gate:** `npm run qa` green; cards re-sort live on `&sort=` change asserted in `cards.test.tsx`; star toggles `aria-pressed` asserted in `ResortCard.test.tsx`; the seed dataset's two slugs render with the four named live + durable fields each. Visual fidelity to `docs/reference/01.png` is reviewer-judgement only (no Playwright snapshot infra until Epic 6 per parent spec §6.5) — not a gate.
+Status: **DONE** — merged in [#18](https://github.com/mathvbarone/snowboard-trip-advisor/pull/18) (commit `126e8b5`). Delivered: 9 design-system components (Button, IconButton, Input, Select, Chip, Pill, Card, SourceBadge, FieldValueRenderer) + Tooltip primitive + cards/ResortCard/Hero/FilterBar views + self-hosted `hero.jpg` + per-resort `lang` attribute (`countryToPrimaryLang`) + ResortCard CTA security attributes + `data-detail-trigger="<slug>"` per §5.5 frozen-interface contract + FilterBar `slot?` prop (filled by 3.4).
 
 ### 7.9 PR 3.3 — Shortlist & sharing
 
-**Goal.** Star-toggle drives the shortlist; drawer renders on every breakpoint; merge/replace dialog handles collisions; share URL works with clipboard fallback.
-
-**Deliverables (tests first):**
-
-- *Tests added:*
-  - `packages/design-system/src/primitives/Modal.test.tsx` — focus trap; scroll lock; Escape.
-  - `packages/design-system/src/primitives/Drawer.test.tsx` — non-modal: keyboard focus inside, mouse-clicks behind work; Escape; outside-click; focus return; full prop superset exercised.
-  - `apps/public/src/views/{ShortlistDrawer,MergeReplaceDialog,ShareUrlDialog}.test.tsx`.
-  - `apps/public/src/state/useShortlist.test.ts` extension — hydration only when URL is empty; mirror writes on URL change; `setEqual([a,b,c],[c,b,a]) === true` (no dialog).
-- *Implementation:*
-  - `packages/design-system/src/primitives/Modal.tsx`.
-  - `packages/design-system/src/primitives/Drawer.tsx` (full prop superset).
-  - `apps/public/src/views/{ShortlistDrawer,MergeReplaceDialog,ShareUrlDialog}.tsx`.
-- *Docs:* README pointer (shortlist is product-facing).
-
-**Acceptance gate:** `npm run qa` green; star → drawer ↔ URL ↔ localStorage three-way coherence asserted; share-URL paste in fresh session triggers MergeReplaceDialog when local exists; same-set/different-order does NOT trigger. Drawer renders at every named breakpoint (xs/sm/md/lg) — asserted in `Drawer.test.tsx` via `vi.spyOn(window, 'matchMedia')` mocking each breakpoint and verifying the drawer mounts.
+Status: **DONE** — merged in [#21](https://github.com/mathvbarone/snowboard-trip-advisor/pull/21) (commit `296d529`). Delivered: Modal + Drawer primitives (full prop superset) + ShortlistDrawer + MergeReplaceDialog + ShareUrlDialog + URL/localStorage three-way coherence (`useShortlist` extension) + clipboard-share with fallback.
 
 ### 7.10 PR 3.4 — MatrixView
 
-**Goal.** Matrix route renders comparison table; `<md` shows redirect message; `&highlight=<METRIC_FIELDS_entry>` activates row highlight (the metric path is a row identifier in the matrix; resorts are columns); cards/matrix toggle lands in the slot.
-
-**Deliverables (tests first):**
-
-- *Tests added:*
-  - `packages/design-system/src/components/{Table,ToggleButtonGroup}.test.tsx`.
-  - `apps/public/src/views/matrix.test.tsx` — empty shortlist → "Add resorts to compare"; non-empty → table; `&highlight=snow_depth_cm` highlights the matching row; viewport `<md` → redirect; lazy chunk loaded only when navigating.
-  - `apps/public/src/views/FilterBar.test.tsx` extension — view toggle pushes `&view=` (PUSH transition).
-- *Implementation:*
-  - `packages/design-system/src/components/{Table,ToggleButtonGroup}.tsx`.
-  - `apps/public/src/views/matrix.tsx` (lazy).
-  - `apps/public/src/views/FilterBar.tsx` — fills the `slot` prop with the `ToggleButtonGroup`.
-  - `apps/public/src/views/matrix.module.css` — when `<lg` and `&detail=` set, downgrade matrix to cards under the drawer.
-- *Docs:* README pointer (matrix is product-facing).
-
-**Acceptance gate:** `npm run qa` green; navigating cards → matrix produces a chunk fetch (asserted via MSW request log in `matrix.test.tsx`); browser-back from `?view=matrix` returns to `?view=cards` (asserted in `useURLState.test.ts` via `dispatchEvent(new PopStateEvent('popstate'))`); bundle visualizer shows matrix in its own chunk (verified by PR 3.6's analyze script — advisory at this PR).
+Status: **DONE** — merged in [#49](https://github.com/mathvbarone/snowboard-trip-advisor/pull/49) (commit `5e60c18`). Delivered: Table + ToggleButtonGroup design-system primitives + lazy matrix view + `&highlight=<METRIC_FIELDS entry>` row affordance + cards/matrix toggle in the FilterBar slot + `matrix.module.css` drawer-downgrade rule for `<lg` viewports.
 
 ### 7.11 PR 3.5 — DetailDrawer body
 
-**Goal.** Detail drawer renders full resort detail with deep-link section. Frozen interface from PR 3.1c gets its body. **Can ship in parallel with 3.2/3.3/3.4** because the interface is locked.
-
-**Deliverables (tests first):**
-
-- *Tests added:*
-  - `apps/public/src/lib/deepLinks.test.ts` — `encodeURIComponent` round-trip; malicious slug doesn't escape; security attributes present on every external `<a>`.
-  - `apps/public/src/views/detail.test.tsx` — drawer mounts when `&detail=<slug>` set + slug exists; hides when slug missing; close → URL clears; focus returns to triggering card star button (`data-detail-trigger`); axe in drawer-open state.
-- *Implementation:*
-  - `apps/public/src/lib/deepLinks.ts` — pure builder for booking + airbnb deep-link URLs.
-  - `apps/public/src/views/detail.tsx` — replaces 3.1c's stub-throw body. **`App.tsx` is NOT touched** (frozen interface).
-- *Acceptance addendum:* attach `npm run analyze` advisory output to PR description.
-- *Docs:* README pointer (detail view is product-facing).
-
-**Acceptance gate:** `npm run qa` green; opening detail produces a lazy chunk fetch (asserted via MSW request log in `detail.test.tsx`); the drawer-on-matrix CSS rule is present in `matrix.module.css` text (asserted by reading the module's source at test time — JSDOM does not evaluate `@media` queries; full media-query firing deferred to Epic 6 Playwright); bundle visualizer shows detail in its own chunk (advisory at this PR).
+Status: **DONE** — merged in [#52](https://github.com/mathvbarone/snowboard-trip-advisor/pull/52) (commit `1f90f89`). Delivered: `detail.tsx` body replacing the 3.1c frozen-interface stub-throw + pure `deepLinks.ts` builder (booking + airbnb) + drawer-open axe assertion. Per §5.5, `App.tsx` was not touched (interface frozen at 3.1c).
 
 ### 7.12 PR 3.6 — Integration tests + bundle analysis
 
-**Goal.** Route-composition axe sweep; bundle analyze script in `warn` mode; final wiring of `DroppedSlugsBanner` and `useScrollReset`.
+Status: **DONE** in three sub-PRs:
 
-**Deliverables (tests first):**
+- **3.6a** — integration test infra + final wiring of `DroppedSlugsBanner`, `useScrollReset`, and `<NoResorts>` — merged in [#53](https://github.com/mathvbarone/snowboard-trip-advisor/pull/53) (commit `c82bc9e`).
+- **3.6b** — bundle analysis tooling: `check-bundle-budget` (warn mode) + `check-preload-hrefs` (error mode) + `check-dist-dataset` (error mode) + `npm run analyze` + `rollup-plugin-visualizer` plugin — merged in [#55](https://github.com/mathvbarone/snowboard-trip-advisor/pull/55) (commit `9e8ac47`).
+- **3.6c** — `.github/workflows/quality-gate.yml` adds the `analyze` job depending on `qa` — merged in [#57](https://github.com/mathvbarone/snowboard-trip-advisor/pull/57). (PR #56 was the original 3.6c; it was phantom-merged when its base branch `epic-3/pr-3.6b-analysis` was deleted after #55's squash. PR #57 re-applied the same content. See §10.8.)
 
-- *Tests added:*
-  - `tests/integration/apps/public/cards-empty.test.ts` — focus order across Shell + FilterBar + empty grid; skip-link target.
-  - `tests/integration/apps/public/cards-loaded.test.ts` — focus order with cards rendered.
-  - `tests/integration/apps/public/matrix.test.ts` — matrix-route composition.
-  - `tests/integration/apps/public/detail-open.test.ts` — drawer-open composition; focus return path.
-  - `apps/public/src/views/DroppedSlugsBanner.test.tsx` — final wiring scenarios.
-  - `apps/public/src/state/useScrollReset.test.ts` — fires on view transition; doesn't fire on sort/filter.
-- *Implementation:*
-  - `apps/public/src/views/DroppedSlugsBanner.tsx` final wiring (PR 3.1c shipped a stub).
-  - `apps/public/src/state/useScrollReset.ts` final wiring.
-  - Root `package.json` — `npm run analyze` script using `rollup-plugin-visualizer`.
-  - `scripts/check-bundle-budget.ts` (+ `scripts/check-bundle-budget.test.ts`) — reads visualizer JSON, computes initial chunk gzip, **warns** (exits 0) on >100 KB. Epic 6 follow-up flips to `error`.
-  - `scripts/check-preload-hrefs.ts` (+ `scripts/check-preload-hrefs.test.ts`) — parses `dist/index.html`'s `<link rel="preload">` href values and asserts each resolves to a real file in `dist/` (per §10.7). **Error mode** in CI (exits 1 on missing href; blocks merge — this is a deploy-breakage check, not a budget drift).
-  - `scripts/check-dist-dataset.ts` (+ `scripts/check-dist-dataset.test.ts`) — asserts `dist/data/current.v1.json` exists and parses as JSON with the published-dataset envelope shape (per §10.2 nginx-contract verification). **Error mode** in CI.
-  - `.github/workflows/quality-gate.yml` — adds `npm run analyze` step (warn mode).
+**Operational deviations from the original deliverable list (load-bearing for future agents):**
 
-**Acceptance gate:** `npm run qa` + `npm run test:integration` green; axe-clean per route composition; bundle visualizer report attached.
+- `check-preload-hrefs` was originally specified to parse `dist/index.html` only. Production scope expanded during 3.6b review to also walk `dist/assets/*.js` for runtime-injected `/assets/*.woff2?` URL string literals — the public app's `injectFontPreloads` path resolves the `?url` imports to hashed strings that land in JS, not in the HTML. The script also rejects hrefs whose resolved path escapes `dist/` (containment guard).
+- `check-bundle-budget` is warn-mode only (always exits 0); Epic 6 follow-up flips to error per §6.7. The CLI now prints the actual gzip total even under budget so PR descriptions can attach the audit-trail line.
+- The `analyze` CI job uses `if: success() || failure()` with `if-no-files-found: warn` on the artifact upload (subagent-review fold; avoids double-failing the job when a pre-build error means `dist/stats.html` doesn't exist).
+- `quality-gate / analyze` is **not** yet on `main`'s required-status set; adoption deferred to Epic 6's branch-protection script rebuild (same cadence as `quality-gate / qa`).
 
 ### 7.13 Cross-cutting (every PR)
 
@@ -1000,14 +850,17 @@ at the bottom of `state/useDataset.ts`. The 3-line `import.meta.hot` block is ad
 
 ### 10.7 Bundle-fail mode for emitted preload hrefs
 
-PR 3.6 adds a CI smoke test that parses `dist/index.html`'s `<link rel="preload">` href values and asserts each resolves to a file in `dist/`. Catches the failure mode where Vite renames the woff2 asset but the import URL doesn't update (silent 404 in prod).
+`scripts/check-preload-hrefs.{ts,cli.ts}` (PR 3.6b → #55) walks two URL sources to catch the failure mode where Vite renames a woff2 asset but the import URL doesn't update (silent 404 in prod):
 
----
+- `dist/index.html` `<link rel="preload">` tags (none today; reserved for future Vite-emitted preloads).
+- JS string literals in `dist/assets/*.js` matching `/assets/<name>.<woff2|woff>` — the runtime-injected preloads created by `apps/public/src/lib/injectFontPreloads.ts` from `?url` imports in `main.tsx`. Vite resolves each `?url` import to a hashed string at build time; the literal lands in the emitted JS chunk and the helper appends a `<link rel="preload" as="font" crossorigin>` at module-eval. Quote-class regex accepts `"`, `'`, and backtick template literals (esbuild's minifier emits backtick strings for these refs).
 
-## 11. Verification & next steps
+The script also rejects hrefs whose resolved path escapes `dist/` (containment guard), so a malformed href like `/../etc/secret` cannot validate a file outside the build output.
 
-1. This spec is committed to `docs/superpowers/specs/2026-04-28-epic-3-public-app-design.md` on branch `docs/epic-3-public-app-spec`.
-2. `spec-document-reviewer` subagent runs against this doc; findings folded into the same branch before maintainer review.
-3. User reviews the committed spec.
-4. `superpowers:writing-plans` produces the implementation plan against this spec.
-5. `superpowers:using-git-worktrees` + `superpowers:subagent-driven-development` execute the plan PR by PR, in the dependency-graph order from §7.4.
+### 10.8 PR-#56 phantom-merge incident (Epic 3 close)
+
+PR #56 (the original 3.6c) was opened with `baseRefName: epic-3/pr-3.6b-analysis` (stacked on PR #55's branch). When PR #55 was squash-merged to `main`, GitHub auto-deleted the source branch `epic-3/pr-3.6b-analysis` and marked PR #56 as `MERGED` because its base was gone — but #56's actual commit `eccb24a259...` never landed on `main` (only #55's squash `9e8ac47` did). The workflow YAML diff was lost.
+
+PR #57 re-applied the same content (verbatim cherry-pick of `f089972` onto current main).
+
+**Future agent guidance:** when stacking PRs (`gh pr create --base <other-branch>`), confirm via `gh pr view <stacked-PR> --json baseRefName,mergeCommit` after the parent PR merges. If `baseRefName` points to a now-deleted branch and the stacked PR's `mergeCommit.oid` is not reachable from `main`, the diff was lost and must be re-applied. GitHub's "MERGED" badge on a stacked PR after its base is deleted is a false positive in this scenario.
