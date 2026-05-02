@@ -175,6 +175,25 @@ describe('apiClient (PR 4.1a, spec §3.2 + §7.5)', (): void => {
     await expect(apiClient.listResorts({})).rejects.toThrow()
   })
 
+  it('throws ApiClientError (not ZodError) when 5xx body is non-contract — synthesizes internal envelope', async (): Promise<void> => {
+    server.use(
+      http.get('/api/resorts', () =>
+        HttpResponse.json({ unexpected: 'malformed' }, { status: 500 }),
+      ),
+    )
+    try {
+      await apiClient.listResorts({})
+      expect.fail('should have thrown')
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiClientError)
+      if (err instanceof ApiClientError) {
+        expect(err.status).toBe(500)
+        expect(err.envelope.error.code).toBe('internal')
+        expect(err.envelope.error.message).toContain('500')
+      }
+    }
+  })
+
   it('serializeQuery flattens nested filter + page via JSON-encoded URLSearchParams entries', async (): Promise<void> => {
     let capturedURL = ''
     server.use(

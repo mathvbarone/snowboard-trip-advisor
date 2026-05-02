@@ -40,7 +40,16 @@ async function request<T>(
   const res = await fetch(path, init)
   const json: unknown = await res.json()
   if (!res.ok) {
-    throw new ApiClientError(res.status, ErrorEnvelope.parse(json))
+    // The server SHOULD respond with the ErrorEnvelope shape on 4xx/5xx, but a
+    // malformed error body must NOT leak a Zod error to the catch site — call
+    // sites branch on `err instanceof ApiClientError`, so a ZodError would
+    // bypass their error-handling. Synthesize a deterministic envelope when
+    // the server returns a non-contract error body.
+    const parsed = ErrorEnvelope.safeParse(json)
+    const envelope: ErrorEnvelope = parsed.success
+      ? parsed.data
+      : { error: { code: 'internal', message: `HTTP ${String(res.status)}: malformed error response` } }
+    throw new ApiClientError(res.status, envelope)
   }
   return parser(json)
 }
