@@ -95,7 +95,7 @@ Endpoints 4 + 5 (Test/Sync) and 9 + 10 (analyst notes) are **NOT** added in Epic
 
 **`packages/schema/src/` additions:**
 
-- `workspaceFile.ts` — `WorkspaceFile` Zod schema for `data/admin-workspace/<slug>.json`. Top-level shape: `{ schema_version: 1, slug: ResortSlug, resort: Resort, live_signal: ResortLiveSignal | null, modified_at: ISODateTimeString }`. Uses Zod `.passthrough()` so the post-Epic-4 follow-up can add a `notes` field additively without a `schema_version` bump.
+- `workspaceFile.ts` — `WorkspaceFile` Zod schema for `data/admin-workspace/<slug>.json`. Top-level shape: `{ schema_version: 1, slug: ResortSlug, resort: Resort, live_signal: ResortLiveSignal | null, modified_at: ISODateTimeString, editor_modes: Partial<Record<MetricPath, 'manual' | 'auto'>> }`. Uses Zod `.passthrough()` so the post-Epic-4 follow-up can add a `notes` field additively without a `schema_version` bump. The `editor_modes` field carries the per-field AUTO/MANUAL state for `useModeToggle` (sparse map per §10.2 — only metric paths actively toggled appear; missing keys project as `'auto'`); a `.refine()` enforces the cross-key invariant `Object.keys(editor_modes) ⊆ Object.keys(resort.field_sources)`.
 - `index.ts` / `node.ts` — barrel updates as needed.
 
 ### 2.3 `apps/admin/src/` layout
@@ -384,7 +384,7 @@ Per Epic 3 spec §5.1 "Out of Epic 3" — these components are admin-only in Pha
 
 - **`Sidebar`** — left-rail navigation. Renders an `aria-label` group of `<NavLink>`-style anchors. Supports an active-route highlight prop.
 - **`StatusPill`** — small visual badge with 4 named variants: `Live` | `Stale` | `Failed` | `Manual`. Drives the editor's per-field status indicator. Must axe-clean in all 4 states; uses semantic color tokens from `packages/design-system/src/tokens.ts`.
-- **`Tabs`** — top-of-panel tab affordance. Used in PR 4.4a's editor (Durable / Live tabs). Keyboard-navigable per ARIA pattern (Left/Right arrows, Home/End).
+- **`Tabs`** — top-of-panel tab affordance. Used in PR 4.4b's editor view (Durable / Live tabs); 4.4a is server-only and does not consume `<Tabs>`. Keyboard-navigable per ARIA pattern (Left/Right arrows, Home/End).
 - **`Popover`** — anchored floating panel. Used in 4.4b's `FieldRow` for the per-field actions dropdown (Phase 1 has only the ModeToggle; Epic 5's Test/Sync extends it).
 - **`DropdownMenu`** — keyboard-navigable menu for the HeaderBar's user identity placeholder + Sources / Integrations / History links. Distinct from `Popover` (menu items vs. arbitrary content).
 
