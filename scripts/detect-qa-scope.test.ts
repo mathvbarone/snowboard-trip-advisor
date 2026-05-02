@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { detectQaScope } from './detect-qa-scope'
+import { detectQaScope, parseGitNameStatus } from './detect-qa-scope'
 
 describe('detectQaScope', (): void => {
   it('returns "full" for an empty diff (safe default)', (): void => {
@@ -105,5 +105,82 @@ describe('detectQaScope', (): void => {
 
   it('returns "full" for a path that contains "docs/" mid-string but does not start with it', (): void => {
     expect(detectQaScope(['apps/public/docs/foo.ts'])).toBe('full')
+  })
+})
+
+describe('parseGitNameStatus', (): void => {
+  it('returns an empty list for empty input', (): void => {
+    expect(parseGitNameStatus('')).toEqual([])
+    expect(parseGitNameStatus('\n\n')).toEqual([])
+  })
+
+  it('extracts the path from single-path entries (M / A / D / T)', (): void => {
+    expect(parseGitNameStatus('M\tREADME.md\n')).toEqual(['README.md'])
+    expect(parseGitNameStatus('A\tdocs/x.md\n')).toEqual(['docs/x.md'])
+    expect(parseGitNameStatus('D\tscripts/old.sh\n')).toEqual(['scripts/old.sh'])
+    expect(parseGitNameStatus('T\tpackage.json\n')).toEqual(['package.json'])
+  })
+
+  it('extracts BOTH preimage and postimage paths for renames (R*)', (): void => {
+    expect(
+      parseGitNameStatus('R100\tdocs/old.md\tdocs/new.md\n'),
+    ).toEqual(['docs/old.md', 'docs/new.md'])
+    expect(
+      parseGitNameStatus(
+        'R75\tapps/public/src/main.tsx\tREADME.md\n',
+      ),
+    ).toEqual(['apps/public/src/main.tsx', 'README.md'])
+  })
+
+  it('extracts both paths for copies (C*) — same shape as renames', (): void => {
+    expect(parseGitNameStatus('C75\tsrc/orig.ts\tsrc/copy.ts\n')).toEqual([
+      'src/orig.ts',
+      'src/copy.ts',
+    ])
+  })
+
+  it('handles a mixed diff with single-path and rename lines together', (): void => {
+    const input =
+      'M\tREADME.md\n' +
+      'R100\tdocs/old.md\tdocs/new.md\n' +
+      'A\tdocs/x.md\n' +
+      'D\tscripts/old.sh\n'
+    expect(parseGitNameStatus(input)).toEqual([
+      'README.md',
+      'docs/old.md',
+      'docs/new.md',
+      'docs/x.md',
+      'scripts/old.sh',
+    ])
+  })
+
+  it('strips trailing CR (CRLF stdin from Windows shells)', (): void => {
+    expect(parseGitNameStatus('M\tREADME.md\r\n')).toEqual(['README.md'])
+  })
+
+  it('treats malformed single-column lines as a single path (defensive fail-closed for classifier)', (): void => {
+    expect(parseGitNameStatus('orphan-line\n')).toEqual(['orphan-line'])
+  })
+
+  it('skips empty columns produced by consecutive tabs (defensive)', (): void => {
+    expect(parseGitNameStatus('M\t\tREADME.md\n')).toEqual(['README.md'])
+  })
+
+  it('end-to-end: rename of code → markdown classifies as "full" (Codex P1 case)', (): void => {
+    const renameToMd = 'R75\tapps/public/src/main.tsx\tREADME.md\n'
+    expect(detectQaScope(parseGitNameStatus(renameToMd))).toBe('full')
+  })
+
+  it('end-to-end: rename within docs/ stays "docs-only"', (): void => {
+    const renameWithinDocs =
+      'R100\tdocs/adr/0001-old.md\tdocs/adr/0001-new.md\n'
+    expect(detectQaScope(parseGitNameStatus(renameWithinDocs))).toBe(
+      'docs-only',
+    )
+  })
+
+  it('end-to-end: copy of code file (C*) classifies as "full" even if destination is markdown', (): void => {
+    const copy = 'C50\tsrc/foo.ts\tdocs/foo.md\n'
+    expect(detectQaScope(parseGitNameStatus(copy))).toBe('full')
   })
 })

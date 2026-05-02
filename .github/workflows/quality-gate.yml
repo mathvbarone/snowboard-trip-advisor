@@ -39,7 +39,10 @@ jobs:
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             base='${{ github.event.pull_request.base.sha }}'
             head='${{ github.event.pull_request.head.sha }}'
-            paths="$(git diff --name-only --diff-filter=ACMRD "$base" "$head")"
+            # --name-status (not --name-only) so renames carry both old
+            # and new paths — see detect-qa-scope.ts header for the
+            # rename-bypass rationale (Codex P1 finding on PR #71).
+            paths="$(git diff --name-status --diff-filter=ACMRD "$base" "$head")"
             scope="$(printf '%s\n' "$paths" | npx --no-install tsx scripts/detect-qa-scope.cli.ts)"
           else
             scope=full
