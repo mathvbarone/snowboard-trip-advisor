@@ -4,7 +4,7 @@
 **Parent product spec:** [`docs/superpowers/specs/2026-04-22-product-pivot-design.md`](2026-04-22-product-pivot-design.md) §3 (admin app product surface), §4 (data model — already in `packages/schema`), §5 (`ResortView` projection — already shipped), §8 (`/api/*` contract).
 **Predecessor:** [`docs/superpowers/specs/2026-04-28-epic-3-public-app-design.md`](2026-04-28-epic-3-public-app-design.md) (Epic 3 — public app, shipped).
 **ADRs in flight:** [ADR-0011](../../adr/0011-defer-test-sync-ux-to-epic-5.md) (Test / Sync deferral), [ADR-0012](../../adr/0012-defer-analyst-notes-to-post-epic-4-followup.md) (Analyst notes deferral).
-**Authoritative agent rules:** `AGENTS.md` (or `CLAUDE.md` until the agent-discipline migration stack lands).
+**Authoritative agent rules:** [`AGENTS.md`](../../../AGENTS.md). `CLAUDE.md` is now a Claude-specific compatibility shim that points at AGENTS.md.
 
 ## 0. Executive Summary
 
@@ -454,7 +454,7 @@ PRs touching these paths require an independent subagent review per AGENTS.md:
 
 - **TDD** per the deliverable ordering.
 - **README evaluation** — admin app is internal-only and not user-facing, so README updates are minimal. PRs 4.5b (publish UI) and 4.6b (integration tests) MAY warrant a README mention of the admin app's existence + how to start it; lower-numbered PRs may skip with a one-line note in the PR description.
-- **DCO sign-off** on every commit (`git commit -s`, or auto-added by `prepare-commit-msg` once stack-2 of the agent-discipline migration lands).
+- **DCO sign-off** on every commit (`git commit -s`, or auto-added by the `prepare-commit-msg` hook installed from `scripts/prepare-commit-msg` via `npm run setup`).
 - **Subagent Review Discipline** — per the §7.2 matrix.
 - **Pre-commit `npm run qa`** — runs before each commit.
 
