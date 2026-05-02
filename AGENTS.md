@@ -36,11 +36,11 @@ npm run setup
 
 The rules in this file are not suggestions. They are backed by mechanical gates that fire before content lands in git:
 
-- **CI required status check `quality-gate / qa`** — runs `npm run qa` (lint → check:agent-discipline-sync → typecheck → coverage → tokens:check → test:hooks → test:integration) on every PR. PR cannot merge if red.
+- **CI required status check `quality-gate / qa`** — runs `npm run qa` (lint → check:agent-discipline-sync → typecheck → coverage → tokens:check → test:hooks → test:integration) on every PR with code changes. PR cannot merge if red. **Docs-only carve-out:** when every PR-changed path is docs (under `docs/` or ending in `.md`, excluding the policy roots `.github/`, `.claude/`, `scripts/`), the job runs only `check:agent-discipline-sync` — the AGENTS.md ↔ CLAUDE.md drift checker is exactly the gate that matters for doc-only changes, and the rest of the chain (typecheck/coverage/tests) has nothing to check. Classifier: `scripts/detect-qa-scope.{ts,cli.ts}` (shared with the pre-commit hook so the two surfaces cannot drift). The job name is unchanged so the required-status contract on `main` still reports. Push events to `main` always run the full gate.
 - **Drift checker `check:agent-discipline-sync`** (active, in `qa` chain) — `scripts/check-agent-discipline-sync.cli.ts` verifies AGENTS.md / CLAUDE.md authority symmetry, the AGENTS.md required-section set is intact (catches the closed-PR-#54 silent-section-removal failure mode), no defer-then-override claim in CLAUDE.md, and every bot author in `.github/dependabot.yml` has a matching policy ADR. Exits 0 (clean) / 1 (drift, fix the docs) / 2 (checker bug, fix the script). Runs as the second qa step (after `lint`) so cheap drift detection fails fast before the slow test suite.
 - **CI required status check `dco`** — verifies every commit in the PR carries a `Signed-off-by:` trailer. Missing trailer fails the PR.
 - **CI status check `quality-gate / analyze`** — runs `npm run analyze` (build + bundle-budget warn + preload-hrefs error + dist-dataset error). Not yet on the required-status set; adoption deferred to Epic 6 branch-protection rebuild.
-- **Pre-commit hook** — `npm run qa` runs before every local commit (`scripts/pre-commit`, installed by `npm run setup`).
+- **Pre-commit hook** — `npm run qa` runs before every local commit (`scripts/pre-commit`, installed by `npm run setup`). The same docs-only carve-out as `quality-gate / qa` applies: a commit whose every staged path is docs runs only `check:agent-discipline-sync`. Same classifier (`scripts/detect-qa-scope.cli.ts`) used in both surfaces.
 - **PreToolUse:Bash hook** (Claude runtime; `scripts/hooks/deny-dangerous-git.sh`) — blocks `--no-verify` anywhere and `git push --force` (or `--force-with-lease` / `-f`) to `main`/`master`. A blocked call surfaces the reason to the agent; adjust, don't retry.
 - **PostToolUse:Edit|Write hook** (Claude runtime) — runs targeted ESLint on the file just edited; violations surface while the agent is still in the loop.
 - **PostToolUse:Bash hook** (Claude runtime; post-pr-create reminder) — after `gh pr create` succeeds, surfaces the per-PR workflow checklist (Codex review request, local-test plan generation, fold cycle).
@@ -64,6 +64,7 @@ Load-bearing changes require an independent general-purpose subagent review befo
 - `scripts/pre-commit`, `scripts/prepare-commit-msg`
 - `scripts/install-git-hooks.{ts,cli.ts,test.ts}`
 - `scripts/check-agent-discipline-sync.{ts,cli.ts,test.ts}`
+- `scripts/detect-qa-scope.{ts,cli.ts,test.ts}`
 - `scripts/apply-branch-protection.sh` (when restored)
 - `eslint.config.js`
 - `packages/schema/**`
@@ -133,12 +134,14 @@ This runs in sequence and fails fast:
 6. `npm run test:hooks` (`scripts/hooks/test-hooks.sh` — both `node --test` unit tests and bash integration tests for the hook scripts)
 7. `npm run test:integration` (workspace-scoped integration tests)
 
+**Docs-only carve-out.** Both surfaces (the local pre-commit hook and the CI `quality-gate / qa` job) classify the change set via `scripts/detect-qa-scope.cli.ts`. When every changed path is docs — i.e. it sits under `docs/` or ends in `.md`, AND it is not under any of the policy roots `.github/`, `.claude/`, `scripts/` — only step 2 (`check:agent-discipline-sync`) runs. The drift checker is precisely the gate that matters for doc-only changes; the rest of the chain has nothing to verify because none of its inputs changed. Touching any code path, any file under a policy root (workflows, settings, hook scripts), or `package.json` / `eslint.config.js` / `tsconfig*.json` / `vite.config.ts` triggers the full chain. Both surfaces fail closed if the classifier crashes — the commit / job aborts rather than silently falling through to either branch.
+
 Rules:
 
-- Run `npm run qa` before claiming any task complete.
-- Run `npm run qa` before every commit. The pre-commit hook enforces this automatically.
+- Don't bypass the pre-commit hook. It runs automatically before every local commit (full chain on code commits; drift check only on docs-only commits per the carve-out above).
 - Never use `git commit --no-verify`.
-- A passing `npm run qa` is the definition of done.
+- For code-touching work, `npm run qa` is the operative gate — run it before claiming a task complete.
+- For docs-only work, `npm run check:agent-discipline-sync` is the operative gate; the rest of the chain has no relevant input to check.
 
 ## TDD Workflow
 

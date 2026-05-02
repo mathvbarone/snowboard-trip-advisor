@@ -106,6 +106,14 @@ export default defineConfig({
         // `generate-tokens.cli.ts` above — running the CLI under vitest would
         // require spawning subprocesses to cover ~10 lines per file.
         'scripts/check-*.cli.ts',
+        // `scripts/detect-qa-scope.cli.ts` — side-effect entry point that
+        // streams stdin into the pure `detectQaScope` classifier in
+        // `scripts/detect-qa-scope.ts` (which carries 100% unit coverage).
+        // Invoked by `scripts/pre-commit` and `.github/workflows/quality-gate.yml`
+        // for the docs-only QA carve-out. Same rationale as the other
+        // `*.cli.ts` exclusions: covering the stdin-read shim would require
+        // spawning subprocesses for no additional safety.
+        'scripts/detect-qa-scope.cli.ts',
         // `scripts/install-git-hooks.cli.ts` — side-effect entry that resolves
         // the worktree's hooks dir via `git rev-parse --git-path hooks` and
         // writes the hook files. Same exclusion rationale as the other `*.cli.ts`
