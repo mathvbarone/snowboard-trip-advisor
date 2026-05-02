@@ -114,7 +114,21 @@ describe('apps/admin ESLint restrictions (PR 4.1a, spec §3.2 + §7.5)', (): voi
     ['window.navigator.sendBeacon', `export const x = window.navigator.sendBeacon('/api/log', 'data')\n`],
     ['globalThis.navigator.sendBeacon', `export const x = globalThis.navigator.sendBeacon('/api/log', 'data')\n`],
     ['self.navigator.sendBeacon', `export const x = self.navigator.sendBeacon('/api/log', 'data')\n`],
-  ])('blocks %s (Codex round-6 P2 fold — selector now matches any nested object)', async (_label: string, code: string): Promise<void> => {
+    ["navigator['sendBeacon'] (computed-bracket, Codex round-7)", `export const x = navigator['sendBeacon']('/api/log', 'data')\n`],
+    ['navigator[`sendBeacon`] (computed-template-literal, Codex round-7)', 'export const x = navigator[`sendBeacon`](\'/api/log\', \'data\')\n'],
+  ])('blocks %s (Codex round-6 + round-7 P2 folds)', async (_label: string, code: string): Promise<void> => {
+    const [result] = await lintFixture(code, join(ADMIN_SRC, '__eslint_fixture__.ts'))
+    expect(result?.messages.some((m): boolean => m.ruleId === 'no-restricted-syntax')).toBe(true)
+  })
+
+  it.each([
+    ['named re-export', `export { x } from '../server'\n`],
+    ['named re-export with /foo', `export { x } from '../server/foo'\n`],
+    ['type-only named re-export', `export type { X } from '../server/foo'\n`],
+    ['wildcard re-export', `export * from '../server/foo'\n`],
+    ['wildcard re-export bare', `export * from '../server'\n`],
+    ['deeper relative wildcard re-export', `export * from '../../../server/foo'\n`],
+  ])('blocks server re-export form: %s (Codex round-7 P2 fold)', async (_label: string, code: string): Promise<void> => {
     const [result] = await lintFixture(code, join(ADMIN_SRC, '__eslint_fixture__.ts'))
     expect(result?.messages.some((m): boolean => m.ruleId === 'no-restricted-syntax')).toBe(true)
   })

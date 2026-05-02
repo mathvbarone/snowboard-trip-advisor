@@ -567,9 +567,21 @@ export default tseslint.config(
           // missed the nested cases. The broader selector is acceptable in
           // apps/admin/src/** where no non-navigator object legitimately
           // exposes a sendBeacon method.
-          selector: 'CallExpression[callee.type="MemberExpression"][callee.property.name="sendBeacon"]',
+          selector: 'CallExpression[callee.type="MemberExpression"][callee.computed=false][callee.property.name="sendBeacon"]',
           message:
             'sendBeacon is a fire-and-forget network channel that bypasses the typed apiClient (covers navigator.sendBeacon, window.navigator.sendBeacon, globalThis.navigator.sendBeacon). Admin SPA Phase 1 has no analytics use case; if one lands, route it through the apiClient.',
+        },
+        {
+          // Computed-member bracket-string sendBeacon: navigator['sendBeacon'](...)
+          selector: 'CallExpression[callee.type="MemberExpression"][callee.computed=true][callee.property.type="Literal"][callee.property.value="sendBeacon"]',
+          message:
+            "Computed-member sendBeacon (navigator['sendBeacon']) is also banned — same bypass class as the dot-notation form. Use the typed apiClient.",
+        },
+        {
+          // Computed-member template-literal sendBeacon: navigator[`sendBeacon`](...)
+          selector: 'CallExpression[callee.type="MemberExpression"][callee.computed=true][callee.property.type="TemplateLiteral"][callee.property.quasis.0.value.cooked="sendBeacon"]',
+          message:
+            "Template-literal computed-member sendBeacon (navigator[`sendBeacon`]) is also banned — same bypass class as the bracket-string form. Use the typed apiClient.",
         },
         {
           // Arbitrary-depth relative server imports: ../server, ../server/,
@@ -600,6 +612,23 @@ export default tseslint.config(
           selector: 'ImportExpression[source.type="TemplateLiteral"][source.quasis.0.value.cooked=/^(\\.\\.\\/)+server(\\/|$)/]',
           message:
             "Template-literal dynamic server-module imports (await import(`../server`), await import(`../server/...`)) are also banned at arbitrary depth — same boundary as the string-literal variant above.",
+        },
+        {
+          // Re-export forms (Codex round-7 P2 fold): `export { x } from '../server'`
+          // and `export type { X } from '../server/foo'`. These are
+          // ExportNamedDeclaration nodes (NOT ImportDeclaration) so the
+          // import selectors above missed them. Type-only re-exports are
+          // also banned — the SPA's wire-contract types come from
+          // packages/schema/api, not apps/admin/server.
+          selector: 'ExportNamedDeclaration[source.value=/^(\\.\\.\\/)+server(\\/|$)/]',
+          message:
+            "Relative re-exports of server modules (export { x } from '../server/...') are banned at arbitrary depth — same SPA/server boundary as the import bans. Type-only re-exports are also banned: SPA wire-contract types come from packages/schema/api, not apps/admin/server.",
+        },
+        {
+          // `export * from '../server/foo'` — ExportAllDeclaration.
+          selector: 'ExportAllDeclaration[source.value=/^(\\.\\.\\/)+server(\\/|$)/]',
+          message:
+            "Relative wildcard re-exports of server modules (export * from '../server/...') are banned at arbitrary depth — same boundary as the named re-export and import bans.",
         },
         {
           selector: BRAND_CAST_SELECTOR,
