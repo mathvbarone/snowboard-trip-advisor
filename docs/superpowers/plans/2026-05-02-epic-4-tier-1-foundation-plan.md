@@ -66,7 +66,7 @@ Branch names per spec §7.5–7.7: `epic-4/pr-4.1a-foundation`, `epic-4/pr-4.1b-
 - Contract snapshot present at `packages/schema/api/__snapshots__/contract.snap` and picked up by `npm run coverage`.
 - `apiClient` unit tests pass (MSW-backed).
 - ESLint rules block `apps/admin/src/**` from importing `@snowboard-trip-advisor/schema/node` and from raw `fetch(`. **Checked-in test** (`tests/eslint/admin-restrictions.test.ts`) verifies the rule fires + the apiClient inline-disable is the ONLY one.
-- `FieldStateFor<T>` (TS) + `FieldState` (Zod) + `toFieldValue<T>` exported and tested (the Epic 2 deferred comment in [resortView.ts:2-5](packages/schema/src/resortView.ts) is removed).
+- `FieldStateFor<T>` (TS) + `FieldState` (Zod) + `toFieldValue<T>` exported and tested (the Epic 2 deferred comment in [resortView.ts:2-5](../../../packages/schema/src/resortView.ts) is removed).
 
 **Commit budget** (per `feedback_atomic_prs.md` ≤5 commits / PR). Per-task `git commit` blocks below are *teaching steps* — the implementer commits at task granularity for incremental TDD evidence, then **before push** consolidates to 5 logical units via `git reset --soft <root-sha> && git commit -s` chains. Final commit map for PR 4.1a:
 
@@ -117,7 +117,7 @@ Run `git diff <merge-base> HEAD --stat` after the squash to confirm the file set
 
 ### 1.1 Task: `FieldStateFor<T>` + `toFieldValue<T>` types in `resortView.ts`
 
-**Files.** Test: [packages/schema/src/resortView.test.ts](packages/schema/src/resortView.test.ts) (modify, append). Modify: [packages/schema/src/resortView.ts](packages/schema/src/resortView.ts) (remove deferred-comment block lines 2-5; add the two types).
+**Files.** Test: [packages/schema/src/resortView.test.ts](../../../packages/schema/src/resortView.test.ts) (modify, append). Modify: [packages/schema/src/resortView.ts](../../../packages/schema/src/resortView.ts) (remove deferred-comment block lines 2-5; add the two types).
 
 **Why.** The admin editor needs a 4-state discriminated state per field (`Live | Stale | Failed | Manual`) and an admin→public projection helper. Spec §2.2 + §7.5 mandate these land in 4.1a alongside the schema/api surface so endpoint 2's `ResortDetailResponse.field_states` can reference them.
 
@@ -448,7 +448,7 @@ After all 6 endpoints land:
 
 ### 1.6 Task: ESLint extensions + checked-in enforcement test
 
-**Files.** Test: `tests/eslint/admin-restrictions.test.ts` (create — repo-level test directory). Modify: [eslint.config.js](eslint.config.js).
+**Files.** Test: `tests/eslint/admin-restrictions.test.ts` (create — repo-level test directory). Modify: [eslint.config.js](../../../eslint.config.js).
 
 **Why.** Spec §3.2 + §7.5: enforce that `apps/admin/src/**` cannot import `@snowboard-trip-advisor/schema/node` (Node-only module) and cannot make raw `fetch(` calls. SPA must go through the typed `apiClient`. Mirrors `apps/public`'s existing restrictions. **The lint rule itself needs a checked-in test** — without one, a future Edit could silently disable the restriction (the §1.99 reviewer brief specifically asks the reviewer to verify this).
 
@@ -541,7 +541,7 @@ After all 6 endpoints land:
 
 **Why.** Spec §7.5 + §4.9 invariant 2: every SPA-side request goes through the typed client; the client is generated from the Zod schemas in `packages/schema/api/*`. The client is a flat module — direct fetch calls + Zod validate the response — per ai-clean-code-adherence §2 (no factory).
 
-**Test environment note (jsdom).** `apps/admin` tests run under `environment: 'jsdom'` (configured in [apps/admin/vite.config.ts:21](apps/admin/vite.config.ts)). jsdom provides `window.location.href = 'http://localhost/'` by default, so `fetch('/api/...')` resolves to `http://localhost/api/...` and MSW v2's `setupServer` intercepts correctly. No base-URL configuration needed in `apiClient.ts`. **If a test ever moves to `environment: 'node'`, relative-URL fetch will reject** — the apiClient comment block calls this out so a future env change surfaces the dependency.
+**Test environment note (jsdom).** `apps/admin` tests run under `environment: 'jsdom'` (configured in [apps/admin/vite.config.ts:21](../../../apps/admin/vite.config.ts)). jsdom provides `window.location.href = 'http://localhost/'` by default, so `fetch('/api/...')` resolves to `http://localhost/api/...` and MSW v2's `setupServer` intercepts correctly. No base-URL configuration needed in `apiClient.ts`. **If a test ever moves to `environment: 'node'`, relative-URL fetch will reject** — the apiClient comment block calls this out so a future env change surfaces the dependency.
 
 - [ ] **Step 1: Write failing tests** with MSW intercepts:
   ```ts
@@ -1122,7 +1122,7 @@ Squash recipe identical in shape to §1's: `git reset --soft <merge-base>` then 
 
 ### 2.3 Task: Vite config binding + index.html
 
-**Files.** Modify: [apps/admin/vite.config.ts](apps/admin/vite.config.ts), [apps/admin/index.html](apps/admin/index.html).
+**Files.** Modify: [apps/admin/vite.config.ts](../../../apps/admin/vite.config.ts), [apps/admin/index.html](../../../apps/admin/index.html).
 
 **Why.** Spec §2.5 + §3.1: bind `127.0.0.1:5174` `strictPort: true`. `index.html` gets `lang` + `description` meta. No CSP per spec §10.6 (admin is dev-only).
 
@@ -1767,8 +1767,8 @@ Per the AI clean-code rubric: explicitly call out the abstractions you SKIPPED, 
 - **No router library.** App.tsx routes by URL state via the existing Epic-3 pattern (port to `apps/admin/src/lib/urlState.ts` lands in PR 4.2, not Tier 1). React Router / TanStack Router are out of scope for Phase 1.
 - **No real handler logic.** The 6 endpoint handlers are 501-stubs in 4.1b. Real reads land in 4.2/4.3/4.4a; real writes land in 4.4c/4.5a.
 - **No CI Dockerfile guard.** Deferred to Epic 6 per spec §10.7 + C4 fold (the existing Dockerfile is broken — `docker build` cannot ship a guard). Tier 1's CODEOWNERS-triggered subagent review on `Dockerfile` is the Phase 1 control.
-- **No analyst-notes UI / endpoints.** Deferred per [ADR-0012](docs/adr/0012-defer-analyst-notes-to-post-epic-4-followup.md). The `WorkspaceFile` Zod schema's `.passthrough()` makes the follow-up additive.
-- **No Test/Sync UX or endpoints 4–5.** Deferred to Epic 5 per [ADR-0011](docs/adr/0011-defer-test-sync-ux-to-epic-5.md).
+- **No analyst-notes UI / endpoints.** Deferred per [ADR-0012](../../adr/0012-defer-analyst-notes-to-post-epic-4-followup.md). The `WorkspaceFile` Zod schema's `.passthrough()` makes the follow-up additive.
+- **No Test/Sync UX or endpoints 4–5.** Deferred to Epic 5 per [ADR-0011](../../adr/0011-defer-test-sync-ux-to-epic-5.md).
 
 ---
 
@@ -1777,11 +1777,11 @@ Per the AI clean-code rubric: explicitly call out the abstractions you SKIPPED, 
 After PR 4.1c merges:
 
 1. Verify the Tier 1 → Tier 2 gate (spec §7.4 / plan header).
-2. Update [the spec's executive summary](docs/superpowers/specs/2026-05-01-epic-4-admin-app-design.md) ADR-in-flight wording (§0 line 6) to "merged to main" — this is one of the three follow-ups noted at spec-merge time. One-line edit; can fold into the next Tier-2 PR's polish or a separate trivial doc PR.
+2. Update [the spec's executive summary](../specs/2026-05-01-epic-4-admin-app-design.md) ADR-in-flight wording (§0 line 6) to "merged to main" — this is one of the three follow-ups noted at spec-merge time. One-line edit; can fold into the next Tier-2 PR's polish or a separate trivial doc PR.
 3. Begin drafting `docs/superpowers/plans/2026-05-XX-epic-4-tier-2-navigation-plan.md` covering PRs 4.2 + 4.3. Per the rolling-plan approach: Tier 2 plan opens once Tier 1 PR 4.1a is in maintainer-review state (so Tier-2 work is unblocked once the foundation lands); Tier 2 plan merges before Tier 1 PR 4.1c does NOT need to hold (independent doc-PRs).
 
 ---
 
 ## 6. Rollback policy
 
-Per [parent spec §10.4](docs/superpowers/specs/2026-04-22-product-pivot-design.md) + [ADR-0009](docs/adr/0009-dco-exemption-for-dependabot.md): rollback is `git revert <merge-sha>` directly on `main`. The pre-tool-use hook ([scripts/hooks/deny-dangerous-git.sh](scripts/hooks/deny-dangerous-git.sh)) blocks force-push to `main`/`master`. Worktrees with downstream Tier 2+ work rebase against post-revert `main`. DCO sign-off applies to revert commits.
+Per [parent spec §10.4](../specs/2026-04-22-product-pivot-design.md) + [ADR-0009](../../adr/0009-dco-exemption-for-dependabot.md): rollback is `git revert <merge-sha>` directly on `main`. The pre-tool-use hook ([scripts/hooks/deny-dangerous-git.sh](../../../scripts/hooks/deny-dangerous-git.sh)) blocks force-push to `main`/`master`. Worktrees with downstream Tier 2+ work rebase against post-revert `main`. DCO sign-off applies to revert commits.
