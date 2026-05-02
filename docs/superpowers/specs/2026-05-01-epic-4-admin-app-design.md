@@ -581,7 +581,7 @@ Rollback is `git revert <merge-sha>` directly on `main`, per parent spec §10.4 
 **Files:**
 
 - Implement `apps/admin/server/health.ts` — replace 4.1b's 501 stub with the real implementation: read all workspace files (or fall back to published doc), aggregate per-field statuses, compose `HealthResponse`.
-- Create `apps/admin/server/__tests__/health.test.ts`.
+- Create `apps/admin/server/__tests__/health.test.ts` — asserts every `HealthResponse` aggregate field, including the `resorts_with_missing_provenance` count (added per Codex P1 fold; surfaced to `<PublishDialog>`'s pre-publish blocking-state per §4.3.1) computed from a fixture with at least one workspace file missing a `field_sources` entry.
 - Create `apps/admin/src/state/useHealth.ts` + `.test.ts`.
 - Create `apps/admin/src/views/Dashboard.tsx` + `.test.tsx`. Card click navigates via URL state (e.g., `?route=resorts&filter=stale`). Routing is URL-driven with `useURLState`-style hooks (port from Epic 3's pattern).
 - Create `apps/admin/src/lib/urlState.ts` + `.test.ts` (admin variant of Epic 3's URL-state lib; admin route schema is different but the abstraction is the same).
@@ -722,7 +722,7 @@ Rollback is `git revert <merge-sha>` directly on `main`, per parent spec §10.4 
 **Files (tests first):**
 
 - Create `packages/design-system/src/components/Toast.test.tsx` (variants: `info`, `success`, `error`; auto-dismiss timing prop).
-- Create `apps/admin/src/views/PublishDialog.test.tsx` — verifies confirm button is `disabled` when `health.resorts_with_failed_fields > 0` per §4.3.1; tooltip text is correct.
+- Create `apps/admin/src/views/PublishDialog.test.tsx` — verifies confirm button is `disabled` when ANY of (a) `health.resorts_with_failed_fields > 0`, (b) `health.resorts_with_missing_provenance > 0`, or (c) `health.resorts_total === 0` (Phase 1 cold-start case per §4.3.1); each disabled-state's tooltip text is correct (failures-tooltip / missing-provenance-tooltip / cold-start-tooltip).
 - Create `apps/admin/src/views/PublishHistory.test.tsx`.
 - Create `tests/integration/apps/admin/publish-flow.test.tsx`.
 - Create `packages/design-system/src/components/Toast.tsx` — first real consumer is here. Variant matrix: `info`, `success`, `error`. Auto-dismiss timing prop.
@@ -868,7 +868,7 @@ A workspace file (`data/admin-workspace/<slug>.json`) can become unparseable for
 
 **Handler behavior on corrupt workspace files:**
 
-- **`GET /api/resorts` (endpoint 1, §4.1) + `GET /api/health` (endpoint 8, §4.8)** — these handlers iterate every workspace file. On Zod parse failure for any one file, the handler logs the failing slug (and the Zod issue list) to stderr, **excludes the corrupt file from the response**, and continues. This degrades gracefully rather than failing the whole list. The health endpoint surfaces the corrupt-file count via a new `resorts_with_corrupt_workspace` field if the count is non-zero (Phase 1 logs only; the field is added when the first corruption case lands in practice rather than speculatively).
+- **`GET /api/resorts` (endpoint 1, §4.1) + `GET /api/health` (endpoint 8, §4.8)** — these handlers iterate every workspace file. On Zod parse failure for any one file, the handler logs the failing slug (and the Zod issue list) to stderr, **excludes the corrupt file from the response**, and continues. This degrades gracefully rather than failing the whole list. The health endpoint surfaces the corrupt-file count via a new `resorts_with_corrupt_workspace` field if the count is non-zero (Phase 1 logs only — **this field is NOT in Epic 4's `HealthResponse` shape at §4.8**; it is added speculatively-deferred to whichever post-Epic-4 PR ships the first corruption case in practice, alongside its dedicated `<DashboardCard>` UI affordance).
 - **`GET /api/resorts/:slug` (endpoint 2, §4.2)** — single-slug read. On Zod parse failure of the corresponding workspace file, the handler responds `500 workspace-corrupt` (new error code, added to the `errorEnvelope.ts` schema in PR 4.1a) with `details` carrying the failing slug + the Zod issue list. The admin UI surfaces this via the existing error-envelope handling in the `<ResortEditor>` route.
 - **`PUT /api/resorts/:slug` (endpoint 3, §4.3)** — write path. If the target workspace file is corrupt, the handler responds `500 workspace-corrupt` and refuses to overwrite (so the corrupted state is preserved for forensic recovery rather than silently masked). The analyst must `rm` the file manually before re-saving.
 - **`POST /api/resorts/:slug/publish` (endpoint 6, §4.6)** — publish path. Per all-or-nothing publish, a single corrupt workspace file would otherwise block all publishing. On Zod parse failure, the publish handler responds `500 workspace-corrupt` with the failing slug; the operator must `rm` the corrupt file (which removes the resort from the next publish) or repair it before retrying. The error envelope's `details` includes the failing slug so the SPA can surface a "remove or repair `<slug>.json`" affordance.
