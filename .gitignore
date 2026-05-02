@@ -20,6 +20,9 @@ npm-debug.log*
 # Playwright MCP runtime artifacts (snapshots, console logs, screenshots)
 .playwright-mcp/
 
+# Manual e2e screenshot artifacts (e.g. pasted into PR review threads)
+.e2e-artifacts/
+
 # per-workspace build & coverage outputs
 apps/*/dist/
 apps/*/coverage/
