@@ -34,6 +34,16 @@ If a vulnerability cannot be patched (no upstream fix yet, or upstream fix carri
 2. Tag `@mathvbarone` for sign-off in the PR adding the exception.
 3. The CI security gate can be told to ignore the advisory ID via `package.json#overrides` only if the override actually neutralises the risk — never as a way to silence the gate.
 
+## Blocked upgrades
+
+Major-version bumps that cannot land today because a transitive plugin in our ESLint/build/test stack has not published a compatible release. We track them here so Dependabot is told to ignore the major (preventing repeated failing-CI noise) and we revisit when upstream catches up.
+
+| Package | Stuck on | Blocker | Re-evaluate when | Tracking |
+| --- | --- | --- | --- | --- |
+| `eslint` | `^9.x` | `eslint-plugin-react@7.37.5` peer caps at `^9.7`; ESLint 10 also removed the `RuleContext` API the plugin uses (upstream PRs [jsx-eslint/eslint-plugin-react#3972](https://github.com/jsx-eslint/eslint-plugin-react/pull/3972), [#3979](https://github.com/jsx-eslint/eslint-plugin-react/pull/3979) open, no release). `@eslint/js` would also need a sibling bump. | `eslint-plugin-react@8` (or successor with `eslint: "^10"` peer) is published. | PR [#68](https://github.com/mathvbarone/snowboard-trip-advisor/pull/68) closed via `@dependabot ignore this major version` on 2026-05-02. Recurring agent re-checks upstream every 4 weeks. |
+
+When an entry's blocker clears: remove the row, drop the corresponding `ignore` from `.github/dependabot.yml` (if one was added there as a belt-and-braces alongside the PR-comment ignore), and let Dependabot reopen the bump. The upgrade itself ships in its own PR, not bundled with unrelated changes (per atomic-PR discipline in [AGENTS.md](../../AGENTS.md)).
+
 ## Bot-PR DCO policy
 
 The repo's required `dco` CI check (`.github/workflows/ci.yml`) rejects every commit that lacks a `Signed-off-by:` trailer. Bot accounts (Dependabot, Renovate, etc.) do not add DCO trailers by default, so bot PRs would be permanently blocked from merge.
