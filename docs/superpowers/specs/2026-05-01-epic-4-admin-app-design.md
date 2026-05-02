@@ -10,13 +10,13 @@
 
 Epic 4 ships `apps/admin`, a loopback-only Vite SPA + in-process API middleware that lets a single analyst edit `Resort` and `ResortLiveSignal` documents and trigger an all-or-nothing publish through the same `publishDataset()` pipeline `apps/public` already consumes. The admin app is **never** built into a production container image; the network boundary (`127.0.0.1:5174` `strictPort: true`) is the access control in Phase 1. Editing is read-only below the `md` breakpoint — controls are removed from the tab order, not merely disabled.
 
-**What ships in Epic 4** (12 PRs across foundation, navigation, editor, publish, polish — see §7 for the dependency graph):
+**What ships in Epic 4** (13 PRs across foundation, navigation, editor, publish, polish — see §7 for the dependency graph and the tier-and-gate workflow):
 
-- **Foundation** (PRs 4.1a/b/c) — `packages/schema/api/` Zod surface for 6 in-scope endpoints + `WorkspaceFile` schema + contract-snapshot test; the `vite-plugin-admin-api.ts` middleware skeleton + `apps/admin` Shell composition; design-system additions (Sidebar, StatusPill, Tabs, Popover, DropdownMenu).
-- **Navigation** (PRs 4.2 / 4.3) — Dashboard health cards + Resorts table.
-- **Editor** (PRs 4.4a/4.4b/4.4c/4.4d) — quad-split on the server / view / write / interaction axes: 4.4a ships the server read path (`resortDetail` + workspace read helpers); 4.4b ships the read-only editor view (durable + live panels + StatusPill); 4.4c ships the server write path (`resortUpsert` + workspace atomic-write helper); 4.4d makes the editor edit-interactive (ModeToggle flips AUTO↔MANUAL, MANUAL exposes edit input, integration write round-trip).
-- **Publish** (PRs 4.5a/4.5b) — dual-split on the handler / UI axis: 4.5a ships `publish` + `listPublishes` server handlers; 4.5b ships `<PublishDialog>` + `<PublishHistory>` views + the first real Toast consumer.
-- **Polish** (PR 4.6 — closing PR) — keyboard shortcuts + responsive read-only-below-md affordance + final integration suite (full-flow composite). The Dockerfile prod-build guard is **deferred to Epic 6** alongside the Dockerfile rewrite (the existing `Dockerfile` is broken — see §10.7).
+- **Foundation** (PRs 4.1a/b/c) — `packages/schema/api/` Zod surface for 6 in-scope endpoints + `WorkspaceFile` schema (with top-level `editor_modes` + cross-key invariant per §10.2) + contract-snapshot test; the `vite-plugin-admin-api.ts` middleware skeleton + `apps/admin` Shell composition + tiered-MSW test harness (canned + bridge); design-system additions (Sidebar, StatusPill, Tabs, Popover, DropdownMenu).
+- **Navigation** (PRs 4.2 / 4.3) — Dashboard health cards + Resorts table. Both surface the cold-start empty state per §10.9.
+- **Editor** (PRs 4.4a/4.4b/4.4c/4.4d) — quad-split on the server / view / write / interaction axes: 4.4a ships the server read path (`resortDetail` + workspace read helpers); 4.4b ships the read-only editor view (durable + live panels + StatusPill); 4.4c ships the server write path (`resortUpsert` + workspace atomic-write helper) — server-only, with the client-side `useWorkspaceState` hook landing in 4.4d alongside the interactive ModeToggle; 4.4d makes the editor edit-interactive (ModeToggle flips AUTO↔MANUAL via `editor_modes`, MANUAL exposes edit input, integration write round-trip via `bridgeHandlers(tmpdir)`).
+- **Publish** (PRs 4.5a/4.5b) — dual-split on the handler / UI axis: 4.5a ships `publish` + `listPublishes` server handlers; 4.5b ships `<PublishDialog>` + `<PublishHistory>` views + the first real Toast consumer. PublishDialog gates on four blocking conditions including `resorts_with_corrupt_workspace > 0` per §4.3.1.
+- **Closing** (PRs 4.6a / 4.6b) — dual-split on the polish / integration-backfill axis: 4.6a ships keyboard shortcuts + responsive read-only-below-md affordance; 4.6b ships the integration backfill (Dashboard, ResortsTable, full-flow). 4.6a and 4.6b are parallel-capable (no shared files). The Dockerfile prod-build guard is **deferred to Epic 6** alongside the Dockerfile rewrite (the existing `Dockerfile` is broken — see §10.7).
 
 **What does NOT ship in Epic 4** (out of scope; documented per ADR / parent spec):
 
@@ -52,6 +52,7 @@ The admin's `/api/*` wire contract is the **stable portability line** across Pha
 | §3.9 (Analyst notes) | No analyst-notes UI / endpoints / Markdown sanitizer in Epic 4. | [ADR-0012](../../adr/0012-defer-analyst-notes-to-post-epic-4-followup.md). Workspace file is forward-compat for the follow-up PR. |
 | §8.4.1 (`/api/*` contract inventory) | Endpoints 4 (`POST /api/resorts/:slug/test-adapter/:sourceKey`) and 5 (`POST /api/resorts/:slug/sync/:sourceKey`) are NOT schema'd in `packages/schema/api/` and NOT registered in `apps/admin/server/` in Epic 4. | [ADR-0011](../../adr/0011-defer-test-sync-ux-to-epic-5.md). Land with the first real adapter. |
 | §8.4.1 (`/api/*` contract inventory) | Endpoints 9 (`GET /api/analyst-notes/:slug`) and 10 (`PUT /api/analyst-notes/:slug`) are NOT schema'd / registered in Epic 4. | [ADR-0012](../../adr/0012-defer-analyst-notes-to-post-epic-4-followup.md). Land with the analyst-notes follow-up PR. |
+| §8.4.1 (endpoint 6 path-param schema) | Endpoint 6 (`POST /api/resorts/:slug/publish`) widens its `:slug` path-param schema to `z.union([ResortSlug, z.literal('__all__')])` in Phase 1; endpoints 2 / 3 keep plain `ResortSlug`. | Phase 1 publish is all-or-nothing per §1 row 5; the SPA's no-arg `apiClient.publish()` injects the `'__all__'` sentinel into the URL. `ResortSlug`'s regex `^[a-z0-9-]{1,64}$` rejects underscores, so a plain `ResortSlug` schema would 400 on the sentinel before reaching the handler. Phase 2 collapses the union back to plain `ResortSlug` when per-resort publish lands; the contract-snapshot test (§4.9 invariant 3) catches the change. |
 
 ---
 
@@ -295,18 +296,22 @@ To surface blocking state to the user **before** they click Publish:
 - The `<PublishDialog>` (PR 4.5b deliverables) reads from `GET /api/health` (endpoint 8) to display:
   - Number of workspace files with at least one field in `Failed` state.
   - Number of workspace files missing required `field_sources` entries.
-  - Total number of would-publish resorts.
+  - Number of workspace files that fail `WorkspaceFile.parse()` (corrupt; see §10.3.1).
+  - Total number of would-publish resorts (workspace ∪ published union).
 - Client-side re-validation is **explicitly NOT done** — the SPA does not import `validatePublishedDataset`. Server-side health is the single source of truth.
 - Publish disabled-state: the dialog's confirm button is `disabled` when ANY of the following:
   - `health.resorts_with_failed_fields > 0` — tooltip: "fix failures or switch fields to MANUAL before publishing."
   - `health.resorts_with_missing_provenance > 0` — tooltip: "every metric field needs a matching `field_sources` entry; check the editor's StatusPill column for missing-provenance markers."
-  - `health.resorts_total === 0` — tooltip: "no resorts staged for publish. Add resorts in the editor before publishing." (Phase 1 cold-start case: `PublishedDataset.resorts` is `z.array(Resort).min(1)` per `packages/schema/src/published.ts:15`'s `EMPTY_DATASET_ZOD_MESSAGE = 'dataset_empty'` invariant — publishing an empty dataset would fail validation server-side; the dialog catches this client-side as a friendlier UX affordance.)
+  - `health.resorts_with_corrupt_workspace > 0` — tooltip: "1 workspace file is corrupt. Inspect `data/admin-workspace/` and either repair or `rm` the file before publishing. See server logs for the failing slug + Zod issue list." (The corrupt-workspace count is surfaced in `HealthResponse` per §4.8 so pre-publish gating remains truthful — without this gate, publish would deterministically fail with `500 workspace-corrupt` per §10.3.1 while the dialog rendered "ready to publish.")
+  - `health.resorts_total === 0` — tooltip: "no resorts staged for publish. Add resorts in the editor before publishing." (Phase 1 cold-start case per §10.9: `PublishedDataset.resorts` is `z.array(Resort).min(1)` per `packages/schema/src/published.ts:15`'s `EMPTY_DATASET_ZOD_MESSAGE = 'dataset_empty'` invariant — publishing an empty dataset would fail validation server-side; the dialog catches this client-side as a friendlier UX affordance.)
 
 ### 4.6 Endpoint 6 — `POST /api/resorts/:slug/publish`
 
+**Path param schema:** Endpoint 6's `:slug` is `z.union([ResortSlug, z.literal('__all__')])` — a Phase 1 widening of the parent §8.4.1 contract per §1.1's divergence row. `ResortSlug` (regex `^[a-z0-9-]{1,64}$`) rejects underscores; the SPA's no-arg `apiClient.publish()` injects the `'__all__'` literal sentinel into the URL, so a plain `ResortSlug` schema would 400 the request before reaching the handler. Phase 2 collapses the union back to plain `ResortSlug` when per-resort publish lands; the contract-snapshot test (§4.9 invariant 3) catches the change. Endpoints 2 / 3 keep plain `ResortSlug`.
+
 **Request:** `PublishBody` — `{ confirm: true }`. The boolean is a guard against accidental publish; the SPA's confirm dialog sets it.
 
-**Note:** despite the path including `:slug`, Phase 1 publish is **all-or-nothing** — the slug parameter is a path artefact for future Phase 2 per-resort publish. The handler reads ALL workspace files and rebuilds the published JSON.
+**Note:** despite the path including `:slug`, Phase 1 publish is **all-or-nothing** — the slug parameter is a path artefact for future Phase 2 per-resort publish. The handler asserts `slug === '__all__'` (catches accidental per-slug calls before Phase 2 widens the contract) then reads ALL workspace files and rebuilds the published JSON.
 
 **Response:** `PublishResponse` — `{ version_id: string, archive_path: string, published_at: ISODateTimeString, resort_count: number }`.
 
@@ -331,9 +336,14 @@ To surface blocking state to the user **before** they click Publish:
 
 **Request:** `HealthQuery` — `{}`.
 
-**Response:** `HealthResponse` — `{ resorts_total, resorts_with_stale_fields, resorts_with_failed_fields, resorts_with_missing_provenance, pending_integration_errors, last_published_at, archive_size_bytes }`. `resorts_with_missing_provenance` counts workspace files where one or more `METRIC_FIELDS` entries lack a matching `field_sources` entry — this is the count surfaced to `<PublishDialog>` per §4.3.1's pre-publish blocking-state UX (Codex P1 finding on commit `7439e6b`).
+**Response:** `HealthResponse` — `{ resorts_total, resorts_with_stale_fields, resorts_with_failed_fields, resorts_with_missing_provenance, resorts_with_corrupt_workspace, pending_integration_errors, last_published_at, archive_size_bytes }`.
 
-**Handler logic:** read all workspace files (or fall back to published doc); aggregate per-field statuses; respond.
+- `resorts_total` counts the **workspace ∪ published union** — i.e., the would-publish set (workspace files take precedence; published-only resorts contribute the rest). Cold-start (`resorts_total === 0`) is reachable per §10.9 and gates `<PublishDialog>` per §4.3.1.
+- `resorts_with_missing_provenance` counts workspace files where one or more `METRIC_FIELDS` entries lack a matching `field_sources` entry — surfaced to `<PublishDialog>` per §4.3.1.
+- `resorts_with_corrupt_workspace` counts workspace files that fail `WorkspaceFile.parse()`. Corrupt files are silently skipped from `resorts_total` and the per-field aggregates (§10.3.1), but their existence is surfaced as this count so `<PublishDialog>` can pre-block — without it, publish would deterministically fail with `500 workspace-corrupt` while the dialog rendered "ready to publish."
+- `last_published_at` is `null` when `data/published/current.v1.json` is missing (per §10.9 missing-published-doc handling); `archive_size_bytes` is `0` in that case.
+
+**Handler logic:** `mkdir -p data/admin-workspace/` (lazy-create per §10.9); read all workspace files (skipping ones that fail `WorkspaceFile.parse()`, incrementing `resorts_with_corrupt_workspace` and logging the failing slug + Zod issues to stderr); fall back to published doc for resorts not represented in workspace; aggregate per-field statuses; respond.
 
 ### 4.9 Contract invariants (parent §8.4.1, enforced in Epic 4)
 
@@ -401,7 +411,7 @@ Mirrors Epic 3's pattern (one hook per concern; `__resetForTests` exports for is
 - `useResortList()` — wraps `apiClient.listResorts(query)`. Query state via URL params (admin's URL-state lib lives in `apps/admin/src/lib/urlState.ts`, parallel to Epic 3's `apps/public/src/lib/urlState.ts`).
 - `useResortDetail(slug)` — wraps `apiClient.getResort(slug)`. Suspense-friendly via React 19 `use()` (same pattern as Epic 3's `useDataset`; same rejected-promise pinning per [ADR-0010](../../adr/0010-usedataset-rejected-promise-pinning.md)).
 - `useWorkspaceState()` — local UI state for the editor's draft changes BEFORE PUT (debounced auto-save fires PUT through `apiClient`). Backed by `useState` + `useEffect`; not Suspense-driven.
-- `useModeToggle(slug, fieldPath)` — per-field AUTO/MANUAL state. Local UI state; the mode is part of the workspace file's per-field state (`field_sources[fieldPath].mode = 'manual' | 'auto'`).
+- `useModeToggle(slug, fieldPath)` — per-field AUTO/MANUAL state. Local UI state; the mode is stored in the workspace file's top-level `editor_modes` map (keyed by metric path, values `'manual' | 'auto'`) per §10.2. The hook reads from `useResortDetail()`'s parsed `WorkspaceFile.editor_modes` (default `'auto'` when the key is missing) and writes through `apiClient.upsertResort()` whose PUT body carries the new map. Cross-key invariant per §10.2: every `editor_modes` key MUST be a key in `resort.field_sources` — the hook computes `validPaths = Object.keys(resort.field_sources)` and no-ops `toggleMode(path)` when `path ∉ validPaths` (with a dev-only `console.warn`) so the SPA never sends a PUT that would fail the schema refinement.
 - `usePublish()` — wraps `apiClient.publish()`. Returns `{ status: 'idle' | 'publishing' | 'success' | 'error', result?, error? }`.
 - `usePublishes()` — wraps `apiClient.listPublishes()`.
 - `useHealth()` — wraps `apiClient.getHealth()`.
@@ -417,14 +427,18 @@ Inherits semantic tokens from `packages/design-system/tokens.css`. No theme-togg
 Same Epic 3 patterns:
 
 - **Unit tests** (`vitest` + jest-axe) for every component, hook, lib helper, and server handler. 100% line / branch / function / statement coverage gate; no `/* istanbul ignore */`.
-- **Integration tests** under `tests/integration/apps/admin/*.test.tsx`. MSW intercepts `apiClient` fetches at the network layer. Each test exercises a route composition:
-  - `shell.test.tsx` — Shell renders without errors (PR 4.1b).
-  - `resort-editor-read.test.tsx` — editor opens, durable + live render, MANUAL toggle visible-but-disabled (PR 4.4b — first PR with a rendered editor).
-  - `resort-editor-write.test.tsx` — MANUAL edit + PUT round-trip + workspace file written (PR 4.4d — this test is part of 4.4d's acceptance gate, since 4.4d is when the toggle becomes interactive).
-  - `publish-flow.test.tsx` — PublishDialog opens + confirm + Toast on success/failure (PR 4.5b).
-  - `dashboard.test.tsx` — health cards render + click-through-to-filtered-resorts (PR 4.6 — closing PR completes coverage; the test may have a stub landed earlier).
-  - `resorts-table.test.tsx` — table renders + sort + filter + click row (PR 4.6 — same).
-  - `full-flow.test.tsx` — composite open admin → Resorts → row click → MANUAL edit → save → publish → see in history (PR 4.6).
+- **Integration tests** under `tests/integration/apps/admin/*.test.tsx`. **Tiered MSW harness** — two interception modes:
+  - **Tier 1 — Canned MSW (default).** `apps/admin/src/mocks/server.ts` returns canned responses keyed by URL pattern. Used by read-only / SPA-composition integration tests where no filesystem side effects are exercised. Fast.
+  - **Tier 2 — Bridge MSW (`bridgeHandlers(workspaceDir)`).** `apps/admin/src/mocks/realHandlers.ts` exports a function that returns MSW handlers which decode the request via Zod, **invoke the real `apps/admin/server/*` handler** with the test's fixture workspace dir, and encode the response. Used by side-effect-bearing integration tests (write round-trip, publish, full-flow). Each test sets `server.use(...bridgeHandlers(tmpdir))` in `beforeEach` after creating a per-test workspace tmpdir. Catches "I forgot to wire the SPA → middleware → handler" regressions that canned MSW would mask.
+  - Per-test interception choice (read-only tests use canned; side-effect tests use bridge) is the load-bearing distinction. The Vite plugin's lifecycle adapter is coverage-excluded per §10.1; the dispatch helper is what `bridgeHandlers` mirrors.
+- **Integration test inventory:**
+  - `shell.test.tsx` — Shell renders without errors (PR 4.1b). **Tier:** canned.
+  - `resort-editor-read.test.tsx` — editor opens, durable + live render, MANUAL toggle visible-but-disabled (PR 4.4b — first PR with a rendered editor). **Tier:** canned.
+  - `resort-editor-write.test.tsx` — ModeToggle flips, MANUAL edit triggers PUT, workspace file written, page reload preserves state (PR 4.4d — when the toggle becomes interactive). **Tier:** bridge.
+  - `publish-flow.test.tsx` — PublishDialog opens, confirm runs through real `publishDataset()`, history dir grows, Toast on success/failure (PR 4.5b). **Tier:** bridge.
+  - `dashboard.test.tsx` — health cards render + click-through-to-filtered-resorts (PR 4.6b — integration backfill closing PR). **Tier:** canned.
+  - `resorts-table.test.tsx` — table renders + sort + filter + click row (PR 4.6b). **Tier:** canned.
+  - `full-flow.test.tsx` — composite open admin → Resorts → row click → MANUAL edit → save → publish → see in history (PR 4.6b). **Tier:** bridge.
 - **End-to-end Playwright tests** are deferred to Epic 6 (visual regression layer — same posture as Epic 3 per parent §6.5).
 - **Server handler tests** live under `apps/admin/server/__tests__/`. Each handler is invocable directly with fixture inputs (no Vite required). The Vite middleware itself is a thin lifecycle adapter and is coverage-excluded with rationale (see §10.1).
 
@@ -451,55 +465,104 @@ PRs touching these paths require an independent subagent review per AGENTS.md:
 | 4.4d | (none — UI interaction only) |
 | 4.5a | `apps/admin/server/publish.ts` (publish pipeline gate), `packages/schema/**` (touches `publishDataset` consumer) |
 | 4.5b | `packages/design-system/**` (Toast component addition) |
-| 4.6 | (none — Dockerfile guard deferred to Epic 6 per §10.7 / C4; no other CODEOWNERS-protected paths) |
+| 4.6a | (none — UI polish + responsive only; no CODEOWNERS-protected paths) |
+| 4.6b | (none — integration tests only; Dockerfile guard deferred to Epic 6 per §10.7 / C4) |
 
 ### 7.3 Cross-cutting assignments (every PR)
 
 - **TDD** per the deliverable ordering.
-- **README evaluation** — admin app is internal-only and not user-facing, so README updates are minimal. PRs 4.5b (publish UI) and 4.6 (closing PR with integration tests) MAY warrant a README mention of the admin app's existence + how to start it; lower-numbered PRs may skip with a one-line note in the PR description.
+- **README evaluation** — admin app is internal-only and not user-facing, so README updates are minimal. PRs 4.5b (publish UI) and 4.6b (integration backfill, closing PR) MAY warrant a README mention of the admin app's existence + how to start it; lower-numbered PRs may skip with a one-line note in the PR description.
 - **DCO sign-off** on every commit (`git commit -s`, or auto-added by the `prepare-commit-msg` hook installed from `scripts/prepare-commit-msg` via `npm run setup`).
 - **Subagent Review Discipline** — per the §7.2 matrix.
 - **Pre-commit `npm run qa`** — runs before each commit.
 
-### 7.4 Dependency graph + rollback
+### 7.4 Tiers, gates, and parallelism
 
-12 PRs total per the maintainer-authorized restructure (4.4 quad-split, 4.5 dual-split, 4.1c bundled with Epic-3-PR-3.2 precedent justification, 4.6 closing PR bundles polish + integration tests). Dockerfile prod-build guard deferred to Epic 6 per §10.7.
+Epic 4 ships across **5 tiers** (13 PRs total). **Inter-tier gates are blocking** — no Tier N+1 PR opens until all Tier N PRs are merged AND the gate verification below passes. Within a tier, PRs marked **‖** can land in any order (parallel-capable; same base commit, no shared files); PRs marked **→** are strictly sequential (later branches stack on the predecessor).
+
+| Tier | Contents | Within-tier order |
+|---|---|---|
+| 1 — Foundation | 4.1a → 4.1b → 4.1c | Sequential (each builds on the prior PR's surface) |
+| 2 — Navigation | 4.2 → 4.3 | Sequential (shared `apps/admin/src/lib/urlState.ts`) |
+| 3 — Editor | (4.4a ‖ 4.4b) → 4.4c → 4.4d | 4.4a/4.4b parallel; 4.4c → 4.4d sequential (4.4d's bridge integration test invokes 4.4c's handler) |
+| 4 — Publish | 4.5a → 4.5b | Sequential (4.5b's bridge integration test invokes 4.5a's handler) |
+| 5 — Closing | 4.6a ‖ 4.6b | Parallel (no shared files; 4.6a is polish, 4.6b is integration backfill) |
 
 ```
-4.1a (Foundation: schema/api + apiClient + FieldStateFor) ─┐
-4.1b (Vite middleware skeleton) ───────────────────────────┼─→ 4.2 (Dashboard)
-4.1c (DS additions: 5 components, Epic-3-3.2 precedent) ───┘     │
-                                                                  ↓
-                                                              4.3 (Resorts table)
-                                                                  │
-                                                                  ↓
-                                                              4.4a (Server read)
-                                                                  │
-                                                                  ↓
-                                                              4.4b (Editor view, read-only)
-                                                                  │
-                                                                  ↓
-                                                              4.4c (Server write + atomic-write)
-                                                                  │
-                                                                  ↓
-                                                              4.4d (Edit interactive)
-                                                                  │
-                                                                  ↓
-                                                              4.5a (Publish handler)
-                                                                  │
-                                                                  ↓
-                                                              4.5b (Publish UI + Toast)
-                                                                  │
-                                                                  ↓
-                                                              4.6  (Polish + integration tests, closing PR)
+Tier 1 ─ Foundation
+  4.1a (Foundation: schema/api + apiClient + FieldStateFor + WorkspaceFile.editor_modes refinement)
+    ↓
+  4.1b (Vite middleware skeleton + Shell + tiered MSW: server.ts canned + realHandlers.ts bridge)
+    ↓
+  4.1c (DS additions: 5 components, Epic-3-3.2 precedent)
+    ↓
+                              ─── Tier 1 → 2 GATE ───
+Tier 2 ─ Navigation
+  4.2 (Dashboard + GET /api/health real handler + cold-start empty state)
+    ↓
+  4.3 (Resorts table + GET /api/resorts real handler + cold-start empty state)
+    ↓
+                              ─── Tier 2 → 3 GATE ───
+Tier 3 ─ Editor
+  4.4a (Server read) ‖ 4.4b (Editor view, read-only)   ← parallel-capable
+    ↓
+  4.4c (Server write + atomic-write helper)
+    ↓
+  4.4d (Edit interactive: ModeToggle + useWorkspaceState + bridge write integration)
+    ↓
+                              ─── Tier 3 → 4 GATE ───
+Tier 4 ─ Publish
+  4.5a (Publish handler + listPublishes handler)
+    ↓
+  4.5b (Publish UI + Toast + 4-state PublishDialog gating)
+    ↓
+                              ─── Tier 4 → 5 GATE ───
+Tier 5 ─ Closing
+  4.6a (Polish: keyboard shortcuts + responsive read-only)
+  4.6b (Integration backfill: dashboard + resorts-table + full-flow tests, bridge tier)
+        ‖ ← parallel-capable
+                              ─── Epic 4 done ───
 ```
 
-**Cross-tier notes** (per A2 P1 fold):
+**Inter-tier gates** (`npm run qa` green on `main` after the last tier-PR merges; maintainer verifies the items below before authorizing next-tier PRs):
+
+- **Tier 1 → 2 gate (after 4.1a/b/c merged):**
+  - `npm run dev:admin` boots on `127.0.0.1:5174` `strictPort:true`.
+  - `fetch('/api/...')` returns `501` with the standard error envelope for all 6 endpoints.
+  - Shell renders the real Sidebar + DropdownMenu (not placeholders).
+  - Contract snapshot pinned at `packages/schema/api/__snapshots__/contract.snap`; every export from `packages/schema/api/index.ts` represented.
+  - `WorkspaceFile.parse()` enforces the `editor_modes` cross-key invariant (per §10.2 / P0-2 fold).
+  - Tiered MSW harness present: `apps/admin/src/mocks/server.ts` (canned) + `apps/admin/src/mocks/realHandlers.ts` (bridge) both exist and have unit tests.
+- **Tier 2 → 3 gate (after 4.2 → 4.3 merged):**
+  - Dashboard renders against real `/api/health`; ResortsTable against real `/api/resorts`.
+  - Cold-start empty state visible per §10.9 (Dashboard "No resorts yet" card; ResortsTable empty-state row) when `data/admin-workspace/` is empty AND `data/published/current.v1.json` is missing.
+  - Card-click + row-click navigation works in browser smoke (URL state updates).
+  - Both real handlers tested against missing-`current.v1.json` fixtures.
+- **Tier 3 → 4 gate (after 4.4a/b/c/d merged):**
+  - Editor opens for both seed slugs (`kotelnica-bialczanska`, `spindleruv-mlyn`); MANUAL edit round-trips through PUT; page reload preserves the workspace state via `editor_modes`.
+  - Bridge integration test (`resort-editor-write.test.tsx`, Tier 2 of the test harness) green; per-test workspace tmpdir verified to receive the atomic-written file.
+  - `editor_modes` cross-key invariant rejects malformed PUTs (handler test asserts `400 invalid-resort` carrying the refinement message).
+- **Tier 4 → 5 gate (after 4.5a → 4.5b merged):**
+  - Publish dialog → POST → `data/published/history/` grows (verified via bridge test); Toast on success/failure; PublishHistory shows the new version.
+  - Pre-publish blocking-state surface (§4.3.1) gates correctly on all four conditions: `resorts_with_failed_fields > 0`, `resorts_with_missing_provenance > 0`, `resorts_with_corrupt_workspace > 0`, `resorts_total === 0`. Each disabled-state's tooltip text verified.
+- **Tier 5 (Epic 4 done) gate (after 4.6a + 4.6b merged):**
+  - `full-flow.test.tsx` green (bridge tier — composite open admin → Resorts → row click → MANUAL edit → save → publish → see in history).
+  - Keyboard shortcuts work in browser smoke (`/`, `g r`, `g i`, `mod+enter`, `esc`).
+  - Responsive read-only enforced via DOM `tabindex="-1"` + render-gate-hidden edit input below `md` (NOT CSS-only; tested via simulated viewport).
+  - `npm run qa` green on `main`.
+
+**Parallel-capable PRs** branch from the same base commit (the prior tier's last-merged commit). They MUST NOT modify shared files; each PR's "Files" subsection enumerates its surface so a reviewer can verify disjointness at a glance. If a parallel PR's review reveals a needed shared-file change, the maintainer collapses the pair to sequential.
+
+**Sequential PRs** stack on the predecessor's branch. After the predecessor merges, rebase onto `main`. Each PR's `**Depends on:**` line names the immediate predecessor.
+
+**Why parallelism is conservative.** Most Epic 4 PRs share file surface (`FieldRow.tsx`, `Shell.tsx`, `urlState.ts`) or runtime contract (bridge integration tests need the real handler to exist). Linear is the default. The two genuinely-disjoint pairs (4.4a‖4.4b, 4.6a‖4.6b) are the only safe parallelism. Aggressive parallelism (e.g., pre-skeletoning empty routes in 4.1b to enable 4.2‖4.3) is YAGNI per AGENTS.md "don't add features beyond what the task requires."
+
+**Cross-tier notes** (per A2 P1 fold, retained):
 
 - 4.4a depends on 4.1a's `apiClient` + the new `FieldStateFor<T>` projection helpers; 4.4b depends on 4.4a + 4.1c's `Tabs` / `StatusPill` primitives.
-- 4.4a's row-click navigation uses the route schema introduced in 4.3, but the route shape is shared, so the maintainer may opt to land 4.4a in parallel with 4.3 if the route schema is finalized first. The graph as drawn keeps the linear dependency for clarity.
+- 4.4a's row-click navigation uses the route schema introduced in 4.3, but the route shape is shared. The graph keeps 4.4a after 4.3 for clarity.
 
-Rollback is `git revert <merge-sha>` directly on `main`, per parent spec §10.4 ("Phase 1 ships feature branches directly to `main`; no integration branch") and the PreToolUse hook (`scripts/hooks/deny-dangerous-git.sh`) that blocks force-push. Worktrees with downstream work (e.g., a stacked PR whose base just got reverted) rebase against post-revert `main`. DCO sign-off applies to revert commits per [ADR-0009](../../adr/0009-dco-exemption-for-dependabot.md).
+**Rollback** is `git revert <merge-sha>` directly on `main`, per parent spec §10.4 ("Phase 1 ships feature branches directly to `main`; no integration branch") and the PreToolUse hook (`scripts/hooks/deny-dangerous-git.sh`) that blocks force-push. Worktrees with downstream work (e.g., a stacked PR whose base just got reverted) rebase against post-revert `main`. DCO sign-off applies to revert commits per [ADR-0009](../../adr/0009-dco-exemption-for-dependabot.md).
 
 ### 7.5 PR 4.1a — Foundation: schema/api + apiClient + FieldStateFor + contract snapshot
 
@@ -510,12 +573,17 @@ Rollback is `git revert <merge-sha>` directly on `main`, per parent spec §10.4 
 **Files (tests first per TDD; implementation listed after):**
 
 - Create / extend `packages/schema/src/resortView.test.ts` — cases for `FieldStateFor<T>` (4-state discriminated union: `Live` | `Stale` | `Failed` | `Manual`) + `toFieldValue<T>` (admin → public mapper).
-- Create `packages/schema/src/workspaceFile.test.ts`.
-- Create `packages/schema/api/contract.test.ts` (snapshot test; pins every export from `packages/schema/api/index.ts`; updates `__snapshots__/contract.snap`).
+- Create `packages/schema/src/workspaceFile.test.ts` — schema cases pinning the `editor_modes` cross-key invariant per §10.2 / P0-2 fold:
+  - Happy: `field_sources: {a, b, c}` + `editor_modes: {a: 'manual'}` parses.
+  - Default: missing `editor_modes` parses as `{}`.
+  - Reject: `editor_modes: {d: 'manual'}` when `field_sources` has no `d` — parse fails with the refinement message naming `d`.
+  - Reject: empty-string key in `editor_modes` — parse fails (defensive).
+  - Cold-start: workspace file alone (no published-doc context) parses cleanly per §10.9.
+- Create `packages/schema/api/contract.test.ts` (snapshot test; pins every export from `packages/schema/api/index.ts`; updates `__snapshots__/contract.snap`). The snapshot MUST capture endpoint 6's `:slug` path-param schema as the union `z.union([ResortSlug, z.literal('__all__')])` (per §1.1 divergence row + §4.6); a future Phase 2 PR collapsing the union back to `ResortSlug` is then a visible snapshot diff.
 - Create `apps/admin/src/lib/apiClient.test.ts` — MSW-backed unit tests for each endpoint's happy + error paths.
 - Modify `packages/schema/src/resortView.ts` — implement `FieldStateFor<T>` + `toFieldValue<T>` per the test cases; remove the existing "DEFERRED to Epic 4 PR 4.4" comment block (`resortView.ts` lines 2-5).
-- Create `packages/schema/src/workspaceFile.ts` (`WorkspaceFile` Zod schema with `.passthrough()` per §10.2).
-- Create `packages/schema/api/index.ts` + 6 schema files (`listResorts.ts`, `resortDetail.ts`, `resortUpsert.ts`, `publish.ts`, `listPublishes.ts`, `health.ts`) + `errorEnvelope.ts` + `rateLimitClass.ts` (per §10.5 + C3 P1 fold — exports `RATE_LIMIT_CLASS = { listResorts: 'read', resortDetail: 'read', resortUpsert: 'write', publish: 'write', listPublishes: 'read', health: 'read' } as const`; schemas reference it via `.describe()` annotations so Phase 2 can wire enforcement without re-shaping the schemas).
+- Create `packages/schema/src/workspaceFile.ts` (`WorkspaceFile` Zod schema with `.passthrough()` per §10.2 + a top-level `editor_modes: z.record(MetricPath, z.enum(['manual', 'auto'])).default({})` field + a `.refine()` enforcing the cross-key invariant: every `editor_modes` key MUST be present in `resort.field_sources`. The refinement's error message names the offending paths so `400 invalid-resort` envelopes from `resortUpsert` carry actionable detail).
+- Create `packages/schema/api/index.ts` + 6 schema files (`listResorts.ts`, `resortDetail.ts`, `resortUpsert.ts`, `publish.ts`, `listPublishes.ts`, `health.ts`) + `errorEnvelope.ts` + `rateLimitClass.ts` (per §10.5 + C3 P1 fold — exports `RATE_LIMIT_CLASS = { listResorts: 'read', resortDetail: 'read', resortUpsert: 'write', publish: 'write', listPublishes: 'read', health: 'read' } as const`; schemas reference it via `.describe()` annotations so Phase 2 can wire enforcement without re-shaping the schemas). `errorEnvelope.ts`'s `code` enum includes `workspace-corrupt` (per §10.3.1 / P0-4 fold). `publish.ts`'s `:slug` path-param is `z.union([ResortSlug, z.literal('__all__')])` (per §4.6 / §1.1 divergence row); `resortDetail.ts` and `resortUpsert.ts` keep plain `ResortSlug`. `health.ts`'s `HealthResponse` includes `resorts_with_corrupt_workspace: number` (per §4.8 / P0-4 fold).
 - Modify `packages/schema/src/index.ts` to barrel-export `WorkspaceFile` and the new `resortView` additions.
 - Modify `eslint.config.js`:
   - Allow `apps/admin/src/**` to import `@snowboard-trip-advisor/schema/api`.
@@ -536,19 +604,21 @@ Rollback is `git revert <merge-sha>` directly on `main`, per parent spec §10.4 
 **Files:**
 
 - Create `apps/admin/vite-plugin-admin-api.ts` — Vite plugin that registers a Connect middleware on `/api/*`, parses request body through Zod schemas, dispatches to `server/*` handlers (stub implementations returning 501 in this PR), wraps response in error envelope. Lifecycle adapter is coverage-excluded; the dispatch helper is unit-tested.
-- Create `apps/admin/server/{listResorts,resortDetail,resortUpsert,publish,listPublishes,health,workspace}.ts` — STUB handlers returning `{ error: { code: 'not-implemented', message: '...' } }` with status 501. Real implementations land in subsequent PRs.
-- Create `apps/admin/server/__tests__/dispatch.test.ts` — unit-tests the middleware's request → handler dispatch logic (path matching, schema parsing, error envelope).
+- Create `apps/admin/server/{listResorts,resortDetail,resortUpsert,publish,listPublishes,health,workspace}.ts` — STUB handlers returning `{ error: { code: 'not-implemented', message: '...' } }` with status 501. Real implementations land in subsequent PRs. The dispatch helper lazy-creates `data/admin-workspace/` via `mkdir -p` on first invocation per §10.9 (matches `publishDataset.ts:30`'s pattern for `data/published/history/`).
+- Create `apps/admin/server/__tests__/dispatch.test.ts` — unit-tests the middleware's request → handler dispatch logic (path matching, schema parsing, error envelope) AND the lazy `mkdir -p` of `data/admin-workspace/` on first invocation.
 - Modify `apps/admin/vite.config.ts` — register `adminApiPlugin()`; bind `127.0.0.1:5174 strictPort:true`.
 - Modify `apps/admin/index.html` — `<html lang="en">`, `<meta name="description">`, basic shell mount point. NO CSP nonce (admin is dev-only).
 - Modify `apps/admin/src/App.tsx` — replace stub `<main className="app-shell" />` with `<Shell><Outlet /></Shell>` composition (or the equivalent without a router until 4.2/4.3 — the App could initially render `<Shell><Dashboard />` placeholder).
 - Create `apps/admin/src/views/Shell.tsx` — composes `<Sidebar>` (placeholder until 4.1c) + `<HeaderBar>` (placeholder) + `<main>{children}</main>`. The component is a placeholder shell until 4.1c lands the design-system pieces.
 - Modify `apps/admin/src/main.tsx` — mount with `<StrictMode>` (already existed); no extra setup.
 - Modify `apps/admin/src/test-setup.ts` — extend with admin-specific MSW server setup (the file already exists per the §2.3 file-tree comment "test-setup.ts # exists"; this PR adds the admin-side handlers; pattern mirrors the public app's `test-setup.ts`).
-- Create `apps/admin/src/mocks/server.ts` — MSW handlers stubs for all 6 endpoints (return canned data; tests override per-suite).
+- Create `apps/admin/src/mocks/server.ts` — **canned-data MSW handlers** for all 6 endpoints (return canned data; tests override per-suite). File-level header comment makes the test-only intent explicit: "Test-time MSW handlers returning canned data. Used by SPA unit tests (apiClient.test.ts, view tests) and read-only integration tests where no filesystem side effects are exercised. NOT runtime — runtime is `vite-plugin-admin-api.ts` dispatching to `apps/admin/server/*`. For integration tests that need real handler invocation, see `mocks/realHandlers.ts`."
+- Create `apps/admin/src/mocks/realHandlers.ts` + `realHandlers.test.ts` — **bridge MSW handlers** per §6.3 / P0-3 fold. Exports `bridgeHandlers(workspaceDir: string)` returning MSW handlers that decode the request via Zod, invoke the matching real `apps/admin/server/*` handler with the per-test workspace dir override, and encode the response. File-level header comment: "Test-time MSW bridge handlers that decode the request via Zod, invoke the real `apps/admin/server/*` handler with a per-test workspace fixture dir, and encode the response. Used by side-effect-bearing integration tests (4.4d edit roundtrip, 4.5b publish, 4.6b full-flow). NOT runtime. For canned-data SPA unit tests, see `mocks/server.ts`."
+- Both `mocks/server.ts` and `mocks/realHandlers.ts` are test-only — they exist for SPA-side test-time interception (apiClient unit tests, view tests, integration tests). Runtime behavior is `vite-plugin-admin-api.ts` dispatching to `apps/admin/server/*`. The two files differ in response source: `server.ts` returns canned data; `realHandlers.ts` invokes real handlers with a per-test workspace dir.
 
 **Subagent review trigger:** YES — `apps/admin/vite.config.ts` (binding decision), `apps/admin/vite-plugin-admin-api.ts` (new middleware surface).
 
-**Acceptance gate:** `npm run dev:admin` boots on 127.0.0.1:5174; `fetch('/api/resorts')` returns 501 with the error envelope; `App.test.tsx` passes; integration test `tests/integration/apps/admin/shell.test.tsx` (NEW) verifies Shell renders without errors.
+**Acceptance gate:** `npm run dev:admin` boots on 127.0.0.1:5174; `fetch('/api/resorts')` returns 501 with the error envelope; `App.test.tsx` passes; integration test `tests/integration/apps/admin/shell.test.tsx` (NEW) verifies Shell renders without errors. `realHandlers.test.ts` verifies the bridge handler invokes a real handler with the test-supplied workspace dir.
 
 ### 7.7 PR 4.1c — Design-system additions: Sidebar, StatusPill, Tabs, Popover, DropdownMenu
 
@@ -580,16 +650,21 @@ Rollback is `git revert <merge-sha>` directly on `main`, per parent spec §10.4 
 
 **Files:**
 
-- Implement `apps/admin/server/health.ts` — replace 4.1b's 501 stub with the real implementation: read all workspace files (or fall back to published doc), aggregate per-field statuses, compose `HealthResponse`.
-- Create `apps/admin/server/__tests__/health.test.ts` — asserts every `HealthResponse` aggregate field, including the `resorts_with_missing_provenance` count (added per Codex P1 fold; surfaced to `<PublishDialog>`'s pre-publish blocking-state per §4.3.1) computed from a fixture with at least one workspace file missing a `field_sources` entry.
+- Implement `apps/admin/server/health.ts` — replace 4.1b's 501 stub with the real implementation: read all workspace files (skipping ones that fail `WorkspaceFile.parse()`, incrementing `resorts_with_corrupt_workspace`); fall back to published doc for resorts not in workspace; treat missing `data/published/current.v1.json` as `last_published_at: null` + `archive_size_bytes: 0` per §10.9; aggregate per-field statuses; compose `HealthResponse` (including `resorts_with_corrupt_workspace` per §4.8 / P0-4 fold).
+- Create `apps/admin/server/__tests__/health.test.ts` — asserts every `HealthResponse` aggregate field across multiple fixtures:
+  - Happy path with provenance: workspace fixture with intact `field_sources`, asserts `resorts_with_missing_provenance === 0`.
+  - Missing-provenance path: at least one workspace file missing a `field_sources` entry, asserts `resorts_with_missing_provenance === 1` (surfaced to `<PublishDialog>` per §4.3.1).
+  - Corrupt-workspace path (P0-4): fixture with one truncated/invalid JSON file, asserts `resorts_with_corrupt_workspace === 1` AND the healthy slugs are still aggregated correctly (corrupt file skipped, NOT counted in failed/stale aggregates).
+  - Missing-published path (§10.9): no `data/published/current.v1.json` on disk; asserts `last_published_at: null`, `archive_size_bytes: 0`, `resorts_total` reflects workspace-only count.
+  - Cold-start path (§10.9): no workspace files AND no published doc; asserts `resorts_total === 0`, all aggregates `0`.
 - Create `apps/admin/src/state/useHealth.ts` + `.test.ts`.
-- Create `apps/admin/src/views/Dashboard.tsx` + `.test.tsx`. Card click navigates via URL state (e.g., `?route=resorts&filter=stale`). Routing is URL-driven with `useURLState`-style hooks (port from Epic 3's pattern).
+- Create `apps/admin/src/views/Dashboard.tsx` + `.test.tsx`. Card click navigates via URL state (e.g., `?route=resorts&filter=stale`). Routing is URL-driven with `useURLState`-style hooks (port from Epic 3's pattern). Renders a "No resorts yet" empty-state card when `resorts_total === 0` per §10.9, with a brief pointer at the §10.9 manual-creation instructions (Phase 1 has no in-UI Create-resort affordance).
 - Create `apps/admin/src/lib/urlState.ts` + `.test.ts` (admin variant of Epic 3's URL-state lib; admin route schema is different but the abstraction is the same).
 - Modify `apps/admin/src/App.tsx` — route by URL state to render Dashboard or future Resorts view.
 
 **Subagent review trigger:** NO (no CODEOWNERS-protected paths beyond design-system, which 4.1c already touched).
 
-**Acceptance gate:** `npm run qa` green; `npm run dev:admin` boots and Dashboard renders the 5 health metrics.
+**Acceptance gate:** `npm run qa` green; `npm run dev:admin` boots and Dashboard renders the health metrics including `resorts_with_corrupt_workspace`; cold-start fixture (no workspace + no published doc) renders the "No resorts yet" empty state with the §10.9 pointer.
 
 ### 7.9 PR 4.3 — Resorts table + GET /api/resorts endpoint
 
@@ -599,10 +674,10 @@ Rollback is `git revert <merge-sha>` directly on `main`, per parent spec §10.4 
 
 **Files:**
 
-- Implement `apps/admin/server/listResorts.ts` — replace 501 stub. Read workspace files; fall back to published doc; compute summaries; apply filter + page.
-- Create `apps/admin/server/__tests__/listResorts.test.ts`.
+- Implement `apps/admin/server/listResorts.ts` — replace 501 stub. Read workspace files (skipping corrupt per §10.3.1); fall back to published doc for resorts not in workspace; treat missing `data/published/current.v1.json` as empty published set per §10.9; compute summaries; apply filter + page.
+- Create `apps/admin/server/__tests__/listResorts.test.ts` — happy path + draft-resort union per §4.1.1 + missing-published-doc case per §10.9 (workspace-only resorts surface) + cold-start case (empty result list).
 - Create `apps/admin/src/state/useResortList.ts` + `.test.ts`.
-- Create `apps/admin/src/views/ResortsTable.tsx` + `.test.tsx` — uses Epic-3's `Table` design-system primitive (already shipped).
+- Create `apps/admin/src/views/ResortsTable.tsx` + `.test.tsx` — uses Epic-3's `Table` design-system primitive (already shipped). Renders an empty-state row pointing to §10.9 manual-creation instructions when the response item list is empty.
 - Modify `apps/admin/src/App.tsx` — wire the Resorts route.
 - Modify `apps/admin/src/lib/urlState.ts` — extend route schema with `resorts` route + filter params.
 
@@ -618,22 +693,26 @@ Rollback is `git revert <merge-sha>` directly on `main`, per parent spec §10.4 
 
 **Files (tests first):**
 
-- Create `apps/admin/server/__tests__/resortDetail.test.ts` (happy path + draft-slug 200 per §4.2.1 + missing-slug 404).
-- Create `apps/admin/server/__tests__/workspace.test.ts` (read paths only — atomic-write tests land in 4.4c).
+- Create `apps/admin/server/__tests__/resortDetail.test.ts` (happy path + draft-slug 200 per §4.2.1 + missing-slug 404 + missing-published-doc + workspace-only slug returns 200 per §10.9 + corrupt-workspace `500 workspace-corrupt` per §10.3.1).
+- Create `apps/admin/server/__tests__/workspace.test.ts` (read paths only — atomic-write tests land in 4.4c). Includes a "missing `data/published/current.v1.json`" case where the read helper returns the workspace state alone per §10.9.
 - Create `apps/admin/src/state/useResortDetail.test.ts`.
-- Implement `apps/admin/server/resortDetail.ts` — replace 4.1b's 501 stub. Read workspace file or fall back to published; build `field_states` via the new `FieldStateFor<T>` projection helpers from 4.1a; respond per §4.2 / §4.2.1.
+- Implement `apps/admin/server/resortDetail.ts` — replace 4.1b's 501 stub. Read workspace file or fall back to published; build `field_states` via the new `FieldStateFor<T>` projection helpers from 4.1a; respond per §4.2 / §4.2.1; handle missing-published per §10.9 + corrupt-workspace per §10.3.1.
 - Implement `apps/admin/server/workspace.ts` — read helpers for `data/admin-workspace/<slug>.json`. Atomic-write helper deferred to 4.4c.
 - Create `apps/admin/src/state/useResortDetail.ts` — wraps `apiClient.getResort(slug)`, Suspense-friendly via React 19 `use()` (same pattern + rejected-promise pinning as Epic 3's `useDataset` per [ADR-0010](../../adr/0010-usedataset-rejected-promise-pinning.md)).
 
+**Parallel-capable with:** PR 4.4b (per §7.4 — both branch from the same base after 4.3 merges; no shared files; 4.4a is server-only and 4.4b is UI-only; 4.4b's read-only integration test stays on canned MSW until 4.4d's bridge tier).
+
 **Subagent review trigger:** YES — `apps/admin/server/**` is the Phase 2 portability surface; review verifies wire-contract conformance and that draft slugs are handled per §4.2.1. Per D1 P1 fold, the `apps/admin/server/**` justification is sufficient on its own; no need to also cite indirect schema-touch.
 
-**Acceptance gate:** `npm run qa` green; server-handler unit tests + state-hook tests pass; both seed-dataset slugs respond correctly; draft-slug 200 verified.
+**Acceptance gate:** `npm run qa` green; server-handler unit tests + state-hook tests pass; both seed-dataset slugs (`kotelnica-bialczanska`, `spindleruv-mlyn`) respond correctly; draft-slug 200 verified; missing-published handler test green per §10.9.
 
 ### 7.11 PR 4.4b — Editor view (read-only)
 
 **Goal.** Editor route renders durable + live panels read-only; ModeToggle visible but disabled (no PUT yet — adapter actions are Epic 5; interactive ModeToggle lands in 4.4d); StatusPill per field.
 
-**Branch:** `epic-4/pr-4.4b-editor-view`. **Depends on:** 4.4a merged. **README:** skip.
+**Branch:** `epic-4/pr-4.4b-editor-view`. **Depends on:** 4.3 merged (NOT 4.4a — see §7.4 / parallel-capable note below). **README:** skip.
+
+**Parallel-capable with:** PR 4.4a (per §7.4 — both branch from `main` after 4.3 merges; no shared files; 4.4b's `resort-editor-read.test.tsx` uses canned MSW so it does not depend on 4.4a's real handler. The `dev:admin` browser smoke does require 4.4a's handler to render the editor — the gate at the end of Tier 3 covers that).
 
 **Files (tests first):**
 
@@ -656,41 +735,50 @@ Rollback is `git revert <merge-sha>` directly on `main`, per parent spec §10.4 
 
 ### 7.12 PR 4.4c — Server write path + workspace atomic-write
 
-**Goal.** Wire the write-side API: `PUT /api/resorts/:slug` validates and atomically writes a workspace file. Adds the atomic-write helper to `workspace.ts`.
+**Goal.** Wire the write-side API: `PUT /api/resorts/:slug` validates and atomically writes a workspace file. Adds the atomic-write helper to `workspace.ts`. Server-only PR — the client-side `useWorkspaceState` hook lands in 4.4d alongside the interactive ModeToggle (per P1-6 fold) so the subagent review here stays focused on server-write semantics.
 
-**Branch:** `epic-4/pr-4.4c-server-write`. **Depends on:** 4.4b merged. **README:** skip.
+**Branch:** `epic-4/pr-4.4c-server-write`. **Depends on:** (4.4a ‖ 4.4b) merged. **README:** skip.
 
 **Files (tests first):**
 
-- Create `apps/admin/server/__tests__/resortUpsert.test.ts` — validation failures + happy path + idempotency + assertion that `modified_at` is set to `ISODateTimeString.parse(new Date().toISOString())` before the atomic write (per G3 P1 fold; the brand parse is required because `ISODateTimeString` is a branded Zod type per `packages/schema/src/branded.ts:12` — assigning a bare `string` to the slot fails strict TypeScript).
+- Create `apps/admin/server/__tests__/resortUpsert.test.ts`:
+  - Validation failures (per-document `Resort` parse rejects).
+  - Happy path + idempotency.
+  - `modified_at` is set to `ISODateTimeString.parse(new Date().toISOString())` before the atomic write (per G3 P1 fold; the brand parse is required because `ISODateTimeString` is a branded Zod type per `packages/schema/src/branded.ts:12`).
+  - `editor_modes` cross-key invariant — reject case (per P0-2 fold): PUT with `editor_modes: {ghost: 'manual'}` when `field_sources` has no `ghost` returns `400 invalid-resort` carrying the refinement message in `details`.
+  - `editor_modes` field-source-removal reject case (per P0-2 fold): PUT that drops `field_sources.a` while keeping `editor_modes.a` returns `400 invalid-resort`.
+  - Corrupt-workspace handling (per §10.3.1): if the target workspace file is unparseable, the handler returns `500 workspace-corrupt` and refuses to overwrite (preserves the corrupt file for forensic recovery).
 - Extend `apps/admin/server/__tests__/workspace.test.ts` — add atomic-write helper tests asserting all four steps from §10.3 (write tmp → fsync(fd) → rename → fsync(parent_dir)) and the macOS APFS `EBADF` tolerance.
-- Create `apps/admin/src/state/useWorkspaceState.test.ts`.
-- Implement `apps/admin/server/resortUpsert.ts` — replace 4.1b's 501 stub. Read existing workspace; merge incoming partial; per-resort schema validation; set `modified_at = ISODateTimeString.parse(new Date().toISOString())` (brand parse required — see test deliverable above); atomic-write workspace file.
+- Implement `apps/admin/server/resortUpsert.ts` — replace 4.1b's 501 stub. Read existing workspace; merge incoming partial (preserving `editor_modes`); per-resort schema validation including the `WorkspaceFile.refine()` cross-key invariant; set `modified_at = ISODateTimeString.parse(new Date().toISOString())`; atomic-write workspace file.
 - Modify `apps/admin/server/workspace.ts` — add atomic-write helper matching `packages/schema/src/publishDataset.ts:162-211` (`atomicWriteText`) byte-for-byte (§10.3).
-- Create `apps/admin/src/state/useWorkspaceState.ts` — local UI state for in-flight edits with debounced PUT (default debounce: 500ms).
 
-**Subagent review trigger:** YES — `apps/admin/server/**` (validation contract + atomic-write semantics; review verifies the atomic-write helper matches `publishDataset.ts:162-211` byte-for-byte and that PUT validation agrees in spirit with the full publish-time `validatePublishedDataset` gate).
+**Subagent review trigger:** YES — `apps/admin/server/**` (validation contract + atomic-write semantics; review verifies the atomic-write helper matches `publishDataset.ts:162-211` byte-for-byte AND that PUT validation enforces the `editor_modes` refinement AND that corrupt-workspace handling preserves the file rather than overwriting).
 
-**Acceptance gate:** `npm run qa` green; PUT round-trip verified in unit tests; atomic-write semantics verified (tmp file cleanup, parent-dir fsync EBADF tolerance on macOS APFS).
+**Acceptance gate:** `npm run qa` green; PUT round-trip verified in unit tests; atomic-write semantics verified (tmp file cleanup, parent-dir fsync EBADF tolerance on macOS APFS); `editor_modes` reject cases produce the documented `400 invalid-resort` envelopes.
 
 ### 7.13 PR 4.4d — Editor edit interaction
 
-**Goal.** ModeToggle becomes interactive; MANUAL mode exposes edit input; integration test round-trips MANUAL edit → PUT → workspace state.
+**Goal.** Editor becomes edit-interactive: `useWorkspaceState` carries the in-flight draft + debounced PUT, `useModeToggle` flips AUTO↔MANUAL via `editor_modes`, MANUAL exposes the edit input, integration write round-trip via `bridgeHandlers(tmpdir)` proves the workspace file is actually written and survives reload.
 
 **Branch:** `epic-4/pr-4.4d-editor-write`. **Depends on:** 4.4c merged. **README:** skip.
 
 **Files (tests first):**
 
-- Create `apps/admin/src/state/useModeToggle.test.ts`.
-- Create `tests/integration/apps/admin/resort-editor-write.test.tsx` — verifies ModeToggle flips, MANUAL edit triggers PUT (asserted via MSW request log), workspace state mirrors response, page reload preserves the workspace state.
-- Create `apps/admin/src/state/useModeToggle.ts` — per-field AUTO/MANUAL state.
+- Create `apps/admin/src/state/useModeToggle.test.ts` — verifies the `validPaths` guard per §6.1 / P0-2 fold:
+  - Calling `toggleMode('a')` when `'a' ∈ Object.keys(resort.field_sources)` emits a PUT with the new `editor_modes` map.
+  - Calling `toggleMode('ghost')` when `'ghost' ∉ field_sources` is a no-op AND emits a `console.warn` (so the SPA never sends a PUT that would fail the schema refinement).
+  - Default: missing `editor_modes` entry projects as `'auto'`.
+- Create `apps/admin/src/state/useWorkspaceState.test.ts` (moved from 4.4c per P1-6 fold) — unit tests for in-flight draft state + debounced PUT.
+- Create `tests/integration/apps/admin/resort-editor-write.test.tsx` — **bridge tier per §6.3 / P0-3 fold**: `beforeEach` creates a per-test workspace tmpdir, calls `server.use(...bridgeHandlers(tmpdir))`. The test then verifies ModeToggle flips, MANUAL edit triggers PUT, **the workspace file is written to the tmpdir** (filesystem assertion, NOT just MSW request log), `editor_modes` map persists, and page reload (re-mounting the editor) preserves the workspace state through the bridge.
+- Create `apps/admin/src/state/useModeToggle.ts` — per-field AUTO/MANUAL state. Reads from `WorkspaceFile.editor_modes`; computes `validPaths = Object.keys(resort.field_sources)`; no-ops with `console.warn` for invalid paths per the test deliverable above.
+- Create `apps/admin/src/state/useWorkspaceState.ts` (moved from 4.4c per P1-6 fold) — local UI state for in-flight edits with debounced PUT (default debounce: 500ms). Reads / writes `editor_modes` as part of the workspace state.
 - Modify `apps/admin/src/views/ResortEditor/FieldRow.tsx` — add edit input affordance in MANUAL mode; debounced auto-save via `useWorkspaceState`.
-- Modify `apps/admin/src/views/ResortEditor/ModeToggle.tsx` — interactive (AUTO ↔ MANUAL).
+- Modify `apps/admin/src/views/ResortEditor/ModeToggle.tsx` — interactive (AUTO ↔ MANUAL); reads/writes `editor_modes` via `useModeToggle`.
 - Modify `apps/admin/src/test-setup.ts` if needed for the workspace-file test fixture loading.
 
 **Subagent review trigger:** NO (the schema + write surface already shipped under review in 4.1a + 4.4c).
 
-**Acceptance gate:** End-to-end MANUAL edit → PUT → workspace file written. Integration test passes; per-field round-trip verified.
+**Acceptance gate:** End-to-end MANUAL edit → PUT → workspace file written **on disk** (verified via bridge tmpdir assertion); page reload preserves `editor_modes`; per-field round-trip verified; `validPaths` guard prevents invalid PUTs.
 
 ### 7.14 PR 4.5a — Publish handler + listPublishes handler
 
@@ -722,9 +810,14 @@ Rollback is `git revert <merge-sha>` directly on `main`, per parent spec §10.4 
 **Files (tests first):**
 
 - Create `packages/design-system/src/components/Toast.test.tsx` (variants: `info`, `success`, `error`; auto-dismiss timing prop).
-- Create `apps/admin/src/views/PublishDialog.test.tsx` — verifies confirm button is `disabled` when ANY of (a) `health.resorts_with_failed_fields > 0`, (b) `health.resorts_with_missing_provenance > 0`, or (c) `health.resorts_total === 0` (Phase 1 cold-start case per §4.3.1); each disabled-state's tooltip text is correct (failures-tooltip / missing-provenance-tooltip / cold-start-tooltip).
+- Create `apps/admin/src/views/PublishDialog.test.tsx` — verifies confirm button is `disabled` when ANY of the **four blocking conditions** per §4.3.1 / P0-4 fold:
+  - (a) `health.resorts_with_failed_fields > 0` — failures-tooltip.
+  - (b) `health.resorts_with_missing_provenance > 0` — missing-provenance-tooltip.
+  - (c) `health.resorts_with_corrupt_workspace > 0` — corrupt-workspace-tooltip ("1 workspace file is corrupt. Inspect `data/admin-workspace/` and either repair or `rm` the file before publishing. See server logs for the failing slug + Zod issue list.").
+  - (d) `health.resorts_total === 0` — cold-start-tooltip per §10.9.
+  Each disabled-state's tooltip text is asserted exactly.
 - Create `apps/admin/src/views/PublishHistory.test.tsx`.
-- Create `tests/integration/apps/admin/publish-flow.test.tsx`.
+- Create `tests/integration/apps/admin/publish-flow.test.tsx` — **bridge tier per §6.3 / P0-3 fold**: `beforeEach` creates a per-test workspace + history tmpdir, calls `server.use(...bridgeHandlers(tmpdir))`. The test then verifies PublishDialog opens, confirm runs through real `publishDataset()`, **`data/published/history/` directory grows on disk** (filesystem assertion), Toast surfaces, PublishHistory shows the new version.
 - Create `packages/design-system/src/components/Toast.tsx` — first real consumer is here. Variant matrix: `info`, `success`, `error`. Auto-dismiss timing prop.
 - Modify `packages/design-system/src/index.ts` — re-export Toast.
 - Create `apps/admin/src/views/PublishDialog.tsx` — reads `useHealth()` to render the pre-publish blocking-state surface (§4.3.1).
@@ -735,29 +828,44 @@ Rollback is `git revert <merge-sha>` directly on `main`, per parent spec §10.4 
 
 **Acceptance gate:** End-to-end publish flow works — open dialog, confirm, see Toast, history directory (`data/published/history/`) grows, PublishHistory updates; pre-publish blocking-state UX exercised in integration test.
 
-### 7.16 PR 4.6 — Polish (keyboard shortcuts + responsive read-only-below-md) + integration tests
+### 7.16 PR 4.6a — Polish (keyboard shortcuts + responsive read-only-below-md)
 
-**Goal.** Closing PR for Epic 4. Per parent §3.10 (keyboard shortcuts) and §3.2 (responsive policy); plus the final integration suite covering the full admin workflow. The Dockerfile prod-build guard that originally lived here is **deferred to Epic 6** per §10.7 / C4.
+**Goal.** Ship the user-facing polish surface: global keyboard shortcuts (parent §3.10) + responsive read-only-below-md affordance (parent §3.2). Polish is one concern; integration backfill ships separately in 4.6b (per P1-5 fold).
 
-**Branch:** `epic-4/pr-4.6-polish-and-integration`. **Depends on:** 4.5b merged. **README:** consider mentioning admin app's `npm run dev:admin` entrypoint.
+**Branch:** `epic-4/pr-4.6a-polish`. **Depends on:** 4.5b merged. **README:** evaluation only.
 
-**PR sizing acknowledgment.** This PR bundles polish + integration tests as one closing-quality concern: "ship Epic 4's closing quality gate." Splitting these into two separate PRs would land integration tests against a partial-polish state and then polish into an already-passing-tests state — fragmenting the closing review without reducing diff complexity. Epic 3 PR 3.2 precedent (multi-component "one concern" justification) applies analogously: the closing-gate is one concern.
+**Parallel-capable with:** PR 4.6b (per §7.4 — both branch from the same base after 4.5b merges; no shared files; 4.6a is polish surface and 4.6b is integration backfill).
 
 **Files (tests first):**
 
 - Create `apps/admin/src/lib/shortcuts.test.ts` — assert `/` focuses search, `g r` → resorts, `g i` → integrations placeholder, `mod+enter` saves in editor, `esc` closes modals (via `vitest` userEvent).
-- Create / extend `tests/integration/apps/admin/dashboard.test.tsx` (may have landed earlier; this PR completes coverage).
-- Create / extend `tests/integration/apps/admin/resorts-table.test.tsx`.
-- Create `tests/integration/apps/admin/full-flow.test.tsx` — composite: open admin → navigate to Resorts → click row → MANUAL edit → save → publish → see in history.
+- Create `apps/admin/src/lib/useResponsiveTabOrder.ts` + `.test.ts` — hook returning `{ readOnly: boolean }` keyed off `useMediaQuery('(max-width: <md>)')`. Test asserts the hook flips at the break.
 - Create `apps/admin/src/lib/shortcuts.ts` — global keyboard shortcut handler implementing the test cases.
 - Create / modify `apps/admin/src/views/Shell.responsive.css.ts` — visual breakpoint styles only (e.g., grid → stacked layout, header collapse). **CSS cannot apply `tabindex` or `disabled` attributes**; the tab-order discipline lives in TSX render gates below.
-- Create `apps/admin/src/lib/useResponsiveTabOrder.ts` + `.test.ts` — hook returning `{ readOnly: boolean }` keyed off `useMediaQuery('(max-width: <md>)')`. Test asserts the hook flips at the break.
 - Modify `apps/admin/src/views/ResortEditor/FieldRow.tsx` — when `useResponsiveTabOrder().readOnly === true`, render a read-only `<span>` instead of the edit input/select; this is the "removed from tab order" path per parent §3.2 (the edit controls aren't in the DOM at all below `md`, so they cannot receive focus).
 - Modify `apps/admin/src/views/Shell.tsx` (or the relevant header/sidebar components) — apply `tabIndex={-1}` and `aria-disabled` JSX props on any header/sidebar action buttons that DO render below `md` but must not be tabbable. Tests assert the rendered DOM carries `tabindex="-1"` (not just CSS visibility).
 
-**Subagent review trigger:** NO (no CODEOWNERS-protected paths; the original Dockerfile guard is deferred to Epic 6 per §10.7).
+**Subagent review trigger:** NO (UI polish only; no CODEOWNERS-protected paths).
 
-**Acceptance gate:** All integration tests green; keyboard shortcuts test green; responsive test asserts the rendered DOM at simulated `md`-1 viewport contains read-only `<span>` (not edit input) for `<FieldRow>` and `tabindex="-1"` JSX attributes (not CSS-only) on any header/sidebar action that still renders; `npm run qa` green.
+**Acceptance gate:** Keyboard shortcuts test green; responsive test asserts the rendered DOM at simulated `md`-1 viewport contains read-only `<span>` (not edit input) for `<FieldRow>` and `tabindex="-1"` JSX attributes (not CSS-only) on any header/sidebar action that still renders; `npm run qa` green.
+
+### 7.17 PR 4.6b — Integration backfill (closing PR)
+
+**Goal.** Ship Epic 4's closing integration suite — Dashboard, ResortsTable, and full-flow integration tests. Closes Epic 4. The Dockerfile prod-build guard that was originally scoped here is **deferred to Epic 6** per §10.7 / C4.
+
+**Branch:** `epic-4/pr-4.6b-integration-backfill`. **Depends on:** 4.5b merged. **README:** consider mentioning admin app's `npm run dev:admin` entrypoint (Epic 4 is now end-to-end functional).
+
+**Parallel-capable with:** PR 4.6a (per §7.4).
+
+**Files (tests first):**
+
+- Create / extend `tests/integration/apps/admin/dashboard.test.tsx` — **canned tier per §6.3**: health cards render + click-through-to-filtered-resorts. Cold-start empty state verified per §10.9.
+- Create / extend `tests/integration/apps/admin/resorts-table.test.tsx` — **canned tier**: table renders + sort + filter + click row updates URL state. Cold-start empty-state row verified per §10.9.
+- Create `tests/integration/apps/admin/full-flow.test.tsx` — **bridge tier per §6.3 / P0-3 fold**: `beforeEach` creates a per-test workspace + history tmpdir, calls `server.use(...bridgeHandlers(tmpdir))`. Composite: open admin → navigate to Resorts → click row → MANUAL edit (flips `editor_modes` and writes the workspace file) → save → publish (writes `data/published/current.v1.json` + grows `data/published/history/`) → see in PublishHistory. The test asserts both the SPA-visible state AND the on-disk filesystem state.
+
+**Subagent review trigger:** NO (no CODEOWNERS-protected paths; Dockerfile guard deferred to Epic 6 per §10.7).
+
+**Acceptance gate:** All three integration tests green; `npm run qa` green; **Tier 5 → Epic 4 done gate** verified per §7.4 (full-flow green; keyboard shortcuts work in browser smoke per 4.6a; responsive read-only enforced via DOM `tabindex="-1"`).
 
 ---
 
@@ -827,12 +935,29 @@ const WorkspaceFile = z.object({
   resort: Resort,
   live_signal: ResortLiveSignal.nullable(),
   modified_at: ISODateTimeString,
-}).passthrough()  // forward-compat for the analyst-notes follow-up PR
+  editor_modes: z.record(MetricPath, z.enum(['manual', 'auto'])).default({}),
+}).passthrough().refine(
+  (wf) => Object.keys(wf.editor_modes).every(
+    (path) => path in wf.resort.field_sources
+  ),
+  (wf) => ({
+    message: `editor_modes contains paths not in resort.field_sources: ${
+      Object.keys(wf.editor_modes).filter(p => !(p in wf.resort.field_sources)).join(', ')
+    }`,
+    path: ['editor_modes'],
+  }),
+)
 ```
 
-The `.passthrough()` permits unknown top-level fields. The post-Epic-4 analyst-notes follow-up adds a `notes` field (a `Record<string, AnalystNote>` keyed by metric path); existing workspace files written without `notes` continue to parse.
+The `.passthrough()` permits unknown top-level fields (forward-compat for the analyst-notes follow-up PR). The post-Epic-4 analyst-notes follow-up adds a `notes` field (a `Record<MetricPath, AnalystNote>`); existing workspace files written without `notes` continue to parse.
 
-**`notes` is pinned as a top-level workspace key** (per B2 P1 fold) to keep it collision-free with `Resort.field_sources` and any future per-field provenance addition. The post-Epic-4 follow-up's `WorkspaceFile` shape is therefore:
+**`editor_modes` cross-key invariant** (per P0-2 fold): every key in `editor_modes` MUST correspond to a metric path that exists in `resort.field_sources`. You can have a `field_source` without an `editor_mode` (read-time projection: missing entry = `'auto'`, matching §1.1's parent-spec divergence row for §3.6 — Epic 4 displays AUTO by default, MANUAL is the only mutation path). You cannot have an `editor_mode` for a metric path with no corresponding `field_source`.
+
+The invariant is enforced via Zod `.refine()` at `WorkspaceFile.parse()` time, not just by convention. It catches three drift modes: (1) hand-edited workspace files setting a mode for a typo'd metric path, (2) buggy handlers dropping a `field_source` without clearing its mode, (3) SPA sending a PUT for a non-existent path. Without it, `editor_modes` and `field_sources` can disagree silently — a `'manual'` mode on a path the editor will never render is invisible until the analyst stumbles on it. Defense-in-depth: PR 4.4d's `useModeToggle` hook also computes `validPaths = Object.keys(resort.field_sources)` and no-ops `toggleMode(path)` when `path ∉ validPaths` (with a dev-only `console.warn`), so the SPA never sends a PUT that would 400 against the refinement.
+
+**`editor_modes` is admin-internal** — it lives in the workspace file alongside `resort` and `live_signal`, but is never written through to the published doc. The publish pipeline reads `WorkspaceFile.resort` (which contains `field_sources` but not `editor_modes`) and composes `PublishedDataset.resorts`; `editor_modes` stays behind in the workspace. This is the same isolation pattern the analyst-notes follow-up uses for `notes`.
+
+**`notes` is pinned as a top-level workspace key** (per B2 P1 fold) to keep it collision-free with `Resort.field_sources`, `editor_modes`, and any future per-field provenance addition. The post-Epic-4 follow-up's `WorkspaceFile` shape is therefore:
 
 ```ts
 {
@@ -841,13 +966,14 @@ The `.passthrough()` permits unknown top-level fields. The post-Epic-4 analyst-n
   resort: Resort,
   live_signal: ResortLiveSignal | null,
   modified_at: ISODateTimeString,
+  editor_modes: Record<MetricPath, 'manual' | 'auto'>,
   notes?: { [metricPath: string]: AnalystNote },  // added by post-Epic-4 follow-up
 }
 ```
 
 `notes` is keyed by `metricPath` (the same path used in `Resort.field_sources` keys), values are `AnalystNote` records (Markdown-sanitized text + author + timestamp). Pinning `notes` at the top level — rather than nesting under `resort.notes` or `field_sources[].notes` — keeps the analyst-notes follow-up purely additive: no Resort-schema changes required, and no risk of colliding with provenance keys.
 
-**Why this is admin-internal and NOT under `published.schema_version`:** workspace files are never shipped to `apps/public`. They live under `data/admin-workspace/`, never enter `data/published/`, and the publish pipeline reads them, validates against the published-doc schema, and writes a fresh `current.v1.json`. The workspace `schema_version` is a separate evolution track from the published one. A workspace `schema_version` bump would be needed if the workspace SHAPE changes incompatibly (e.g., merging `resort` and `live_signal` into a single `RecordEntry`); additive fields like `notes` are backwards-compatible by design.
+**Why this is admin-internal and NOT under `published.schema_version`:** workspace files are never shipped to `apps/public`. They live under `data/admin-workspace/`, never enter `data/published/`, and the publish pipeline reads them, validates against the published-doc schema, and writes a fresh `current.v1.json`. The workspace `schema_version` is a separate evolution track from the published one. A workspace `schema_version` bump would be needed if the workspace SHAPE changes incompatibly (e.g., merging `resort` and `live_signal` into a single `RecordEntry`); additive fields like `editor_modes` and `notes` are backwards-compatible by design.
 
 ### 10.3 Atomic-write semantics
 
@@ -868,7 +994,7 @@ A workspace file (`data/admin-workspace/<slug>.json`) can become unparseable for
 
 **Handler behavior on corrupt workspace files:**
 
-- **`GET /api/resorts` (endpoint 1, §4.1) + `GET /api/health` (endpoint 8, §4.8)** — these handlers iterate every workspace file. On Zod parse failure for any one file, the handler logs the failing slug (and the Zod issue list) to stderr, **excludes the corrupt file from the response**, and continues. This degrades gracefully rather than failing the whole list. The health endpoint surfaces the corrupt-file count via a new `resorts_with_corrupt_workspace` field if the count is non-zero (Phase 1 logs only — **this field is NOT in Epic 4's `HealthResponse` shape at §4.8**; it is added speculatively-deferred to whichever post-Epic-4 PR ships the first corruption case in practice, alongside its dedicated `<DashboardCard>` UI affordance).
+- **`GET /api/resorts` (endpoint 1, §4.1) + `GET /api/health` (endpoint 8, §4.8)** — these handlers iterate every workspace file. On Zod parse failure for any one file, the handler logs the failing slug (and the Zod issue list) to stderr, **excludes the corrupt file from the response's per-resort aggregates**, and continues. This degrades gracefully rather than failing the whole list. The health endpoint **surfaces the corrupt-file count via the `resorts_with_corrupt_workspace` field on `HealthResponse`** (per §4.8 / P0-4 fold) — this is the load-bearing signal that lets `<PublishDialog>` (§4.3.1) pre-block before the operator clicks Publish. Without this field surfaced, publish would deterministically fail with `500 workspace-corrupt` while the dialog rendered "ready to publish" — a deterministic UX lie. The corrupt count is therefore a **first-class Epic 4 deliverable**, not a deferred follow-up.
 - **`GET /api/resorts/:slug` (endpoint 2, §4.2)** — single-slug read. On Zod parse failure of the corresponding workspace file, the handler responds `500 workspace-corrupt` (new error code, added to the `errorEnvelope.ts` schema in PR 4.1a) with `details` carrying the failing slug + the Zod issue list. The admin UI surfaces this via the existing error-envelope handling in the `<ResortEditor>` route.
 - **`PUT /api/resorts/:slug` (endpoint 3, §4.3)** — write path. If the target workspace file is corrupt, the handler responds `500 workspace-corrupt` and refuses to overwrite (so the corrupted state is preserved for forensic recovery rather than silently masked). The analyst must `rm` the file manually before re-saving.
 - **`POST /api/resorts/:slug/publish` (endpoint 6, §4.6)** — publish path. Per all-or-nothing publish, a single corrupt workspace file would otherwise block all publishing. On Zod parse failure, the publish handler responds `500 workspace-corrupt` with the failing slug; the operator must `rm` the corrupt file (which removes the resort from the next publish) or repair it before retrying. The error envelope's `details` includes the failing slug so the SPA can surface a "remove or repair `<slug>.json`" affordance.
@@ -917,17 +1043,49 @@ Per parent §3.1: "`apps/admin` is **never** built into the production container
 
 ### 10.8 Test fixtures for workspace files
 
-Hand-authored fixtures under `tests/fixtures/admin-workspace/<slug>.json` for both seed-dataset slugs. Loaded by `apps/admin/server/__tests__/workspace.test.ts` and the integration tests under `tests/integration/apps/admin/`. The fixtures must match `WorkspaceFile` Zod parse — they're the canonical examples.
+Hand-authored fixtures under `tests/fixtures/admin-workspace/` for both seed-dataset slugs (`kotelnica-bialczanska.json` for the PL Tatra resort, `spindleruv-mlyn.json` for the CZ Krkonoše resort — per parent pivot spec §1 line 34, both deliberately chosen to exercise the FX-conversion pattern of ADR-0003). Loaded by `apps/admin/server/__tests__/workspace.test.ts` and the integration tests under `tests/integration/apps/admin/`. The fixtures must match `WorkspaceFile` Zod parse — including the `editor_modes` cross-key invariant per §10.2 — they're the canonical examples.
 
 When the analyst-notes follow-up PR adds the `notes` field, it adds NEW fixtures with `notes` populated; the Epic 4 fixtures (without `notes`) MUST continue to parse — that's the forward-compat invariant test.
+
+### 10.9 Cold-start, missing files, and resort creation in Phase 1
+
+**Repository default state.** A fresh checkout of `main` has `data/published/current.v1.json` (2 seed resorts: `kotelnica-bialczanska` (PL) + `spindleruv-mlyn` (CZ) per pivot spec §1) and **no `data/admin-workspace/` directory** — the workspace dir does not exist on `main` until the admin server first creates it.
+
+**Server boot.** The dispatch helper in `apps/admin/vite-plugin-admin-api.ts` (PR 4.1b) **lazy-creates `data/admin-workspace/` via `mkdir -p`** on first invocation that needs to read or write it (matches `publishDataset.ts:30`'s pattern for `data/published/history/`). No explicit boot step is needed — the directory materializes on first read or first write. PR 4.1b's `dispatch.test.ts` verifies the lazy `mkdir`.
+
+**Missing `data/published/current.v1.json`.** All read handlers (endpoints 1, 2, 8) treat the file as optional. If absent:
+
+- `GET /api/resorts` returns workspace-only resorts (or empty list if no workspace files).
+- `GET /api/resorts/:slug` returns 200 with `live_signal: null` for workspace-only slugs; 404 only when neither workspace nor published has the slug.
+- `GET /api/health` responds with `last_published_at: null`, `archive_size_bytes: 0`, `resorts_total` = workspace-only count.
+- Publish remains permitted IF workspace files validate against the published-doc schema (per §4.6's normal flow — a workspace-only set of resorts publishes cleanly to a brand-new `current.v1.json`).
+
+PR 4.1a's `workspaceFile.test.ts` includes a "workspace file alone (no published-doc context) parses cleanly" case. PR 4.4a's `resortDetail.test.ts` and PR 4.2's `health.test.ts` + PR 4.3's `listResorts.test.ts` each include a missing-`current.v1.json` fixture.
+
+**Cold-start UX (`health.resorts_total === 0`).** Reachable when both `data/published/current.v1.json` is missing AND `data/admin-workspace/` is empty:
+
+- **Dashboard** renders zeros across all metrics + a "No resorts yet" empty-state card pointing the analyst at the "Adding a resort in Phase 1" instructions below.
+- **ResortsTable** renders an empty-state row with the same pointer.
+- **`<PublishDialog>`** confirm button is `disabled` per §4.3.1 (cold-start tooltip: "no resorts staged for publish. Add resorts in the editor before publishing.").
+
+**Adding a resort in Phase 1.** Phase 1 has **no in-UI "Create resort" action.** The Phase 1 creation path is manual:
+
+1. Author `data/admin-workspace/<slug>.json` matching the `WorkspaceFile` Zod shape (canonical examples: `tests/fixtures/admin-workspace/<slug>.json` per §10.8).
+2. Reload the admin (or open a fresh browser tab to `127.0.0.1:5174`).
+3. The new resort surfaces as `publish_state: 'draft'` in `GET /api/resorts` per §4.1.1.
+4. Edit / publish via the normal Epic 4 flow.
+
+The in-UI "Create resort" affordance is **Phase 2** (parent §3 + §13 future work). Documenting the manual creation path explicitly here is the spec's choice to ship Phase 1 with a deliberate friction surface that's honestly named, rather than waving the absence away.
+
+**Why this is documented in spec, not just operational handoff.** §10.9 is reachable in normal Phase 1 use (the X1 fresh-checkout state is the day-1 boot path; X3 cold-start is reachable via `rm -rf data/admin-workspace/ data/published/current.v1.json`). Specifying the boot semantics + missing-file branches + creation path here removes ambiguity from 5+ PRs that would otherwise each invent their own answer.
 
 ---
 
 ## 11. Verification & next steps
 
-0. **ADR cross-ref dependency.** This spec cites [ADR-0011](../../adr/0011-defer-test-sync-ux-to-epic-5.md) and [ADR-0012](../../adr/0012-defer-analyst-notes-to-post-epic-4-followup.md) extensively. Both ADRs are in flight as standalone PRs ([#63](https://github.com/mathvbarone/snowboard-trip-advisor/pull/63) and [#64](https://github.com/mathvbarone/snowboard-trip-advisor/pull/64)) at spec-write time. The cross-references resolve once both ADRs land on `main`; merge order does not matter (sibling decisions, not stacked). This spec PR is independent of the ADR PRs (all three based on `origin/main`); merging this spec first is acceptable as long as the ADR PRs land before any Epic 4 implementation PR opens.
-1. This spec is committed to `docs/superpowers/specs/2026-05-01-epic-4-admin-app-design.md` on branch `docs/epic-4-admin-app-spec`.
-2. A spec-document-reviewer subagent runs against this doc; findings folded into the same branch before maintainer review.
+0. **ADR cross-ref dependency.** This spec cites [ADR-0011](../../adr/0011-defer-test-sync-ux-to-epic-5.md) and [ADR-0012](../../adr/0012-defer-analyst-notes-to-post-epic-4-followup.md) extensively. Both ADRs **merged to `main`** as PRs [#63](https://github.com/mathvbarone/snowboard-trip-advisor/pull/63) and [#64](https://github.com/mathvbarone/snowboard-trip-advisor/pull/64); cross-references resolve.
+1. This spec is committed to `docs/superpowers/specs/2026-05-01-epic-4-admin-app-design.md` on branch `docs/epic-4-admin-app-spec` (PR [#65](https://github.com/mathvbarone/snowboard-trip-advisor/pull/65)).
+2. A spec-document-reviewer subagent runs against this doc; findings folded into the same branch before maintainer review. Multiple fold cycles have already landed (`6ed3df9`, `7af26d7`, `0d5f226`, `7e7d3c0`, `3470111`, plus the post-`50af331` fold that introduced this revision).
 3. Maintainer reviews the committed spec.
-4. `superpowers:writing-plans` produces the implementation plan against this spec.
-5. `superpowers:using-git-worktrees` + `superpowers:subagent-driven-development` execute the plan PR by PR, in the dependency-graph order from §7.4.
+4. `superpowers:writing-plans` produces the implementation plan against this spec — the plan decomposes each of the **13 PRs** in §7.5–§7.17 into TDD-ordered concrete tasks per the tier-and-gate workflow in §7.4.
+5. `superpowers:using-git-worktrees` + `superpowers:subagent-driven-development` execute the plan PR by PR, honoring the inter-tier gates and the 4.4a‖4.4b / 4.6a‖4.6b parallel pairs per §7.4.
