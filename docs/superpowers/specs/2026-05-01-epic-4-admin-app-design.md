@@ -14,9 +14,9 @@ Epic 4 ships `apps/admin`, a loopback-only Vite SPA + in-process API middleware 
 
 - **Foundation** (PRs 4.1a/b/c) — `packages/schema/api/` Zod surface for 6 in-scope endpoints + `WorkspaceFile` schema + contract-snapshot test; the `vite-plugin-admin-api.ts` middleware skeleton + `apps/admin` Shell composition; design-system additions (Sidebar, StatusPill, Tabs, Popover, DropdownMenu).
 - **Navigation** (PRs 4.2 / 4.3) — Dashboard health cards + Resorts table.
-- **Editor** (PRs 4.4a/4.4b) — Resort editor split on the read-vs-write axis: 4.4a ships GET + workspace read + render-only durable + live panels with StatusPill wiring; 4.4b ships ModeToggle + MANUAL edit form + PUT + workspace atomic-write + integration round-trip.
-- **Publish** (PR 4.5) — POST publish + publish history + Toast wired to publish success/failure.
-- **Polish** (PRs 4.6a/4.6b) — keyboard shortcuts + responsive read-only-below-md affordance; integration tests. The Dockerfile prod-build guard is **deferred to Epic 6** alongside the Dockerfile rewrite (the existing `Dockerfile` is broken — see §10.7).
+- **Editor** (PRs 4.4a/4.4b/4.4c/4.4d) — quad-split on the server / view / write / interaction axes: 4.4a ships the server read path (`resortDetail` + workspace read helpers); 4.4b ships the read-only editor view (durable + live panels + StatusPill); 4.4c ships the server write path (`resortUpsert` + workspace atomic-write helper); 4.4d makes the editor edit-interactive (ModeToggle flips AUTO↔MANUAL, MANUAL exposes edit input, integration write round-trip).
+- **Publish** (PRs 4.5a/4.5b) — dual-split on the handler / UI axis: 4.5a ships `publish` + `listPublishes` server handlers; 4.5b ships `<PublishDialog>` + `<PublishHistory>` views + the first real Toast consumer.
+- **Polish** (PR 4.6 — closing PR) — keyboard shortcuts + responsive read-only-below-md affordance + final integration suite (full-flow composite). The Dockerfile prod-build guard is **deferred to Epic 6** alongside the Dockerfile rewrite (the existing `Dockerfile` is broken — see §10.7).
 
 **What does NOT ship in Epic 4** (out of scope; documented per ADR / parent spec):
 
@@ -360,7 +360,7 @@ Schema lives at `packages/schema/api/errorEnvelope.ts`. Every handler wraps its 
 
 ## 5. Component Inventory
 
-### 5.1 Design-system additions (PR 4.1c, with Toast moved to PR 4.5)
+### 5.1 Design-system additions (PR 4.1c, with Toast moved to PR 4.5b)
 
 Per Epic 3 spec §5.1 "Out of Epic 3" — these components are admin-only in Phase 1 (the public app does not consume them). All ship with the same TDD + axe + variant-matrix discipline as Epic 3's components.
 
@@ -370,7 +370,7 @@ Per Epic 3 spec §5.1 "Out of Epic 3" — these components are admin-only in Pha
 - **`Popover`** — anchored floating panel. Used in 4.4b's `FieldRow` for the per-field actions dropdown (Phase 1 has only the ModeToggle; Epic 5's Test/Sync extends it).
 - **`DropdownMenu`** — keyboard-navigable menu for the HeaderBar's user identity placeholder + Sources / Integrations / History links. Distinct from `Popover` (menu items vs. arbitrary content).
 
-**Deferred to PR 4.5:** `Toast` — first real consumer is publish success/failure UI; component fan-out tightens by deferring until consumer exists.
+**Deferred to PR 4.5b:** `Toast` — first real consumer is publish success/failure UI; component fan-out tightens by deferring until consumer exists.
 
 **Deferred to analyst-notes follow-up:** `TextArea` — only the analyst-notes UI consumes it ([ADR-0012](../../adr/0012-defer-analyst-notes-to-post-epic-4-followup.md)).
 
@@ -383,8 +383,8 @@ Per Epic 3 spec §5.1 "Out of Epic 3" — these components are admin-only in Pha
   - **`DurablePanel`** — renders the Resort doc's durable fields via `<FieldRow>` per field.
   - **`LivePanel`** — renders the latest `ResortLiveSignal` per field via `<FieldRow>`.
   - **`FieldRow`** — `<StatusPill>` + value display (or edit input in MANUAL mode) + `<ModeToggle>` + `<SourceBadge>` (the Epic-3 design-system component).
-  - **`ModeToggle`** — `AUTO` ↔ `MANUAL` toggle. Disabled when no adapter is registered for the field (i.e., always disabled in Epic 4 since real adapters are Epic 5; but the visual disabled state ships now per the parent §3.6 contract).
-- **`PublishDialog`** — modal confirm dialog before `POST /api/publish`. Lists workspace state (number of changed resorts; number of resorts with `Failed` fields blocking publish per parent §3.7).
+  - **`ModeToggle`** — `AUTO` ↔ `MANUAL` toggle. **Interactive in Epic 4** (lands in PR 4.4d): clicking flips a field's mode in the workspace state, and MANUAL mode exposes the edit input that PR 4.4c wires to PUT. What is **absent** in Epic 4 is the AUTO-side adapter-action buttons (Test / Sync) — those land in Epic 5 alongside the first real adapter per [ADR-0011](../../adr/0011-defer-test-sync-ux-to-epic-5.md). §1.1's parent-spec divergence row for §3.6 ("`AUTO` mode in Epic 4 displays the most recent value with `SourceBadge` (read-only); no refresh-from-adapter button. `MANUAL` mode is the only edit path.") is the canonical Epic 4 behavior. PRs 4.4a–4.4b ship the toggle in a render-only state (visible, no PUT yet); 4.4d makes it interactive.
+- **`PublishDialog`** — modal confirm dialog before `POST /api/resorts/:slug/publish` (the canonical endpoint per §4.4; Phase 1 publish is all-or-nothing per §1 row 5). Phase 1's SPA calls `apiClient.publish()` with no slug arg per the B4 P1 fold — the route's `:slug` is ignored in Phase 1's all-or-nothing publish. Lists workspace state (number of changed resorts; number of resorts with `Failed` fields blocking publish per parent §3.7 + §4.3.1).
 - **`PublishHistory`** — list of past publishes from `GET /api/publishes`. Phase 1 read-only — no rollback action.
 
 ---
@@ -415,11 +415,13 @@ Same Epic 3 patterns:
 
 - **Unit tests** (`vitest` + jest-axe) for every component, hook, lib helper, and server handler. 100% line / branch / function / statement coverage gate; no `/* istanbul ignore */`.
 - **Integration tests** under `tests/integration/apps/admin/*.test.tsx`. MSW intercepts `apiClient` fetches at the network layer. Each test exercises a route composition:
-  - `dashboard.test.tsx` — health cards render + click-through-to-filtered-resorts (PR 4.6b).
-  - `resorts-table.test.tsx` — table renders + sort + filter + click row (PR 4.6b).
-  - `resort-editor-read.test.tsx` — editor opens, durable + live render, MANUAL toggle visible (PR 4.4a).
-  - `resort-editor-write.test.tsx` — MANUAL edit + PUT round-trip + workspace file written (PR 4.4b — this test is part of 4.4b's acceptance gate).
-  - `publish-flow.test.tsx` — PublishDialog opens + confirm + Toast on success/failure (PR 4.5).
+  - `shell.test.tsx` — Shell renders without errors (PR 4.1b).
+  - `resort-editor-read.test.tsx` — editor opens, durable + live render, MANUAL toggle visible-but-disabled (PR 4.4b — first PR with a rendered editor).
+  - `resort-editor-write.test.tsx` — MANUAL edit + PUT round-trip + workspace file written (PR 4.4d — this test is part of 4.4d's acceptance gate, since 4.4d is when the toggle becomes interactive).
+  - `publish-flow.test.tsx` — PublishDialog opens + confirm + Toast on success/failure (PR 4.5b).
+  - `dashboard.test.tsx` — health cards render + click-through-to-filtered-resorts (PR 4.6 — closing PR completes coverage; the test may have a stub landed earlier).
+  - `resorts-table.test.tsx` — table renders + sort + filter + click row (PR 4.6 — same).
+  - `full-flow.test.tsx` — composite open admin → Resorts → row click → MANUAL edit → save → publish → see in history (PR 4.6).
 - **End-to-end Playwright tests** are deferred to Epic 6 (visual regression layer — same posture as Epic 3 per parent §6.5).
 - **Server handler tests** live under `apps/admin/server/__tests__/`. Each handler is invocable directly with fixture inputs (no Vite required). The Vite middleware itself is a thin lifecycle adapter and is coverage-excluded with rationale (see §10.1).
 
