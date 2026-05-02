@@ -194,6 +194,28 @@ describe('apiClient (PR 4.1a, spec §3.2 + §7.5)', (): void => {
     }
   })
 
+  it('throws ApiClientError (not SyntaxError) when 5xx body is non-JSON (HTML proxy, plain-text 502, etc.)', async (): Promise<void> => {
+    server.use(
+      http.get('/api/resorts', () =>
+        new HttpResponse('<html><body>502 Bad Gateway</body></html>', {
+          status: 502,
+          headers: { 'Content-Type': 'text/html' },
+        }),
+      ),
+    )
+    try {
+      await apiClient.listResorts({})
+      expect.fail('should have thrown')
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiClientError)
+      if (err instanceof ApiClientError) {
+        expect(err.status).toBe(502)
+        expect(err.envelope.error.code).toBe('internal')
+        expect(err.envelope.error.message).toContain('502')
+      }
+    }
+  })
+
   it('serializeQuery flattens nested filter + page via JSON-encoded URLSearchParams entries', async (): Promise<void> => {
     let capturedURL = ''
     server.use(

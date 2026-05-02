@@ -51,6 +51,39 @@ describe('apps/admin ESLint restrictions (PR 4.1a, spec §3.2 + §7.5)', (): voi
     const [result] = await lintFixture(code, join(ADMIN_SRC, '__eslint_fixture__.ts'))
     expect(result?.messages.some((m): boolean => m.ruleId === 'no-restricted-syntax')).toBe(false)
   })
+
+  it.each([
+    ['window.fetch', `export const x = window.fetch('/api/foo')\n`],
+    ['globalThis.fetch', `export const x = globalThis.fetch('/api/foo')\n`],
+    ['self.fetch', `export const x = self.fetch('/api/foo')\n`],
+  ])('blocks member-expression %s (Codex P1 fold — bare-callee selector did not catch X.fetch)', async (_label: string, code: string): Promise<void> => {
+    const [result] = await lintFixture(code, join(ADMIN_SRC, '__eslint_fixture__.ts'))
+    expect(result?.messages.some((m): boolean => m.ruleId === 'no-restricted-syntax')).toBe(true)
+  })
+
+  it.each([
+    ['../server/foo', `import { x } from '../server/foo'\nvoid x\n`],
+    ['../../server/foo', `import { x } from '../../server/foo'\nvoid x\n`],
+    ['../../../server/foo', `import { x } from '../../../server/foo'\nvoid x\n`],
+  ])('blocks relative server import %s (Codex P2 fold — absolute pattern did not catch ../server)', async (_label: string, code: string): Promise<void> => {
+    const [result] = await lintFixture(code, join(ADMIN_SRC, '__eslint_fixture__.ts'))
+    expect(result?.messages.some((m): boolean => m.ruleId === 'no-restricted-imports')).toBe(true)
+  })
+
+  it('still bans raw fetch in admin TEST files (Codex P2 fold — top-level ignores no longer relaxes the fetch ban)', async (): Promise<void> => {
+    const code = `export const x = fetch('/api/foo')\n`
+    const [result] = await lintFixture(code, join(ADMIN_SRC, '__eslint_fixture__.test.ts'))
+    expect(result?.messages.some((m): boolean => m.ruleId === 'no-restricted-syntax')).toBe(true)
+  })
+
+  it('test files DO retain the schema/node + node:* import carve-out (per the policy comment in eslint.config.js)', async (): Promise<void> => {
+    // Tests sometimes need filesystem primitives for fixture setup; the import
+    // bans are relaxed for test files. Only the syntax bans (raw fetch) stay
+    // active. This pins the carve-out so it doesn't silently drift.
+    const code = `import { readFile } from 'node:fs/promises'\nvoid readFile\n`
+    const [result] = await lintFixture(code, join(ADMIN_SRC, '__eslint_fixture__.test.ts'))
+    expect(result?.messages.some((m): boolean => m.ruleId === 'no-restricted-imports')).toBe(false)
+  })
 })
 
 const ALLOWLIST: ReadonlyArray<string> = [

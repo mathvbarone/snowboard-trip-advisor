@@ -372,30 +372,20 @@ export default tseslint.config(
     },
   },
 
-  // apps/admin SPA discipline (Epic 4 PR 4.1a, spec §3.2 + §7.5).
-  //   - Bans `@snowboard-trip-advisor/schema/node` — Node-only utilities;
-  //     the SPA must not import this subpath. Browser-safe symbols come
-  //     from `@snowboard-trip-advisor/schema` or `/schema/api`.
-  //   - Bans `node:*` built-ins for the same reason.
-  //   - Bans `apps/admin/server/**` — server modules run under the Vite
-  //     middleware (Node), not the SPA bundle. The SPA reaches them via
-  //     the typed apiClient + HTTP, never via direct import.
-  //   - Bans raw `fetch(` calls — the SPA goes through the typed
-  //     apiClient (one inline-disable allowed at apps/admin/src/lib/
-  //     apiClient.ts; another at apps/admin/src/mocks/realHandlers.test.ts
-  //     for the bridge-handler MSW test that simulates SPA→bridge calls).
-  //     The checked-in test at tests/eslint/admin-restrictions.test.ts
-  //     pins the allowlist to those two filenames.
+  // apps/admin SPA discipline (Epic 4 PR 4.1a, spec §3.2 + §7.5). Split into
+  // two blocks so the import bans can carve out test files (which legitimately
+  // need Node primitives for fixture setup) without also relaxing the raw-fetch
+  // ban. Test files MUST go through MSW handlers, never raw fetch.
   //
-  // Test files (*.test.{ts,tsx}) are exempted from the schema/node and
-  // node:* bans only — admin-side tests sometimes need filesystem
-  // primitives or Node utilities for fixture setup. The raw-fetch ban
-  // remains active in tests too, so any test that simulates a fetch
-  // must use MSW handlers (canned or bridge), not raw fetch.
-  //
-  // Flat-config rule arrays overwrite rather than merge: re-list the
-  // deep-import patterns and the apps/** brand-cast / color / raw-HTML
-  // selectors so the admin block does not silently disable them.
+  // Block A — Import bans, test files exempted:
+  //   - `@snowboard-trip-advisor/schema/node` (Node-only utilities; SPA must
+  //     not import this subpath).
+  //   - `node:*` built-ins (browser bundle has no shim).
+  //   - `apps/admin/server/**` (absolute) AND relative `../server/**` patterns
+  //     up to 4 levels deep. SPA reaches the server via the typed apiClient +
+  //     HTTP, never direct import — relative-path bypass would defeat the split.
+  //   - `loadResortDataset` / `publishDataset` named imports from the package
+  //     root (defense-in-depth, mirrors apps/public).
   {
     files: ['apps/admin/src/**/*.{ts,tsx}'],
     ignores: ['apps/admin/src/**/*.test.{ts,tsx}'],
@@ -423,9 +413,20 @@ export default tseslint.config(
                 'Node built-ins are not available in the admin SPA bundle. Server-side work belongs in apps/admin/server/** behind the Vite middleware; SPA fetches go through the typed apiClient.',
             },
             {
-              group: ['apps/admin/server/*', 'apps/admin/server/**'],
+              group: [
+                'apps/admin/server/*',
+                'apps/admin/server/**',
+                '../server/*',
+                '../server/**',
+                '../../server/*',
+                '../../server/**',
+                '../../../server/*',
+                '../../../server/**',
+                '../../../../server/*',
+                '../../../../server/**',
+              ],
               message:
-                "The admin server modules run under the Vite middleware (Node), not in the SPA bundle. Reach them via the typed apiClient over HTTP — never via direct import. See spec §3.2 + §7.5.",
+                "The admin server modules run under the Vite middleware (Node), not in the SPA bundle. Reach them via the typed apiClient over HTTP — never via direct import (absolute or relative). See spec §3.2 + §7.5.",
             },
           ],
           paths: [
@@ -438,6 +439,22 @@ export default tseslint.config(
           ],
         },
       ],
+    },
+  },
+
+  // Block B — Syntax bans on the SPA, INCLUDING test files. Tests must use
+  // MSW handlers (canned or bridge), not raw fetch. Member-expression fetch
+  // (`window.fetch`, `globalThis.fetch`, `self.fetch`) is also banned to close
+  // the bypass; same for member-expression XMLHttpRequest. The inline-disable
+  // mechanism + checked-in test (tests/eslint/admin-restrictions.test.ts)
+  // pin the apiClient.ts + mocks/realHandlers.test.ts allowlist.
+  //
+  // Flat-config rule arrays overwrite rather than merge: re-list the apps/**
+  // brand-cast / color / raw-HTML selectors so this block does not silently
+  // disable them.
+  {
+    files: ['apps/admin/src/**/*.{ts,tsx}'],
+    rules: {
       'no-restricted-syntax': [
         'error',
         {
@@ -446,9 +463,19 @@ export default tseslint.config(
             'Use the typed apiClient (apps/admin/src/lib/apiClient.ts) — raw fetch() bypasses the Zod request/response contract. The apiClient is the only allowed call site (inline-disable mechanism + checked-in test enforces the allowlist).',
         },
         {
+          selector: 'CallExpression[callee.type="MemberExpression"][callee.property.name="fetch"]',
+          message:
+            'Member-expression fetch (window.fetch, globalThis.fetch, self.fetch) is also banned in apps/admin/src/** — use the typed apiClient. The bare-callee selector above does not catch X.fetch() forms.',
+        },
+        {
           selector: 'NewExpression[callee.name="XMLHttpRequest"]',
           message:
             'XMLHttpRequest is banned in apps/admin SPA — use the typed apiClient (apps/admin/src/lib/apiClient.ts).',
+        },
+        {
+          selector: 'NewExpression[callee.type="MemberExpression"][callee.property.name="XMLHttpRequest"]',
+          message:
+            'Member-expression new XMLHttpRequest (window.XMLHttpRequest, globalThis.XMLHttpRequest) is also banned — use the typed apiClient.',
         },
         {
           selector: BRAND_CAST_SELECTOR,

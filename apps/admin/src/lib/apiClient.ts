@@ -38,13 +38,20 @@ async function request<T>(
   // via window.location. If env moves to 'node', use an absolute base URL.
   // eslint-disable-next-line no-restricted-syntax -- this IS the typed apiClient (the one allowed call site per spec §3.2 / §7.5)
   const res = await fetch(path, init)
-  const json: unknown = await res.json()
+  // Read the body once as text, then attempt JSON parse. A non-JSON body
+  // (HTML / plain-text from a proxy/upstream returning 502, an error page,
+  // etc.) must NOT throw a SyntaxError before the !res.ok branch can build
+  // an ApiClientError — call sites branch on `err instanceof ApiClientError`,
+  // so a SyntaxError would bypass their error-handling and leak the raw
+  // upstream body into uncaught state.
+  const bodyText = await res.text()
+  let json: unknown
+  try {
+    json = JSON.parse(bodyText)
+  } catch {
+    json = undefined
+  }
   if (!res.ok) {
-    // The server SHOULD respond with the ErrorEnvelope shape on 4xx/5xx, but a
-    // malformed error body must NOT leak a Zod error to the catch site — call
-    // sites branch on `err instanceof ApiClientError`, so a ZodError would
-    // bypass their error-handling. Synthesize a deterministic envelope when
-    // the server returns a non-contract error body.
     const parsed = ErrorEnvelope.safeParse(json)
     const envelope: ErrorEnvelope = parsed.success
       ? parsed.data
