@@ -46,7 +46,16 @@ export default defineConfig({
       provider: 'v8',
       include: [
         'apps/*/src/**',
+        // PR 4.0 fold: Tier 1 PR 4.1b stub handlers + Vite plugin (dispatch
+        // helper unit-tested; lifecycle adapter is /* v8 ignore */-marked
+        // because Vite must boot for the hook to fire).
+        'apps/admin/server/**',
+        'apps/admin/vite-plugin-admin-api.ts',
         'packages/*/src/**',
+        // PR 4.0 fold: Tier 1 PR 4.1a wire-contract surface lives outside
+        // packages/schema/src/ — covered explicitly so the 100% gate is
+        // not vacuous on that path.
+        'packages/schema/api/**',
         'scripts/**',
         'config/**',
         'tests/integration/**',
