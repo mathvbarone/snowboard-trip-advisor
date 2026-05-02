@@ -215,7 +215,12 @@ const ALLOWLIST: ReadonlyArray<string> = [
   'apps/admin/src/mocks/realHandlers.test.ts',
 ]
 
-const INLINE_DISABLE_PATTERN = /eslint-disable.*(no-restricted-syntax|no-restricted-globals)/
+// `s` flag (dotall): `.` matches newline characters too. Block-comment
+// directives can span multiple lines: `/* eslint-disable\n no-restricted-
+// syntax */`. Without dotall, `.*` would not cross the newline and the
+// allowlist scan would silently miss this bypass class. Codex P2 fold
+// (cid 3177297641).
+const INLINE_DISABLE_PATTERN = /eslint-disable.*?(no-restricted-syntax|no-restricted-globals)/s
 
 async function findFiles(dir: string): Promise<ReadonlyArray<string>> {
   const out: string[] = []
@@ -235,6 +240,28 @@ async function findFiles(dir: string): Promise<ReadonlyArray<string>> {
   }
   return out
 }
+
+describe('inline-disable detection regex (Codex round-3 P2 fold — multiline-safe)', (): void => {
+  it.each([
+    ['single-line next-line directive', '// eslint-disable-next-line no-restricted-syntax\nfetch("/x")'],
+    ['single-line block directive', '/* eslint-disable no-restricted-syntax */ fetch("/x")'],
+    ['multiline block directive (the bypass)', '/* eslint-disable\n  no-restricted-syntax\n*/\nfetch("/x")'],
+    ['multiline with leading whitespace', '/*\n  eslint-disable\n  no-restricted-syntax\n*/\nfetch("/x")'],
+    ['matches no-restricted-globals variant', '// eslint-disable-next-line no-restricted-globals\nfetch("/x")'],
+    ['matches both rules in one directive', '// eslint-disable-next-line no-restricted-syntax, no-restricted-globals\nfetch("/x")'],
+    ['multiline with both rules', '/* eslint-disable\n  no-restricted-syntax,\n  no-restricted-globals\n*/'],
+  ])('detects %s', (_label: string, code: string): void => {
+    expect(INLINE_DISABLE_PATTERN.test(code)).toBe(true)
+  })
+
+  it('does not match non-disable comments mentioning the rule names', (): void => {
+    expect(INLINE_DISABLE_PATTERN.test('// docs reference: no-restricted-syntax\n')).toBe(false)
+  })
+
+  it('does not match unrelated eslint-disable directives', (): void => {
+    expect(INLINE_DISABLE_PATTERN.test('// eslint-disable-next-line @typescript-eslint/no-explicit-any\n')).toBe(false)
+  })
+})
 
 describe('apps/admin/src/** inline-disable allowlist (PR 4.1a, P1-10 + second-review fold)', (): void => {
   it('inline-disables for no-restricted-syntax in apps/admin/src/** are an enumerated allowlist', async (): Promise<void> => {
