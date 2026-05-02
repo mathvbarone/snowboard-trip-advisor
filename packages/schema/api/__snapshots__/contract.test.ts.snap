@@ -1,0 +1,1692 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`schema/api contract snapshot (PR 4.1a, spec §4.9 invariant 3) > captures every export from index.ts (regression gate — diffs require maintainer review) 1`] = `
+[
+  {
+    "jsonSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "enum": [
+        "invalid-request",
+        "invalid-resort",
+        "not-found",
+        "not-implemented",
+        "publish-validation-failed",
+        "workspace-corrupt",
+        "internal",
+      ],
+      "type": "string",
+    },
+    "name": "ErrorCode",
+  },
+  {
+    "jsonSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "enum": [
+                "invalid-request",
+                "invalid-resort",
+                "not-found",
+                "not-implemented",
+                "publish-validation-failed",
+                "workspace-corrupt",
+                "internal",
+              ],
+              "type": "string",
+            },
+            "details": {},
+            "message": {
+              "type": "string",
+            },
+          },
+          "required": [
+            "code",
+            "message",
+          ],
+          "type": "object",
+        },
+      },
+      "required": [
+        "error",
+      ],
+      "type": "object",
+    },
+    "name": "ErrorEnvelope",
+  },
+  {
+    "jsonSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object",
+    },
+    "name": "HealthQuery",
+  },
+  {
+    "jsonSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "archive_size_bytes": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer",
+        },
+        "last_published_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+              "type": "string",
+            },
+            {
+              "type": "null",
+            },
+          ],
+        },
+        "pending_integration_errors": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer",
+        },
+        "resorts_total": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer",
+        },
+        "resorts_with_corrupt_workspace": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer",
+        },
+        "resorts_with_failed_fields": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer",
+        },
+        "resorts_with_missing_provenance": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer",
+        },
+        "resorts_with_stale_fields": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer",
+        },
+      },
+      "required": [
+        "resorts_total",
+        "resorts_with_stale_fields",
+        "resorts_with_failed_fields",
+        "resorts_with_missing_provenance",
+        "resorts_with_corrupt_workspace",
+        "pending_integration_errors",
+        "last_published_at",
+        "archive_size_bytes",
+      ],
+      "type": "object",
+    },
+    "name": "HealthResponse",
+  },
+  {
+    "jsonSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "page": {
+          "additionalProperties": false,
+          "properties": {
+            "limit": {
+              "default": 20,
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer",
+            },
+            "offset": {
+              "default": 0,
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer",
+            },
+          },
+          "required": [
+            "offset",
+            "limit",
+          ],
+          "type": "object",
+        },
+      },
+      "type": "object",
+    },
+    "name": "ListPublishesQuery",
+  },
+  {
+    "jsonSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "archive_path": {
+                "type": "string",
+              },
+              "published_at": {
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                "type": "string",
+              },
+              "published_by": {
+                "type": "string",
+              },
+              "resort_count": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer",
+              },
+              "version_id": {
+                "type": "string",
+              },
+            },
+            "required": [
+              "version_id",
+              "published_at",
+              "archive_path",
+              "resort_count",
+              "published_by",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "page": {
+          "additionalProperties": false,
+          "properties": {
+            "limit": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer",
+            },
+            "offset": {
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer",
+            },
+            "total": {
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer",
+            },
+          },
+          "required": [
+            "offset",
+            "limit",
+            "total",
+          ],
+          "type": "object",
+        },
+      },
+      "required": [
+        "items",
+        "page",
+      ],
+      "type": "object",
+    },
+    "name": "ListPublishesResponse",
+  },
+  {
+    "jsonSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "filter": {
+          "additionalProperties": false,
+          "properties": {
+            "country": {
+              "maxLength": 2,
+              "minLength": 2,
+              "pattern": "^[A-Z]{2}$",
+              "type": "string",
+            },
+            "hasFailures": {
+              "type": "boolean",
+            },
+          },
+          "type": "object",
+        },
+        "page": {
+          "additionalProperties": false,
+          "properties": {
+            "limit": {
+              "default": 50,
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer",
+            },
+            "offset": {
+              "default": 0,
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer",
+            },
+          },
+          "required": [
+            "offset",
+            "limit",
+          ],
+          "type": "object",
+        },
+      },
+      "type": "object",
+    },
+    "name": "ListResortsQuery",
+  },
+  {
+    "jsonSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "country": {
+                "maxLength": 2,
+                "minLength": 2,
+                "pattern": "^[A-Z]{2}$",
+                "type": "string",
+              },
+              "failed_field_count": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer",
+              },
+              "last_updated": {
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                "type": "string",
+              },
+              "name": {
+                "additionalProperties": {
+                  "type": "string",
+                },
+                "properties": {
+                  "en": {
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "en",
+                ],
+                "type": "object",
+              },
+              "publish_state": {
+                "enum": [
+                  "draft",
+                  "published",
+                ],
+                "type": "string",
+              },
+              "slug": {
+                "pattern": "^[a-z0-9-]{1,64}$",
+                "type": "string",
+              },
+              "stale_field_count": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer",
+              },
+            },
+            "required": [
+              "slug",
+              "name",
+              "country",
+              "last_updated",
+              "stale_field_count",
+              "failed_field_count",
+              "publish_state",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "page": {
+          "additionalProperties": false,
+          "properties": {
+            "limit": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer",
+            },
+            "offset": {
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer",
+            },
+            "total": {
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer",
+            },
+          },
+          "required": [
+            "offset",
+            "limit",
+            "total",
+          ],
+          "type": "object",
+        },
+      },
+      "required": [
+        "items",
+        "page",
+      ],
+      "type": "object",
+    },
+    "name": "ListResortsResponse",
+  },
+  {
+    "jsonSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "confirm": {
+          "const": true,
+          "type": "boolean",
+        },
+      },
+      "required": [
+        "confirm",
+      ],
+      "type": "object",
+    },
+    "name": "PublishBody",
+  },
+  {
+    "jsonSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "archive_path": {
+          "type": "string",
+        },
+        "published_at": {
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+          "type": "string",
+        },
+        "published_by": {
+          "type": "string",
+        },
+        "resort_count": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer",
+        },
+        "version_id": {
+          "type": "string",
+        },
+      },
+      "required": [
+        "version_id",
+        "published_at",
+        "archive_path",
+        "resort_count",
+        "published_by",
+      ],
+      "type": "object",
+    },
+    "name": "PublishMetadata",
+  },
+  {
+    "jsonSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "archive_path": {
+          "type": "string",
+        },
+        "published_at": {
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+          "type": "string",
+        },
+        "resort_count": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer",
+        },
+        "version_id": {
+          "type": "string",
+        },
+      },
+      "required": [
+        "version_id",
+        "archive_path",
+        "published_at",
+        "resort_count",
+      ],
+      "type": "object",
+    },
+    "name": "PublishResponse",
+  },
+  {
+    "jsonSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "slug": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9-]{1,64}$",
+              "type": "string",
+            },
+            {
+              "const": "__all__",
+              "type": "string",
+            },
+          ],
+        },
+      },
+      "required": [
+        "slug",
+      ],
+      "type": "object",
+    },
+    "name": "PublishSlugParam",
+  },
+  {
+    "jsonSchema": {
+      "health": "read",
+      "listPublishes": "read",
+      "listResorts": "read",
+      "publish": "write",
+      "resortDetail": "read",
+      "resortUpsert": "write",
+    },
+    "name": "RATE_LIMIT_CLASS",
+  },
+  {
+    "jsonSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "field_states": {
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "observed_at": {
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                    "type": "string",
+                  },
+                  "source": {
+                    "enum": [
+                      "opensnow",
+                      "resort-feed",
+                      "booking",
+                      "airbnb",
+                      "snowforecast",
+                      "manual",
+                    ],
+                    "type": "string",
+                  },
+                  "state": {
+                    "const": "live",
+                    "type": "string",
+                  },
+                  "value": {},
+                },
+                "required": [
+                  "state",
+                  "value",
+                  "source",
+                  "observed_at",
+                ],
+                "type": "object",
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "age_days": {
+                    "type": "number",
+                  },
+                  "observed_at": {
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                    "type": "string",
+                  },
+                  "source": {
+                    "enum": [
+                      "opensnow",
+                      "resort-feed",
+                      "booking",
+                      "airbnb",
+                      "snowforecast",
+                      "manual",
+                    ],
+                    "type": "string",
+                  },
+                  "state": {
+                    "const": "stale",
+                    "type": "string",
+                  },
+                  "value": {},
+                },
+                "required": [
+                  "state",
+                  "value",
+                  "source",
+                  "observed_at",
+                  "age_days",
+                ],
+                "type": "object",
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "observed_at": {
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                    "type": "string",
+                  },
+                  "reason": {
+                    "type": "string",
+                  },
+                  "state": {
+                    "const": "failed",
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "state",
+                  "reason",
+                  "observed_at",
+                ],
+                "type": "object",
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "author": {
+                    "type": "string",
+                  },
+                  "observed_at": {
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                    "type": "string",
+                  },
+                  "state": {
+                    "const": "manual",
+                    "type": "string",
+                  },
+                  "value": {},
+                },
+                "required": [
+                  "state",
+                  "value",
+                  "observed_at",
+                ],
+                "type": "object",
+              },
+            ],
+          },
+          "propertyNames": {
+            "enum": [
+              "altitude_m.min",
+              "altitude_m.max",
+              "slopes_km",
+              "lift_count",
+              "skiable_terrain_ha",
+              "season.start_month",
+              "season.end_month",
+              "snow_depth_cm",
+              "lifts_open.count",
+              "lifts_open.total",
+              "lift_pass_day",
+              "lodging_sample.median_eur",
+            ],
+            "type": "string",
+          },
+          "type": "object",
+        },
+        "live_signal": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "fetched_at": {
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                  "type": "string",
+                },
+                "field_sources": {
+                  "additionalProperties": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "attribution_block": {
+                        "additionalProperties": {
+                          "type": "string",
+                        },
+                        "properties": {
+                          "en": {
+                            "type": "string",
+                          },
+                        },
+                        "required": [
+                          "en",
+                        ],
+                        "type": "object",
+                      },
+                      "fetched_at": {
+                        "format": "date-time",
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                        "type": "string",
+                      },
+                      "fx": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "native_amount": {
+                            "minimum": 0,
+                            "type": "number",
+                          },
+                          "native_currency": {
+                            "enum": [
+                              "PLN",
+                              "CZK",
+                              "CHF",
+                              "GBP",
+                              "NOK",
+                              "SEK",
+                              "DKK",
+                              "HUF",
+                              "RON",
+                              "BGN",
+                            ],
+                            "type": "string",
+                          },
+                          "observed_at": {
+                            "format": "date-time",
+                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                            "type": "string",
+                          },
+                          "rate": {
+                            "minimum": 0,
+                            "type": "number",
+                          },
+                          "source": {
+                            "const": "ecb-reference-rate",
+                            "type": "string",
+                          },
+                        },
+                        "required": [
+                          "source",
+                          "observed_at",
+                          "rate",
+                          "native_amount",
+                          "native_currency",
+                        ],
+                        "type": "object",
+                      },
+                      "observed_at": {
+                        "format": "date-time",
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                        "type": "string",
+                      },
+                      "source": {
+                        "enum": [
+                          "opensnow",
+                          "resort-feed",
+                          "booking",
+                          "airbnb",
+                          "snowforecast",
+                          "manual",
+                        ],
+                        "type": "string",
+                      },
+                      "source_url": {
+                        "pattern": "^https:",
+                        "type": "string",
+                      },
+                      "upstream_hash": {
+                        "pattern": "^[a-f0-9]{64}$",
+                        "type": "string",
+                      },
+                    },
+                    "required": [
+                      "source",
+                      "source_url",
+                      "observed_at",
+                      "fetched_at",
+                      "upstream_hash",
+                      "attribution_block",
+                    ],
+                    "type": "object",
+                  },
+                  "propertyNames": {
+                    "type": "string",
+                  },
+                  "type": "object",
+                },
+                "forecast_next_7d": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "date": {
+                        "type": "string",
+                      },
+                      "snow_cm": {
+                        "type": "number",
+                      },
+                    },
+                    "required": [
+                      "date",
+                      "snow_cm",
+                    ],
+                    "type": "object",
+                  },
+                  "type": "array",
+                },
+                "lift_pass_day": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "amount": {
+                      "type": "number",
+                    },
+                    "currency": {
+                      "const": "EUR",
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "amount",
+                    "currency",
+                  ],
+                  "type": "object",
+                },
+                "lifts_open": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "count": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer",
+                    },
+                    "total": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer",
+                    },
+                  },
+                  "required": [
+                    "count",
+                    "total",
+                  ],
+                  "type": "object",
+                },
+                "lodging_sample": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "median_eur": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "amount": {
+                          "type": "number",
+                        },
+                        "currency": {
+                          "const": "EUR",
+                          "type": "string",
+                        },
+                      },
+                      "required": [
+                        "amount",
+                        "currency",
+                      ],
+                      "type": "object",
+                    },
+                    "sample_size": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer",
+                    },
+                  },
+                  "required": [
+                    "median_eur",
+                    "sample_size",
+                  ],
+                  "type": "object",
+                },
+                "observed_at": {
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                  "type": "string",
+                },
+                "resort_slug": {
+                  "pattern": "^[a-z0-9-]{1,64}$",
+                  "type": "string",
+                },
+                "schema_version": {
+                  "const": 1,
+                  "type": "number",
+                },
+                "snow_depth_cm": {
+                  "type": "number",
+                },
+              },
+              "required": [
+                "schema_version",
+                "resort_slug",
+                "observed_at",
+                "fetched_at",
+                "field_sources",
+              ],
+              "type": "object",
+            },
+            {
+              "type": "null",
+            },
+          ],
+        },
+        "resort": {
+          "additionalProperties": false,
+          "properties": {
+            "altitude_m": {
+              "additionalProperties": false,
+              "properties": {
+                "max": {
+                  "type": "number",
+                },
+                "min": {
+                  "type": "number",
+                },
+              },
+              "required": [
+                "min",
+                "max",
+              ],
+              "type": "object",
+            },
+            "country": {
+              "maxLength": 2,
+              "minLength": 2,
+              "pattern": "^[A-Z]{2}$",
+              "type": "string",
+            },
+            "field_sources": {
+              "additionalProperties": {
+                "additionalProperties": false,
+                "properties": {
+                  "attribution_block": {
+                    "additionalProperties": {
+                      "type": "string",
+                    },
+                    "properties": {
+                      "en": {
+                        "type": "string",
+                      },
+                    },
+                    "required": [
+                      "en",
+                    ],
+                    "type": "object",
+                  },
+                  "fetched_at": {
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                    "type": "string",
+                  },
+                  "fx": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "native_amount": {
+                        "minimum": 0,
+                        "type": "number",
+                      },
+                      "native_currency": {
+                        "enum": [
+                          "PLN",
+                          "CZK",
+                          "CHF",
+                          "GBP",
+                          "NOK",
+                          "SEK",
+                          "DKK",
+                          "HUF",
+                          "RON",
+                          "BGN",
+                        ],
+                        "type": "string",
+                      },
+                      "observed_at": {
+                        "format": "date-time",
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                        "type": "string",
+                      },
+                      "rate": {
+                        "minimum": 0,
+                        "type": "number",
+                      },
+                      "source": {
+                        "const": "ecb-reference-rate",
+                        "type": "string",
+                      },
+                    },
+                    "required": [
+                      "source",
+                      "observed_at",
+                      "rate",
+                      "native_amount",
+                      "native_currency",
+                    ],
+                    "type": "object",
+                  },
+                  "observed_at": {
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                    "type": "string",
+                  },
+                  "source": {
+                    "enum": [
+                      "opensnow",
+                      "resort-feed",
+                      "booking",
+                      "airbnb",
+                      "snowforecast",
+                      "manual",
+                    ],
+                    "type": "string",
+                  },
+                  "source_url": {
+                    "pattern": "^https:",
+                    "type": "string",
+                  },
+                  "upstream_hash": {
+                    "pattern": "^[a-f0-9]{64}$",
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "source",
+                  "source_url",
+                  "observed_at",
+                  "fetched_at",
+                  "upstream_hash",
+                  "attribution_block",
+                ],
+                "type": "object",
+              },
+              "propertyNames": {
+                "type": "string",
+              },
+              "type": "object",
+            },
+            "lift_count": {
+              "maximum": 9007199254740991,
+              "minimum": -9007199254740991,
+              "type": "integer",
+            },
+            "name": {
+              "additionalProperties": {
+                "type": "string",
+              },
+              "properties": {
+                "en": {
+                  "type": "string",
+                },
+              },
+              "required": [
+                "en",
+              ],
+              "type": "object",
+            },
+            "publish_state": {
+              "enum": [
+                "draft",
+                "published",
+              ],
+              "type": "string",
+            },
+            "region": {
+              "additionalProperties": {
+                "type": "string",
+              },
+              "properties": {
+                "en": {
+                  "type": "string",
+                },
+              },
+              "required": [
+                "en",
+              ],
+              "type": "object",
+            },
+            "schema_version": {
+              "const": 1,
+              "type": "number",
+            },
+            "season": {
+              "additionalProperties": false,
+              "properties": {
+                "end_month": {
+                  "maximum": 12,
+                  "minimum": 1,
+                  "type": "integer",
+                },
+                "start_month": {
+                  "maximum": 12,
+                  "minimum": 1,
+                  "type": "integer",
+                },
+              },
+              "required": [
+                "start_month",
+                "end_month",
+              ],
+              "type": "object",
+            },
+            "skiable_terrain_ha": {
+              "type": "number",
+            },
+            "slopes_km": {
+              "type": "number",
+            },
+            "slug": {
+              "pattern": "^[a-z0-9-]{1,64}$",
+              "type": "string",
+            },
+          },
+          "required": [
+            "schema_version",
+            "slug",
+            "name",
+            "country",
+            "region",
+            "altitude_m",
+            "slopes_km",
+            "lift_count",
+            "skiable_terrain_ha",
+            "season",
+            "publish_state",
+            "field_sources",
+          ],
+          "type": "object",
+        },
+      },
+      "required": [
+        "resort",
+        "live_signal",
+        "field_states",
+      ],
+      "type": "object",
+    },
+    "name": "ResortDetailResponse",
+  },
+  {
+    "jsonSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "slug": {
+          "pattern": "^[a-z0-9-]{1,64}$",
+          "type": "string",
+        },
+      },
+      "required": [
+        "slug",
+      ],
+      "type": "object",
+    },
+    "name": "ResortSlugParam",
+  },
+  {
+    "jsonSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "country": {
+          "maxLength": 2,
+          "minLength": 2,
+          "pattern": "^[A-Z]{2}$",
+          "type": "string",
+        },
+        "failed_field_count": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer",
+        },
+        "last_updated": {
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+          "type": "string",
+        },
+        "name": {
+          "additionalProperties": {
+            "type": "string",
+          },
+          "properties": {
+            "en": {
+              "type": "string",
+            },
+          },
+          "required": [
+            "en",
+          ],
+          "type": "object",
+        },
+        "publish_state": {
+          "enum": [
+            "draft",
+            "published",
+          ],
+          "type": "string",
+        },
+        "slug": {
+          "pattern": "^[a-z0-9-]{1,64}$",
+          "type": "string",
+        },
+        "stale_field_count": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer",
+        },
+      },
+      "required": [
+        "slug",
+        "name",
+        "country",
+        "last_updated",
+        "stale_field_count",
+        "failed_field_count",
+        "publish_state",
+      ],
+      "type": "object",
+    },
+    "name": "ResortSummary",
+  },
+  {
+    "jsonSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "editor_modes": {
+          "additionalProperties": {
+            "enum": [
+              "manual",
+              "auto",
+            ],
+            "type": "string",
+          },
+          "propertyNames": {
+            "enum": [
+              "altitude_m.min",
+              "altitude_m.max",
+              "slopes_km",
+              "lift_count",
+              "skiable_terrain_ha",
+              "season.start_month",
+              "season.end_month",
+              "snow_depth_cm",
+              "lifts_open.count",
+              "lifts_open.total",
+              "lift_pass_day",
+              "lodging_sample.median_eur",
+            ],
+            "type": "string",
+          },
+          "type": "object",
+        },
+        "live_signal": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "fetched_at": {
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                  "type": "string",
+                },
+                "field_sources": {
+                  "additionalProperties": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "attribution_block": {
+                        "additionalProperties": {
+                          "type": "string",
+                        },
+                        "properties": {
+                          "en": {
+                            "type": "string",
+                          },
+                        },
+                        "required": [
+                          "en",
+                        ],
+                        "type": "object",
+                      },
+                      "fetched_at": {
+                        "format": "date-time",
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                        "type": "string",
+                      },
+                      "fx": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "native_amount": {
+                            "minimum": 0,
+                            "type": "number",
+                          },
+                          "native_currency": {
+                            "enum": [
+                              "PLN",
+                              "CZK",
+                              "CHF",
+                              "GBP",
+                              "NOK",
+                              "SEK",
+                              "DKK",
+                              "HUF",
+                              "RON",
+                              "BGN",
+                            ],
+                            "type": "string",
+                          },
+                          "observed_at": {
+                            "format": "date-time",
+                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                            "type": "string",
+                          },
+                          "rate": {
+                            "minimum": 0,
+                            "type": "number",
+                          },
+                          "source": {
+                            "const": "ecb-reference-rate",
+                            "type": "string",
+                          },
+                        },
+                        "required": [
+                          "source",
+                          "observed_at",
+                          "rate",
+                          "native_amount",
+                          "native_currency",
+                        ],
+                        "type": "object",
+                      },
+                      "observed_at": {
+                        "format": "date-time",
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                        "type": "string",
+                      },
+                      "source": {
+                        "enum": [
+                          "opensnow",
+                          "resort-feed",
+                          "booking",
+                          "airbnb",
+                          "snowforecast",
+                          "manual",
+                        ],
+                        "type": "string",
+                      },
+                      "source_url": {
+                        "pattern": "^https:",
+                        "type": "string",
+                      },
+                      "upstream_hash": {
+                        "pattern": "^[a-f0-9]{64}$",
+                        "type": "string",
+                      },
+                    },
+                    "required": [
+                      "source",
+                      "source_url",
+                      "observed_at",
+                      "fetched_at",
+                      "upstream_hash",
+                      "attribution_block",
+                    ],
+                    "type": "object",
+                  },
+                  "propertyNames": {
+                    "type": "string",
+                  },
+                  "type": "object",
+                },
+                "forecast_next_7d": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "date": {
+                        "type": "string",
+                      },
+                      "snow_cm": {
+                        "type": "number",
+                      },
+                    },
+                    "required": [
+                      "date",
+                      "snow_cm",
+                    ],
+                    "type": "object",
+                  },
+                  "type": "array",
+                },
+                "lift_pass_day": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "amount": {
+                      "type": "number",
+                    },
+                    "currency": {
+                      "const": "EUR",
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "amount",
+                    "currency",
+                  ],
+                  "type": "object",
+                },
+                "lifts_open": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "count": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer",
+                    },
+                    "total": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer",
+                    },
+                  },
+                  "required": [
+                    "count",
+                    "total",
+                  ],
+                  "type": "object",
+                },
+                "lodging_sample": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "median_eur": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "amount": {
+                          "type": "number",
+                        },
+                        "currency": {
+                          "const": "EUR",
+                          "type": "string",
+                        },
+                      },
+                      "required": [
+                        "amount",
+                        "currency",
+                      ],
+                      "type": "object",
+                    },
+                    "sample_size": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer",
+                    },
+                  },
+                  "required": [
+                    "median_eur",
+                    "sample_size",
+                  ],
+                  "type": "object",
+                },
+                "observed_at": {
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                  "type": "string",
+                },
+                "resort_slug": {
+                  "pattern": "^[a-z0-9-]{1,64}$",
+                  "type": "string",
+                },
+                "schema_version": {
+                  "const": 1,
+                  "type": "number",
+                },
+                "snow_depth_cm": {
+                  "type": "number",
+                },
+              },
+              "type": "object",
+            },
+            {
+              "type": "null",
+            },
+          ],
+        },
+        "resort": {
+          "additionalProperties": false,
+          "properties": {
+            "altitude_m": {
+              "additionalProperties": false,
+              "properties": {
+                "max": {
+                  "type": "number",
+                },
+                "min": {
+                  "type": "number",
+                },
+              },
+              "required": [
+                "min",
+                "max",
+              ],
+              "type": "object",
+            },
+            "country": {
+              "maxLength": 2,
+              "minLength": 2,
+              "pattern": "^[A-Z]{2}$",
+              "type": "string",
+            },
+            "field_sources": {
+              "additionalProperties": {
+                "additionalProperties": false,
+                "properties": {
+                  "attribution_block": {
+                    "additionalProperties": {
+                      "type": "string",
+                    },
+                    "properties": {
+                      "en": {
+                        "type": "string",
+                      },
+                    },
+                    "required": [
+                      "en",
+                    ],
+                    "type": "object",
+                  },
+                  "fetched_at": {
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                    "type": "string",
+                  },
+                  "fx": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "native_amount": {
+                        "minimum": 0,
+                        "type": "number",
+                      },
+                      "native_currency": {
+                        "enum": [
+                          "PLN",
+                          "CZK",
+                          "CHF",
+                          "GBP",
+                          "NOK",
+                          "SEK",
+                          "DKK",
+                          "HUF",
+                          "RON",
+                          "BGN",
+                        ],
+                        "type": "string",
+                      },
+                      "observed_at": {
+                        "format": "date-time",
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                        "type": "string",
+                      },
+                      "rate": {
+                        "minimum": 0,
+                        "type": "number",
+                      },
+                      "source": {
+                        "const": "ecb-reference-rate",
+                        "type": "string",
+                      },
+                    },
+                    "required": [
+                      "source",
+                      "observed_at",
+                      "rate",
+                      "native_amount",
+                      "native_currency",
+                    ],
+                    "type": "object",
+                  },
+                  "observed_at": {
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                    "type": "string",
+                  },
+                  "source": {
+                    "enum": [
+                      "opensnow",
+                      "resort-feed",
+                      "booking",
+                      "airbnb",
+                      "snowforecast",
+                      "manual",
+                    ],
+                    "type": "string",
+                  },
+                  "source_url": {
+                    "pattern": "^https:",
+                    "type": "string",
+                  },
+                  "upstream_hash": {
+                    "pattern": "^[a-f0-9]{64}$",
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "source",
+                  "source_url",
+                  "observed_at",
+                  "fetched_at",
+                  "upstream_hash",
+                  "attribution_block",
+                ],
+                "type": "object",
+              },
+              "propertyNames": {
+                "type": "string",
+              },
+              "type": "object",
+            },
+            "lift_count": {
+              "maximum": 9007199254740991,
+              "minimum": -9007199254740991,
+              "type": "integer",
+            },
+            "name": {
+              "additionalProperties": {
+                "type": "string",
+              },
+              "properties": {
+                "en": {
+                  "type": "string",
+                },
+              },
+              "required": [
+                "en",
+              ],
+              "type": "object",
+            },
+            "publish_state": {
+              "enum": [
+                "draft",
+                "published",
+              ],
+              "type": "string",
+            },
+            "region": {
+              "additionalProperties": {
+                "type": "string",
+              },
+              "properties": {
+                "en": {
+                  "type": "string",
+                },
+              },
+              "required": [
+                "en",
+              ],
+              "type": "object",
+            },
+            "schema_version": {
+              "const": 1,
+              "type": "number",
+            },
+            "season": {
+              "additionalProperties": false,
+              "properties": {
+                "end_month": {
+                  "maximum": 12,
+                  "minimum": 1,
+                  "type": "integer",
+                },
+                "start_month": {
+                  "maximum": 12,
+                  "minimum": 1,
+                  "type": "integer",
+                },
+              },
+              "required": [
+                "start_month",
+                "end_month",
+              ],
+              "type": "object",
+            },
+            "skiable_terrain_ha": {
+              "type": "number",
+            },
+            "slopes_km": {
+              "type": "number",
+            },
+            "slug": {
+              "pattern": "^[a-z0-9-]{1,64}$",
+              "type": "string",
+            },
+          },
+          "type": "object",
+        },
+      },
+      "type": "object",
+    },
+    "name": "ResortUpsertBody",
+  },
+]
+`;
