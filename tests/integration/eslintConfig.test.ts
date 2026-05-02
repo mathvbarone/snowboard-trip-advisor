@@ -107,10 +107,27 @@ describe('eslint apps/public bundle-safety discipline (PR 3.1a)', (): void => {
     expect(ids).not.toContain('no-restricted-imports')
   })
 
-  it('does NOT block `loadResortDataset` from apps/admin (loopback-only, node:fs/promises is fine)', async (): Promise<void> => {
-    // apps/admin runs on 127.0.0.1 with full Node access; it can use the path-taking variant.
+  it('blocks `loadResortDataset` import from apps/admin/src/** (Epic 4 PR 4.1a — SPA must not import Node-only utilities)', async (): Promise<void> => {
+    // Epic 4 spec §3.2: apps/admin is split into SPA (apps/admin/src/**, browser
+    // bundle) + server (apps/admin/server/**, Node middleware). The SPA must
+    // not import Node-only utilities; reach the handlers via the typed apiClient
+    // over HTTP. The carve-out for Node-side imports lives in apps/admin/server/**.
+    //
+    // Note: this assertion replaces the Epic-3-era expectation that admin was
+    // "loopback-only, node:fs/promises is fine" — that simplification was
+    // accurate when admin was a single Node process; Epic 4 separates the
+    // two halves.
     const src = "import { loadResortDataset } from '@snowboard-trip-advisor/schema'\nexport { loadResortDataset }\n"
     const ids = await violations('apps/admin/src/__eslint_fixture__.ts', src)
+    expect(ids).toContain('no-restricted-imports')
+  })
+
+  it('does NOT block `loadResortDataset` from apps/admin/server/** (Node middleware, full Node access)', async (): Promise<void> => {
+    // The Epic 4 split: apps/admin/server/** runs Node middleware behind the
+    // Vite plugin (PR 4.1b lands the dispatch + handler stubs); legitimate
+    // node:fs/promises consumers live there.
+    const src = "import { loadResortDataset } from '@snowboard-trip-advisor/schema'\nexport { loadResortDataset }\n"
+    const ids = await violations('apps/admin/server/__eslint_fixture__.ts', src)
     expect(ids).not.toContain('no-restricted-imports')
   })
 
@@ -170,11 +187,19 @@ describe('eslint apps/public bundle-safety discipline (PR 3.1a)', (): void => {
     expect(ids).toContain('no-restricted-syntax')
   })
 
-  it('does NOT block `loadResortDataset` from apps/admin via the `/node` subpath (loopback-only, node:fs/promises is fine)', async (): Promise<void> => {
-    // The carve-out for apps/admin must extend to the `/node` subpath
-    // (admin runs on Node and legitimately uses these utilities).
+  it('blocks the `/node` subpath from apps/admin/src/** (Epic 4 PR 4.1a — SPA cannot import Node-only utilities)', async (): Promise<void> => {
+    // Epic 4 spec §3.2: see the rationale on the package-root assertion above —
+    // the Epic 4 admin SPA split moves Node-only utilities behind the
+    // apps/admin/server/** boundary. The carve-out for legitimate Node-side
+    // consumers lives in apps/admin/server/**.
     const src = "import { loadResortDataset } from '@snowboard-trip-advisor/schema/node'\nexport { loadResortDataset }\n"
     const ids = await violations('apps/admin/src/__eslint_fixture__.ts', src)
+    expect(ids).toContain('no-restricted-imports')
+  })
+
+  it('does NOT block the `/node` subpath from apps/admin/server/** (Node middleware)', async (): Promise<void> => {
+    const src = "import { loadResortDataset } from '@snowboard-trip-advisor/schema/node'\nexport { loadResortDataset }\n"
+    const ids = await violations('apps/admin/server/__eslint_fixture__.ts', src)
     expect(ids).not.toContain('no-restricted-imports')
   })
 

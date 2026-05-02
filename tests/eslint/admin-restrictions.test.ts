@@ -1,0 +1,97 @@
+import { readdir, readFile } from 'node:fs/promises'
+import { join, relative } from 'node:path'
+
+import { ESLint } from 'eslint'
+import { describe, expect, it } from 'vitest'
+
+const REPO_ROOT = process.cwd()
+const ADMIN_SRC = join(REPO_ROOT, 'apps/admin/src')
+
+async function lintFixture(code: string, filePath: string): Promise<ESLint.LintResult[]> {
+  const eslint = new ESLint({
+    overrideConfigFile: join(REPO_ROOT, 'eslint.config.js'),
+    cwd: REPO_ROOT,
+    warnIgnored: false,
+  })
+  return eslint.lintText(code, { filePath })
+}
+
+describe('apps/admin ESLint restrictions (PR 4.1a, spec §3.2 + §7.5)', (): void => {
+  it.each([
+    [
+      'raw fetch( in SPA code',
+      `export const x = fetch('/api/foo')\n`,
+      'no-restricted-syntax',
+    ],
+    [
+      'schema/node import',
+      `import { publishDataset } from '@snowboard-trip-advisor/schema/node'\nvoid publishDataset\n`,
+      'no-restricted-imports',
+    ],
+    [
+      'node:fs/promises import',
+      `import { readFile } from 'node:fs/promises'\nvoid readFile\n`,
+      'no-restricted-imports',
+    ],
+    [
+      'apps/admin/server import',
+      `import { listResortsHandler } from 'apps/admin/server/listResorts'\nvoid listResortsHandler\n`,
+      'no-restricted-imports',
+    ],
+  ])('blocks %s', async (_name: string, code: string, ruleId: string): Promise<void> => {
+    const [result] = await lintFixture(code, join(ADMIN_SRC, '__eslint_fixture__.ts'))
+    expect(result?.messages.some((m): boolean => m.ruleId === ruleId)).toBe(true)
+  })
+
+  it('exempts apps/admin/src/lib/apiClient.ts from the raw-fetch rule via inline disable', async (): Promise<void> => {
+    const code = `// eslint-disable-next-line no-restricted-syntax\nexport const x = fetch('/api/foo')\n`
+    // The exemption mechanism is the inline-disable comment, not the filename.
+    // Use the eslint-fixture sentinel basename so the lint runner doesn't try to
+    // resolve the virtual path through the tsconfig project service.
+    const [result] = await lintFixture(code, join(ADMIN_SRC, '__eslint_fixture__.ts'))
+    expect(result?.messages.some((m): boolean => m.ruleId === 'no-restricted-syntax')).toBe(false)
+  })
+})
+
+const ALLOWLIST: ReadonlyArray<string> = [
+  'apps/admin/src/lib/apiClient.ts',
+  'apps/admin/src/mocks/realHandlers.test.ts',
+]
+
+const INLINE_DISABLE_PATTERN = /eslint-disable.*no-restricted-syntax/
+
+async function findFiles(dir: string): Promise<ReadonlyArray<string>> {
+  const out: string[] = []
+  try {
+    const entries = await readdir(dir, { withFileTypes: true })
+    for (const entry of entries) {
+      const full = join(dir, entry.name)
+      if (entry.isDirectory()) {
+        const sub = await findFiles(full)
+        out.push(...sub)
+      } else if (/\.(ts|tsx)$/.test(entry.name)) {
+        out.push(full)
+      }
+    }
+  } catch {
+    // Directory does not exist (yet) — admin SPA may be empty pre-PR-4.1a.
+  }
+  return out
+}
+
+describe('apps/admin/src/** inline-disable allowlist (PR 4.1a, P1-10 + second-review fold)', (): void => {
+  it('inline-disables for no-restricted-syntax in apps/admin/src/** are an enumerated allowlist', async (): Promise<void> => {
+    const files = await findFiles(ADMIN_SRC)
+    const offenders: string[] = []
+    for (const filePath of files) {
+      const content = await readFile(filePath, 'utf8')
+      if (INLINE_DISABLE_PATTERN.test(content)) {
+        const relPath = relative(REPO_ROOT, filePath)
+        if (!ALLOWLIST.includes(relPath)) {
+          offenders.push(relPath)
+        }
+      }
+    }
+    expect(offenders, `Files with no-restricted-syntax inline-disables outside the allowlist (${ALLOWLIST.join(', ')}): ${offenders.join(', ')}`).toEqual([])
+  })
+})

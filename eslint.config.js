@@ -372,6 +372,107 @@ export default tseslint.config(
     },
   },
 
+  // apps/admin SPA discipline (Epic 4 PR 4.1a, spec §3.2 + §7.5).
+  //   - Bans `@snowboard-trip-advisor/schema/node` — Node-only utilities;
+  //     the SPA must not import this subpath. Browser-safe symbols come
+  //     from `@snowboard-trip-advisor/schema` or `/schema/api`.
+  //   - Bans `node:*` built-ins for the same reason.
+  //   - Bans `apps/admin/server/**` — server modules run under the Vite
+  //     middleware (Node), not the SPA bundle. The SPA reaches them via
+  //     the typed apiClient + HTTP, never via direct import.
+  //   - Bans raw `fetch(` calls — the SPA goes through the typed
+  //     apiClient (one inline-disable allowed at apps/admin/src/lib/
+  //     apiClient.ts; another at apps/admin/src/mocks/realHandlers.test.ts
+  //     for the bridge-handler MSW test that simulates SPA→bridge calls).
+  //     The checked-in test at tests/eslint/admin-restrictions.test.ts
+  //     pins the allowlist to those two filenames.
+  //
+  // Test files (*.test.{ts,tsx}) are exempted from the schema/node and
+  // node:* bans only — admin-side tests sometimes need filesystem
+  // primitives or Node utilities for fixture setup. The raw-fetch ban
+  // remains active in tests too, so any test that simulates a fetch
+  // must use MSW handlers (canned or bridge), not raw fetch.
+  //
+  // Flat-config rule arrays overwrite rather than merge: re-list the
+  // deep-import patterns and the apps/** brand-cast / color / raw-HTML
+  // selectors so the admin block does not silently disable them.
+  {
+    files: ['apps/admin/src/**/*.{ts,tsx}'],
+    ignores: ['apps/admin/src/**/*.test.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                '@snowboard-trip-advisor/*/internals/*',
+                '@snowboard-trip-advisor/*/internal/*',
+              ],
+              message:
+                'Deep imports into packages are banned. Import from the package root only (spec §6.3 line 483).',
+            },
+            {
+              group: ['@snowboard-trip-advisor/schema/node'],
+              message:
+                "The '/node' subpath carries Node-only utilities (node:fs/promises, node:crypto). The admin SPA must not import this subpath. Use '@snowboard-trip-advisor/schema' (browser-safe) or '@snowboard-trip-advisor/schema/api' (wire contract) instead. See spec §3.2.",
+            },
+            {
+              group: ['node:*'],
+              message:
+                'Node built-ins are not available in the admin SPA bundle. Server-side work belongs in apps/admin/server/** behind the Vite middleware; SPA fetches go through the typed apiClient.',
+            },
+            {
+              group: ['apps/admin/server/*', 'apps/admin/server/**'],
+              message:
+                "The admin server modules run under the Vite middleware (Node), not in the SPA bundle. Reach them via the typed apiClient over HTTP — never via direct import. See spec §3.2 + §7.5.",
+            },
+          ],
+          paths: [
+            {
+              name: '@snowboard-trip-advisor/schema',
+              importNames: ['loadResortDataset', 'publishDataset'],
+              message:
+                "The path-taking loadResortDataset / publishDataset are Node-only (node:fs/promises, node:crypto). Use loadResortDatasetFromObject in apps/admin/src — server-side reads belong in apps/admin/server/** behind the Vite middleware. See spec §3.2.",
+            },
+          ],
+        },
+      ],
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'CallExpression[callee.name="fetch"]',
+          message:
+            'Use the typed apiClient (apps/admin/src/lib/apiClient.ts) — raw fetch() bypasses the Zod request/response contract. The apiClient is the only allowed call site (inline-disable mechanism + checked-in test enforces the allowlist).',
+        },
+        {
+          selector: 'NewExpression[callee.name="XMLHttpRequest"]',
+          message:
+            'XMLHttpRequest is banned in apps/admin SPA — use the typed apiClient (apps/admin/src/lib/apiClient.ts).',
+        },
+        {
+          selector: BRAND_CAST_SELECTOR,
+          message: 'Brand types via Schema.parse only.',
+        },
+        {
+          selector: `Literal[value=/${COLOR_HEX_LITERAL}/]`,
+          message:
+            'Raw hex color literals are forbidden in apps/**. Use design-system tokens (var(--color-...)).',
+        },
+        {
+          selector: `Literal[value=/${COLOR_FN_LITERAL}/]`,
+          message:
+            'Raw rgb/hsl/oklch color literals are forbidden in apps/**. Use design-system tokens.',
+        },
+        {
+          selector: `JSXOpeningElement[name.name=/${RAW_HTML_ELS}/]`,
+          message:
+            'Use design-system wrappers (Button, Input, …) instead of raw HTML elements.',
+        },
+      ],
+    },
+  },
+
   // Scripts (token generator, future generators) may use console; CLI/research
   // overrides will be reintroduced in Epic 5 PR 5.1 when research/cli.ts lands.
   {
