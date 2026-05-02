@@ -4,7 +4,7 @@
 
 **Goal.** Land Tier 1 of Epic 4 (PRs 4.1a, 4.1b, 4.1c) per [the design spec](../specs/2026-05-01-epic-4-admin-app-design.md) §7.4. Tier 1 ships the typed `/api/*` wire contract, the Vite middleware skeleton with 501-stub handlers, and the 5 design-system primitives the editor will consume. **No real handler logic** — that lands in Tier 2+.
 
-**Depends on.** [PR 4.0 (plumbing)](2026-05-02-epic-4-pr-4.0-plumbing-plan.md) merged on `origin/main`. PR 4.0 adds the workspace test dependencies, the `@snowboard-trip-advisor/schema/api` subpath export, the `metricFields.ts` literal-tuple typing fix (so `z.enum(METRIC_FIELDS)` narrows correctly), the `App.test.tsx` rewrite (so the new ESLint admin restriction lands without breaking existing tests), and the `vitest.config.ts` `coverage.include` pre-stage. Without PR 4.0, every Tier 1 PR fails on `npm install` / `npm run lint` / `npm run typecheck`.
+**Depends on.** [PR 4.0 (plumbing)](2026-05-02-epic-4-pr-4.0-plumbing-plan.md) merged on `origin/main`. PR 4.0 adds the workspace test dependencies, the `@snowboard-trip-advisor/schema/api` subpath export, the `metricFields.ts` literal-tuple single-source-of-truth refactor (the array drives the `MetricPath` type alias via `(typeof METRIC_FIELDS)[number]`; `z.enum(METRIC_FIELDS)` was already narrowing correctly even before the refactor — see [PR 4.0 plan §3 post-execution amendment](2026-05-02-epic-4-pr-4.0-plumbing-plan.md) — but the refactor removes the drift risk where adding a metric to the array could leave the type alias stale), the `App.test.tsx` rewrite (so the new ESLint admin restriction lands without breaking existing tests), and the `vitest.config.ts` `coverage.include` pre-stage. Without PR 4.0, every Tier 1 PR fails on `npm install` / `npm run lint` / `npm run typecheck`.
 
 **Architecture.** Three sequential atomic PRs, each with a single concern. PR 4.1a is contract-only (Zod schemas + apiClient); PR 4.1b is the Vite middleware skeleton + Shell composition with stubs; PR 4.1c is design-system fan-out (5 components, bundled per Epic 3 PR 3.2 precedent). The Tier 1 → Tier 2 gate (spec §7.4) is the boundary at which the foundation is verified before navigation work begins.
 
@@ -57,7 +57,7 @@ Branch names per spec §7.5–7.7: `epic-4/pr-4.1a-foundation`, `epic-4/pr-4.1b-
 
 ## 1. PR 4.1a — Foundation: schema/api + apiClient + FieldStateFor + contract snapshot
 
-**Branch.** `epic-4/pr-4.1a-foundation`. **Worktree.** `.worktrees/epic-4-pr-4.1a/`. **Depends on.** [PR 4.0 (plumbing)](2026-05-02-epic-4-pr-4.0-plumbing-plan.md) merged on `origin/main`. Without it: workspace deps missing (`vitest`/`msw` etc. don't resolve), `@snowboard-trip-advisor/schema/api` subpath doesn't exist, `z.enum(METRIC_FIELDS)` widens to `string`, App.test.tsx still imports `schema/node` (the new ESLint rule fails on it).
+**Branch.** `epic-4/pr-4.1a-foundation`. **Worktree.** `.worktrees/epic-4-pr-4.1a/`. **Depends on.** [PR 4.0 (plumbing)](2026-05-02-epic-4-pr-4.0-plumbing-plan.md) merged on `origin/main`. Without it: workspace deps missing (`vitest`/`msw` etc. don't resolve), `@snowboard-trip-advisor/schema/api` subpath doesn't exist, App.test.tsx still imports `schema/node` (the new ESLint rule fails on it), and `metricFields.ts` still has the widened `: readonly MetricPath[]` annotation that would let a metric added to the array silently drift from `MetricPath` (PR 4.0's refactor closes that gap).
 
 **README.** Skip. **Subagent review.** YES (`packages/schema/**`, `eslint.config.js`).
 
@@ -148,16 +148,23 @@ Run `git diff <merge-base> HEAD --stat` after the squash to confirm the file set
 
 **Why.** Spec §10.2: workspace files carry `editor_modes` (sparse `Partial<Record<MetricPath, 'manual' | 'auto'>>`) alongside `resort` and `live_signal`. The `.refine()` enforcing `Object.keys(editor_modes) ⊆ Object.keys(resort.field_sources)` is **load-bearing** (P0-2 fold from spec review) — without it, the SPA's `useModeToggle` could persist a mode for a non-existent field and the UI would render correctly while the workspace file silently disagreed with the published-doc projection.
 
-- [ ] **Step 1: Write failing tests** covering the five cases from spec §7.5:
+- [ ] **Step 1: Write failing tests** covering the five cases from spec §7.5. Use inline `Resort.parse({...})` literals — no `fixtureResort` helper exists yet (PR 4.0 deferred the `./fixtures` subpath export); §2.5 of this plan uses the same inline-literal pattern. Reference `packages/schema/src/fixtures/current.v1.test.ts` for the canonical Resort shape:
   ```ts
   // packages/schema/src/workspaceFile.test.ts
   import { describe, expect, it } from 'vitest'
+  import { Resort } from './resort'
   import { WorkspaceFile } from './workspaceFile'
-  import { fixtureResort } from './fixtures'  // existing fixture w/ ≥1 field_source
 
   describe('WorkspaceFile', () => {
     it('parses a workspace with editor_modes ⊆ field_sources', () => {
-      const r = fixtureResort({ field_sources: { 'snow_depth_cm': { /*...*/ } } })
+      const r = Resort.parse({
+        // Implementer fills the canonical Resort shape from
+        // packages/schema/src/fixtures/current.v1.test.ts; the only requirement
+        // for this test is that field_sources contains snow_depth_cm.
+        slug: 'kotelnica-bialczanska',
+        field_sources: { 'snow_depth_cm': { /*...*/ } },
+        // ... other required Resort fields ...
+      })
       const wf = WorkspaceFile.parse({
         schema_version: 1,
         slug: 'kotelnica-bialczanska',
