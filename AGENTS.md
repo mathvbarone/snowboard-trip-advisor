@@ -62,8 +62,8 @@ Load-bearing changes require an independent general-purpose subagent review befo
 - `.claude/settings.json`
 - `scripts/hooks/**`
 - `scripts/pre-commit`, `scripts/prepare-commit-msg`
-- `scripts/install-git-hooks.{ts,mjs}` (when introduced)
-- `scripts/check-agent-discipline-sync.{ts,mjs}` (when introduced)
+- `scripts/install-git-hooks.{ts,cli.ts,test.ts}`
+- `scripts/check-agent-discipline-sync.{ts,cli.ts,test.ts}`
 - `scripts/apply-branch-protection.sh` (when restored)
 - `eslint.config.js`
 - `packages/schema/**`
