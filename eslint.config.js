@@ -462,6 +462,16 @@ export default tseslint.config(
             "Computed-member fetch (window['fetch'], globalThis['fetch']) is also banned — bracket-notation access bypasses the dot-notation selector above. Use the typed apiClient.",
         },
         {
+          // Template-literal property access: window[`fetch`](...). esquery
+          // path: callee.property.quasis[0].value.cooked === 'fetch'. Catches
+          // the no-expression template form; multi-quasi templates with
+          // interpolations are pathological and out of scope (perfect static
+          // coverage of dynamic indirection isn't achievable anyway).
+          selector: 'CallExpression[callee.type="MemberExpression"][callee.computed=true][callee.property.type="TemplateLiteral"][callee.property.quasis.0.value.cooked="fetch"]',
+          message:
+            "Template-literal computed-member fetch (window[`fetch`]) is also banned — same bypass class as bracket-string access. Use the typed apiClient.",
+        },
+        {
           selector: 'NewExpression[callee.name="XMLHttpRequest"]',
           message:
             'XMLHttpRequest is banned in apps/admin SPA — use the typed apiClient (apps/admin/src/lib/apiClient.ts).',
@@ -475,6 +485,11 @@ export default tseslint.config(
           selector: 'NewExpression[callee.type="MemberExpression"][callee.computed=true][callee.property.type="Literal"][callee.property.value="XMLHttpRequest"]',
           message:
             "Computed-member new XMLHttpRequest (window['XMLHttpRequest']) is also banned — use the typed apiClient.",
+        },
+        {
+          selector: 'NewExpression[callee.type="MemberExpression"][callee.computed=true][callee.property.type="TemplateLiteral"][callee.property.quasis.0.value.cooked="XMLHttpRequest"]',
+          message:
+            "Template-literal computed-member new XMLHttpRequest (window[`XMLHttpRequest`]) is also banned — use the typed apiClient.",
         },
         {
           // Arbitrary-depth relative server imports: ../server/, ../../server/,

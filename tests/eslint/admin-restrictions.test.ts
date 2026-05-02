@@ -70,6 +70,20 @@ describe('apps/admin ESLint restrictions (PR 4.1a, spec §3.2 + §7.5)', (): voi
   })
 
   it.each([
+    ['window[`fetch`]', 'export const x = window[`fetch`]("/api/foo")\n'],
+    ['globalThis[`fetch`]', 'export const x = globalThis[`fetch`]("/api/foo")\n'],
+  ])('blocks template-literal computed-member %s (Codex round-4 P2 fold)', async (_label: string, code: string): Promise<void> => {
+    const [result] = await lintFixture(code, join(ADMIN_SRC, '__eslint_fixture__.ts'))
+    expect(result?.messages.some((m): boolean => m.ruleId === 'no-restricted-syntax')).toBe(true)
+  })
+
+  it('blocks template-literal computed-member new XMLHttpRequest', async (): Promise<void> => {
+    const code = 'export const x = new window[`XMLHttpRequest`]()\n'
+    const [result] = await lintFixture(code, join(ADMIN_SRC, '__eslint_fixture__.ts'))
+    expect(result?.messages.some((m): boolean => m.ruleId === 'no-restricted-syntax')).toBe(true)
+  })
+
+  it.each([
     ['../server/foo (1 level)', `import { x } from '../server/foo'\nvoid x\n`],
     ['../../server/foo (2 levels)', `import { x } from '../../server/foo'\nvoid x\n`],
     ['../../../server/foo (3 levels)', `import { x } from '../../../server/foo'\nvoid x\n`],
