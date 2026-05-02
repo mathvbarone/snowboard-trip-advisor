@@ -62,12 +62,31 @@ describe('apps/admin ESLint restrictions (PR 4.1a, spec §3.2 + §7.5)', (): voi
   })
 
   it.each([
-    ['../server/foo', `import { x } from '../server/foo'\nvoid x\n`],
-    ['../../server/foo', `import { x } from '../../server/foo'\nvoid x\n`],
-    ['../../../server/foo', `import { x } from '../../../server/foo'\nvoid x\n`],
-  ])('blocks relative server import %s (Codex P2 fold — absolute pattern did not catch ../server)', async (_label: string, code: string): Promise<void> => {
+    ["window['fetch']", `export const x = window['fetch']('/api/foo')\n`],
+    ["globalThis['fetch']", `export const x = globalThis['fetch']('/api/foo')\n`],
+  ])('blocks computed-member %s (Codex round-3 P2 fold — bracket access bypassed dot-notation selector)', async (_label: string, code: string): Promise<void> => {
     const [result] = await lintFixture(code, join(ADMIN_SRC, '__eslint_fixture__.ts'))
-    expect(result?.messages.some((m): boolean => m.ruleId === 'no-restricted-imports')).toBe(true)
+    expect(result?.messages.some((m): boolean => m.ruleId === 'no-restricted-syntax')).toBe(true)
+  })
+
+  it.each([
+    ['../server/foo (1 level)', `import { x } from '../server/foo'\nvoid x\n`],
+    ['../../server/foo (2 levels)', `import { x } from '../../server/foo'\nvoid x\n`],
+    ['../../../server/foo (3 levels)', `import { x } from '../../../server/foo'\nvoid x\n`],
+    ['../../../../server/foo (4 levels)', `import { x } from '../../../../server/foo'\nvoid x\n`],
+    ['../../../../../server/foo (5 levels — Codex round-3 P2 fold: arbitrary-depth)', `import { x } from '../../../../../server/foo'\nvoid x\n`],
+    ['../../../../../../server/foo (6 levels)', `import { x } from '../../../../../../server/foo'\nvoid x\n`],
+  ])('blocks relative server import %s', async (_label: string, code: string): Promise<void> => {
+    const [result] = await lintFixture(code, join(ADMIN_SRC, '__eslint_fixture__.ts'))
+    // Moved from no-restricted-imports (enumerated patterns) to no-restricted-syntax
+    // (regex selector) so the rule catches arbitrary depth without enumeration.
+    expect(result?.messages.some((m): boolean => m.ruleId === 'no-restricted-syntax')).toBe(true)
+  })
+
+  it('blocks dynamic relative server import (await import("../server/foo"))', async (): Promise<void> => {
+    const code = `export const load = async (): Promise<unknown> => (await import('../../server/foo'))\n`
+    const [result] = await lintFixture(code, join(ADMIN_SRC, '__eslint_fixture__.ts'))
+    expect(result?.messages.some((m): boolean => m.ruleId === 'no-restricted-syntax')).toBe(true)
   })
 
   it('still bans raw fetch in admin TEST files (Codex P2 fold — top-level ignores no longer relaxes the fetch ban)', async (): Promise<void> => {

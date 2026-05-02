@@ -413,20 +413,9 @@ export default tseslint.config(
                 'Node built-ins are not available in the admin SPA bundle. Server-side work belongs in apps/admin/server/** behind the Vite middleware; SPA fetches go through the typed apiClient.',
             },
             {
-              group: [
-                'apps/admin/server/*',
-                'apps/admin/server/**',
-                '../server/*',
-                '../server/**',
-                '../../server/*',
-                '../../server/**',
-                '../../../server/*',
-                '../../../server/**',
-                '../../../../server/*',
-                '../../../../server/**',
-              ],
+              group: ['apps/admin/server/*', 'apps/admin/server/**'],
               message:
-                "The admin server modules run under the Vite middleware (Node), not in the SPA bundle. Reach them via the typed apiClient over HTTP — never via direct import (absolute or relative). See spec §3.2 + §7.5.",
+                "The admin server modules run under the Vite middleware (Node), not in the SPA bundle. Reach them via the typed apiClient over HTTP — never via direct import. See spec §3.2 + §7.5. (Relative `../server/...` imports at arbitrary depth are caught by no-restricted-syntax in Block B below.)",
             },
           ],
           paths: [
@@ -463,9 +452,14 @@ export default tseslint.config(
             'Use the typed apiClient (apps/admin/src/lib/apiClient.ts) — raw fetch() bypasses the Zod request/response contract. The apiClient is the only allowed call site (inline-disable mechanism + checked-in test enforces the allowlist).',
         },
         {
-          selector: 'CallExpression[callee.type="MemberExpression"][callee.property.name="fetch"]',
+          selector: 'CallExpression[callee.type="MemberExpression"][callee.computed=false][callee.property.name="fetch"]',
           message:
             'Member-expression fetch (window.fetch, globalThis.fetch, self.fetch) is also banned in apps/admin/src/** — use the typed apiClient. The bare-callee selector above does not catch X.fetch() forms.',
+        },
+        {
+          selector: 'CallExpression[callee.type="MemberExpression"][callee.computed=true][callee.property.type="Literal"][callee.property.value="fetch"]',
+          message:
+            "Computed-member fetch (window['fetch'], globalThis['fetch']) is also banned — bracket-notation access bypasses the dot-notation selector above. Use the typed apiClient.",
         },
         {
           selector: 'NewExpression[callee.name="XMLHttpRequest"]',
@@ -473,9 +467,29 @@ export default tseslint.config(
             'XMLHttpRequest is banned in apps/admin SPA — use the typed apiClient (apps/admin/src/lib/apiClient.ts).',
         },
         {
-          selector: 'NewExpression[callee.type="MemberExpression"][callee.property.name="XMLHttpRequest"]',
+          selector: 'NewExpression[callee.type="MemberExpression"][callee.computed=false][callee.property.name="XMLHttpRequest"]',
           message:
             'Member-expression new XMLHttpRequest (window.XMLHttpRequest, globalThis.XMLHttpRequest) is also banned — use the typed apiClient.',
+        },
+        {
+          selector: 'NewExpression[callee.type="MemberExpression"][callee.computed=true][callee.property.type="Literal"][callee.property.value="XMLHttpRequest"]',
+          message:
+            "Computed-member new XMLHttpRequest (window['XMLHttpRequest']) is also banned — use the typed apiClient.",
+        },
+        {
+          // Arbitrary-depth relative server imports: ../server/, ../../server/,
+          // ../../../server/, etc. The absolute-path equivalent
+          // (apps/admin/server/**) lives in Block A's no-restricted-imports;
+          // this regex selector closes the depth gap with one rule rather
+          // than enumerating each level.
+          selector: 'ImportDeclaration[source.value=/^(\\.\\.\\/)+server\\//]',
+          message:
+            "Relative server-module imports (../server/, ../../server/, ...) are banned at arbitrary depth — the SPA must reach apps/admin/server/** via the typed apiClient over HTTP, not via direct import. See spec §3.2 + §7.5.",
+        },
+        {
+          selector: 'ImportExpression[source.value=/^(\\.\\.\\/)+server\\//]',
+          message:
+            "Relative dynamic server-module imports (await import('../server/...')) are banned at arbitrary depth — same reason as the static-import ban above.",
         },
         {
           selector: BRAND_CAST_SELECTOR,
