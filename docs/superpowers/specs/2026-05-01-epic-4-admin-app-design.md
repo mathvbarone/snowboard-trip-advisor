@@ -274,14 +274,17 @@ A "draft resort" is a resort with a workspace file (`data/admin-workspace/<slug>
 
 ### 4.3 Endpoint 3 — `PUT /api/resorts/:slug`
 
-**Request:** `ResortUpsertBody` — `{ resort: Partial<Resort>, live_signal?: Partial<ResortLiveSignal> | null }`. Partial allows field-level edits without resending the whole document.
+**Request:** `ResortUpsertBody` — `{ resort: Partial<Resort>, live_signal?: Partial<ResortLiveSignal> | null, editor_modes?: Record<MetricPath, 'manual' | 'auto'> }`. All three fields use partial-overlay semantics; missing keys preserve the workspace's existing state. The `editor_modes` slot lets `useModeToggle` (§6.1) persist mode flips through the same PUT path the field edits use — without it, the SPA cannot write mode changes through the typed `apiClient`.
 
 **Response:** `ResortDetailResponse` — same shape as endpoint 2 (returns the post-write state).
 
 **Handler logic** (`apps/admin/server/resortUpsert.ts`):
 - Read existing workspace file (or fall back to published doc + workspace creation).
-- Merge incoming partial onto existing state (deep merge for `field_sources`, shallow merge for top-level `Resort` fields).
-- Run **client-side-equivalent validation**: parse the merged `Resort` (and `ResortLiveSignal` if present) through the schema. Reject on parse failure with `400 invalid-resort` envelope (see §4.10).
+- Merge incoming partial onto existing state:
+  - `resort`: deep merge for `field_sources`, shallow merge for top-level `Resort` fields.
+  - `live_signal`: shallow merge if present.
+  - `editor_modes`: shallow merge if present (incoming entries override existing per key; missing-from-incoming keys preserved). To "reset" a metric path back to AUTO, the SPA sends `editor_modes: {a: 'auto'}` — semantically equivalent to clearing the entry per §10.2's default-on-missing projection. Cross-key invariant per §10.2 (`Object.keys(editor_modes) ⊆ Object.keys(resort.field_sources)`) is enforced post-merge against the merged `WorkspaceFile`; ghost paths fail the refinement and the handler returns `400 invalid-resort` carrying the message.
+- Run **client-side-equivalent validation**: parse the merged `WorkspaceFile` (which includes `Resort`, `ResortLiveSignal`, and `editor_modes`) through the schema. Reject on parse failure (Resort schema OR `editor_modes` refinement) with `400 invalid-resort` envelope (see §4.10).
 - **Atomic-write** the workspace file (temp file + rename, see §10.3).
 - Respond with the post-write `ResortDetailResponse`.
 
@@ -360,7 +363,7 @@ All error responses share a single shape:
 ```ts
 {
   error: {
-    code: string,           // 'invalid-request' | 'invalid-resort' | 'not-found' | 'publish-validation-failed' | 'workspace-corrupt' | 'internal'
+    code: string,           // 'invalid-request' | 'invalid-resort' | 'not-found' | 'not-implemented' | 'publish-validation-failed' | 'workspace-corrupt' | 'internal'
     message: string,        // human-readable summary
     details?: unknown,      // Zod issue list, validator issues, etc.
   }
@@ -583,7 +586,11 @@ Tier 5 ─ Closing
 - Create `apps/admin/src/lib/apiClient.test.ts` — MSW-backed unit tests for each endpoint's happy + error paths.
 - Modify `packages/schema/src/resortView.ts` — implement `FieldStateFor<T>` + `toFieldValue<T>` per the test cases; remove the existing "DEFERRED to Epic 4 PR 4.4" comment block (`resortView.ts` lines 2-5).
 - Create `packages/schema/src/workspaceFile.ts` (`WorkspaceFile` Zod schema with `.passthrough()` per §10.2 + a top-level `editor_modes: z.record(MetricPath, z.enum(['manual', 'auto'])).default({})` field + a `.refine()` enforcing the cross-key invariant: every `editor_modes` key MUST be present in `resort.field_sources`. The refinement's error message names the offending paths so `400 invalid-resort` envelopes from `resortUpsert` carry actionable detail).
-- Create `packages/schema/api/index.ts` + 6 schema files (`listResorts.ts`, `resortDetail.ts`, `resortUpsert.ts`, `publish.ts`, `listPublishes.ts`, `health.ts`) + `errorEnvelope.ts` + `rateLimitClass.ts` (per §10.5 + C3 P1 fold — exports `RATE_LIMIT_CLASS = { listResorts: 'read', resortDetail: 'read', resortUpsert: 'write', publish: 'write', listPublishes: 'read', health: 'read' } as const`; schemas reference it via `.describe()` annotations so Phase 2 can wire enforcement without re-shaping the schemas). `errorEnvelope.ts`'s `code` enum includes `workspace-corrupt` (per §10.3.1 / P0-4 fold). `publish.ts`'s `:slug` path-param is `z.union([ResortSlug, z.literal('__all__')])` (per §4.6 / §1.1 divergence row); `resortDetail.ts` and `resortUpsert.ts` keep plain `ResortSlug`. `health.ts`'s `HealthResponse` includes `resorts_with_corrupt_workspace: number` (per §4.8 / P0-4 fold).
+- Create `packages/schema/api/index.ts` + 6 schema files (`listResorts.ts`, `resortDetail.ts`, `resortUpsert.ts`, `publish.ts`, `listPublishes.ts`, `health.ts`) + `errorEnvelope.ts` + `rateLimitClass.ts` (per §10.5 + C3 P1 fold — exports `RATE_LIMIT_CLASS = { listResorts: 'read', resortDetail: 'read', resortUpsert: 'write', publish: 'write', listPublishes: 'read', health: 'read' } as const`; schemas reference it via `.describe()` annotations so Phase 2 can wire enforcement without re-shaping the schemas).
+- `errorEnvelope.ts`'s `code` field is `z.enum(['invalid-request', 'invalid-resort', 'not-found', 'not-implemented', 'publish-validation-failed', 'workspace-corrupt', 'internal'])` per §4.10 (`'not-implemented'` is the canonical 501-stub code used by PR 4.1b's stubs; `'workspace-corrupt'` per §10.3.1 / P0-4 fold).
+- `publish.ts`'s `:slug` path-param is `z.union([ResortSlug, z.literal('__all__')])` (per §4.6 / §1.1 divergence row); `resortDetail.ts` keeps plain `ResortSlug`.
+- `resortUpsert.ts`'s `ResortUpsertBody` is `{ resort: Partial<Resort>, live_signal?: Partial<ResortLiveSignal> | null, editor_modes?: Record<MetricPath, 'manual' | 'auto'> }` per §4.3 — the `editor_modes` slot lets `useModeToggle` persist mode flips through the typed PUT path. URL slug is plain `ResortSlug`.
+- `health.ts`'s `HealthResponse` includes `resorts_with_corrupt_workspace: number` (per §4.8 / P0-4 fold).
 - Modify `packages/schema/src/index.ts` to barrel-export `WorkspaceFile` and the new `resortView` additions.
 - Modify `eslint.config.js`:
   - Allow `apps/admin/src/**` to import `@snowboard-trip-advisor/schema/api`.
@@ -745,11 +752,13 @@ Tier 5 ─ Closing
   - Validation failures (per-document `Resort` parse rejects).
   - Happy path + idempotency.
   - `modified_at` is set to `ISODateTimeString.parse(new Date().toISOString())` before the atomic write (per G3 P1 fold; the brand parse is required because `ISODateTimeString` is a branded Zod type per `packages/schema/src/branded.ts:12`).
+  - `editor_modes` shallow-merge happy path (per §4.3 / Codex P1 fold on `b45348d`): existing workspace has `editor_modes: {a: 'manual', b: 'manual'}`; PUT body has `editor_modes: {a: 'auto', c: 'manual'}` (where `c` is a valid path in `field_sources`); post-merge state is `{a: 'auto', b: 'manual', c: 'manual'}` — incoming entries override per key, missing-from-incoming keys preserved.
+  - `editor_modes` "reset via 'auto'" semantics: PUT body `editor_modes: {a: 'auto'}` is the documented way to reset path `a` to AUTO (semantically equivalent to clearing per §10.2 default-on-missing projection).
   - `editor_modes` cross-key invariant — reject case (per P0-2 fold): PUT with `editor_modes: {ghost: 'manual'}` when `field_sources` has no `ghost` returns `400 invalid-resort` carrying the refinement message in `details`.
-  - `editor_modes` field-source-removal reject case (per P0-2 fold): PUT that drops `field_sources.a` while keeping `editor_modes.a` returns `400 invalid-resort`.
+  - `editor_modes` field-source-removal reject case (per P0-2 fold): PUT that drops `field_sources.a` while keeping `editor_modes.a` returns `400 invalid-resort` (the merged document fails the refinement).
   - Corrupt-workspace handling (per §10.3.1): if the target workspace file is unparseable, the handler returns `500 workspace-corrupt` and refuses to overwrite (preserves the corrupt file for forensic recovery).
 - Extend `apps/admin/server/__tests__/workspace.test.ts` — add atomic-write helper tests asserting all four steps from §10.3 (write tmp → fsync(fd) → rename → fsync(parent_dir)) and the macOS APFS `EBADF` tolerance.
-- Implement `apps/admin/server/resortUpsert.ts` — replace 4.1b's 501 stub. Read existing workspace; merge incoming partial (preserving `editor_modes`); per-resort schema validation including the `WorkspaceFile.refine()` cross-key invariant; set `modified_at = ISODateTimeString.parse(new Date().toISOString())`; atomic-write workspace file.
+- Implement `apps/admin/server/resortUpsert.ts` — replace 4.1b's 501 stub. Read existing workspace; merge incoming partial per §4.3 (deep merge for `Resort.field_sources`, shallow merge for top-level `Resort` + `live_signal`, **shallow merge for `editor_modes` per Codex P1 fold on `b45348d`** — incoming entries override per key, missing-from-incoming keys preserved); per-`WorkspaceFile` schema validation including the `.refine()` cross-key invariant; set `modified_at = ISODateTimeString.parse(new Date().toISOString())`; atomic-write workspace file.
 - Modify `apps/admin/server/workspace.ts` — add atomic-write helper matching `packages/schema/src/publishDataset.ts:162-211` (`atomicWriteText`) byte-for-byte (§10.3).
 
 **Subagent review trigger:** YES — `apps/admin/server/**` (validation contract + atomic-write semantics; review verifies the atomic-write helper matches `publishDataset.ts:162-211` byte-for-byte AND that PUT validation enforces the `editor_modes` refinement AND that corrupt-workspace handling preserves the file rather than overwriting).
