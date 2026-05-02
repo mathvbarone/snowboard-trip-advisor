@@ -25,6 +25,25 @@ export const WorkspaceFile = z.object({
       path: ['editor_modes'],
     })
   }
+  // Slug consistency: the top-level slug, resort.slug, and (when present)
+  // live_signal.resort_slug must agree. Workspace files are stored at
+  // data/admin-workspace/<slug>.json keyed by the top-level slug; an
+  // embedded resort with a different slug would silently disagree with
+  // the storage path on read, producing wrong-resort projections.
+  if (wf.slug !== wf.resort.slug) {
+    ctx.addIssue({
+      code: 'custom',
+      message: `workspace slug "${wf.slug}" does not match resort.slug "${wf.resort.slug}"`,
+      path: ['resort', 'slug'],
+    })
+  }
+  if (wf.live_signal !== null && wf.live_signal.resort_slug !== wf.slug) {
+    ctx.addIssue({
+      code: 'custom',
+      message: `workspace slug "${wf.slug}" does not match live_signal.resort_slug "${wf.live_signal.resort_slug}"`,
+      path: ['live_signal', 'resort_slug'],
+    })
+  }
 })
 
 export type WorkspaceFile = z.infer<typeof WorkspaceFile>

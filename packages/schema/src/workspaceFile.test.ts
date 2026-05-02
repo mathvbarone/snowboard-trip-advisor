@@ -100,6 +100,81 @@ describe('WorkspaceFile (PR 4.1a, spec §10.2)', (): void => {
     expect(wf.editor_modes).toEqual({})
   })
 
+  describe('slug consistency (Codex round-3 P2 fold)', (): void => {
+    it('rejects when top-level slug disagrees with resort.slug', (): void => {
+      const r = baseResort()  // resort.slug === 'kotelnica-bialczanska'
+      const result = WorkspaceFile.safeParse({
+        schema_version: 1,
+        slug: 'spindleruv-mlyn',  // different from resort.slug
+        resort: r,
+        live_signal: null,
+        modified_at: OBS_AT,
+      })
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        const slugIssue = result.error.issues.find(
+          (i): boolean => i.path.join('.') === 'resort.slug',
+        )
+        expect(slugIssue?.message).toContain('spindleruv-mlyn')
+        expect(slugIssue?.message).toContain('kotelnica-bialczanska')
+      }
+    })
+
+    it('rejects when live_signal.resort_slug disagrees with top-level slug', (): void => {
+      const r = baseResort()  // resort.slug === 'kotelnica-bialczanska'
+      const result = WorkspaceFile.safeParse({
+        schema_version: 1,
+        slug: 'kotelnica-bialczanska',
+        resort: r,
+        live_signal: {
+          schema_version: 1,
+          resort_slug: 'spindleruv-mlyn',  // different from top-level slug
+          observed_at: OBS_AT,
+          fetched_at: OBS_AT,
+          field_sources: {},
+        },
+        modified_at: OBS_AT,
+      })
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        const issue = result.error.issues.find(
+          (i): boolean => i.path.join('.') === 'live_signal.resort_slug',
+        )
+        expect(issue).toBeDefined()
+      }
+    })
+
+    it('accepts when top-level slug, resort.slug, and live_signal.resort_slug all agree', (): void => {
+      const r = baseResort()
+      const result = WorkspaceFile.safeParse({
+        schema_version: 1,
+        slug: 'kotelnica-bialczanska',
+        resort: r,
+        live_signal: {
+          schema_version: 1,
+          resort_slug: 'kotelnica-bialczanska',
+          observed_at: OBS_AT,
+          fetched_at: OBS_AT,
+          field_sources: {},
+        },
+        modified_at: OBS_AT,
+      })
+      expect(result.success).toBe(true)
+    })
+
+    it('accepts when live_signal is null (no resort_slug to verify)', (): void => {
+      const r = baseResort()
+      const result = WorkspaceFile.safeParse({
+        schema_version: 1,
+        slug: 'kotelnica-bialczanska',
+        resort: r,
+        live_signal: null,
+        modified_at: OBS_AT,
+      })
+      expect(result.success).toBe(true)
+    })
+  })
+
   it('passthrough preserves unknown top-level keys (forward-compat for analyst-notes)', (): void => {
     const r = baseResort()
     const input = {

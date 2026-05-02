@@ -1454,10 +1454,6 @@ exports[`schema/api contract snapshot (PR 4.1a, spec §4.9 invariant 3) > captur
                   "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
                   "type": "string",
                 },
-                "resort_slug": {
-                  "pattern": "^[a-z0-9-]{1,64}$",
-                  "type": "string",
-                },
                 "schema_version": {
                   "const": 1,
                   "type": "number",
@@ -1625,13 +1621,6 @@ exports[`schema/api contract snapshot (PR 4.1a, spec §4.9 invariant 3) > captur
               ],
               "type": "object",
             },
-            "publish_state": {
-              "enum": [
-                "draft",
-                "published",
-              ],
-              "type": "string",
-            },
             "region": {
               "additionalProperties": {
                 "type": "string",
@@ -1645,10 +1634,6 @@ exports[`schema/api contract snapshot (PR 4.1a, spec §4.9 invariant 3) > captur
                 "en",
               ],
               "type": "object",
-            },
-            "schema_version": {
-              "const": 1,
-              "type": "number",
             },
             "season": {
               "additionalProperties": false,
@@ -1675,10 +1660,6 @@ exports[`schema/api contract snapshot (PR 4.1a, spec §4.9 invariant 3) > captur
             },
             "slopes_km": {
               "type": "number",
-            },
-            "slug": {
-              "pattern": "^[a-z0-9-]{1,64}$",
-              "type": "string",
             },
           },
           "type": "object",
