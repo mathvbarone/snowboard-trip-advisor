@@ -109,10 +109,40 @@ describe('apps/admin ESLint restrictions (PR 4.1a, spec §3.2 + §7.5)', (): voi
     expect(result?.messages.some((m): boolean => m.ruleId === 'no-restricted-syntax')).toBe(true)
   })
 
-  it('blocks navigator.sendBeacon (proactive round-6 P2 fold)', async (): Promise<void> => {
-    const code = `export const x = navigator.sendBeacon('/api/log', 'data')\n`
+  it.each([
+    ['navigator.sendBeacon', `export const x = navigator.sendBeacon('/api/log', 'data')\n`],
+    ['window.navigator.sendBeacon', `export const x = window.navigator.sendBeacon('/api/log', 'data')\n`],
+    ['globalThis.navigator.sendBeacon', `export const x = globalThis.navigator.sendBeacon('/api/log', 'data')\n`],
+    ['self.navigator.sendBeacon', `export const x = self.navigator.sendBeacon('/api/log', 'data')\n`],
+  ])('blocks %s (Codex round-6 P2 fold — selector now matches any nested object)', async (_label: string, code: string): Promise<void> => {
     const [result] = await lintFixture(code, join(ADMIN_SRC, '__eslint_fixture__.ts'))
     expect(result?.messages.some((m): boolean => m.ruleId === 'no-restricted-syntax')).toBe(true)
+  })
+
+  it.each([
+    ["bare ../server (no trailing slash, Codex round-6)", `import { x } from '../server'\nvoid x\n`],
+    ["bare ../../server (no trailing slash)", `import { x } from '../../server'\nvoid x\n`],
+    ["bare dynamic await import('../server')", `export const load = async (): Promise<unknown> => (await import('../server'))\n`],
+    ["bare template-literal await import(`../server`)", 'export const load = async (): Promise<unknown> => (await import(`../server`))\n'],
+    ["bare absolute apps/admin/server (no trailing slash)", `import { x } from 'apps/admin/server'\nvoid x\n`],
+  ])('blocks %s', async (_label: string, code: string): Promise<void> => {
+    const [result] = await lintFixture(code, join(ADMIN_SRC, '__eslint_fixture__.ts'))
+    const ids = result?.messages.map((m): string | null => m.ruleId) ?? []
+    // Bare absolute lives in Block A (no-restricted-imports); bare relative
+    // and dynamic forms live in Block B (no-restricted-syntax). Either rule
+    // firing is acceptable — the assertion is that SOME ban catches it.
+    expect(ids.includes('no-restricted-imports') || ids.includes('no-restricted-syntax')).toBe(true)
+  })
+
+  it('does NOT block ../serverless (false-positive guard for the trailing-slash anchor)', async (): Promise<void> => {
+    // The regex anchor `(\/|$)` after "server" must not over-match prefixes
+    // like `serverless`. Pin the false-positive guard so a future change to
+    // the regex doesn't accidentally widen the rule.
+    const code = `import { x } from '../serverless'\nvoid x\n`
+    const [result] = await lintFixture(code, join(ADMIN_SRC, '__eslint_fixture__.ts'))
+    const ids = result?.messages.map((m): string | null => m.ruleId) ?? []
+    expect(ids.includes('no-restricted-syntax')).toBe(false)
+    expect(ids.includes('no-restricted-imports')).toBe(false)
   })
 
   it.each([

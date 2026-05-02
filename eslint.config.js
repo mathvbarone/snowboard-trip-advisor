@@ -414,6 +414,11 @@ export default tseslint.config(
             },
             {
               group: [
+                // Bare `apps/admin/server` (no trailing slash) resolves to
+                // apps/admin/server/index.ts once it ships. minimatch's `*`
+                // requires at least one character, so the wildcard patterns
+                // below would miss the bare specifier — list it explicitly.
+                'apps/admin/server',
                 'apps/admin/server/*',
                 'apps/admin/server/**',
                 // Forward-looking: if a future package.json at apps/admin/server/
@@ -554,33 +559,47 @@ export default tseslint.config(
             'Member-expression EventSource / WebSocket (window.EventSource, globalThis.WebSocket) is also banned — same reason as the bare-callee form above.',
         },
         {
-          selector: 'CallExpression[callee.type="MemberExpression"][callee.object.name="navigator"][callee.property.name="sendBeacon"]',
+          // Match any sendBeacon-named member-expression call, regardless of
+          // whether the navigator reference is direct (`navigator.sendBeacon`)
+          // or nested (`window.navigator.sendBeacon`, `globalThis.navigator
+          // .sendBeacon`, `self.navigator.sendBeacon`). The narrow form was
+          // a Codex round-6 P2 finding: `[callee.object.name="navigator"]`
+          // missed the nested cases. The broader selector is acceptable in
+          // apps/admin/src/** where no non-navigator object legitimately
+          // exposes a sendBeacon method.
+          selector: 'CallExpression[callee.type="MemberExpression"][callee.property.name="sendBeacon"]',
           message:
-            'navigator.sendBeacon is a fire-and-forget network channel that bypasses the typed apiClient. Admin SPA Phase 1 has no analytics use case; if one lands, route it through the apiClient.',
+            'sendBeacon is a fire-and-forget network channel that bypasses the typed apiClient (covers navigator.sendBeacon, window.navigator.sendBeacon, globalThis.navigator.sendBeacon). Admin SPA Phase 1 has no analytics use case; if one lands, route it through the apiClient.',
         },
         {
-          // Arbitrary-depth relative server imports: ../server/, ../../server/,
-          // ../../../server/, etc. The absolute-path equivalent
-          // (apps/admin/server/**) lives in Block A's no-restricted-imports;
-          // this regex selector closes the depth gap with one rule rather
-          // than enumerating each level.
-          selector: 'ImportDeclaration[source.value=/^(\\.\\.\\/)+server\\//]',
+          // Arbitrary-depth relative server imports: ../server, ../server/,
+          // ../../server, ../../server/, etc. The absolute-path equivalent
+          // (apps/admin/server, apps/admin/server/**) lives in Block A's
+          // no-restricted-imports; this regex selector closes the depth gap.
+          //
+          // The trailing `(/|$)` is a Codex round-6 P2 fold: bare `../server`
+          // (no trailing slash) resolves to apps/admin/server/index.ts once
+          // that file ships and would have bypassed a regex requiring `/`.
+          // Anchoring to either end-of-string OR a path-segment boundary
+          // catches both `../server` and `../server/foo` while still
+          // rejecting `../serverless/foo`.
+          selector: 'ImportDeclaration[source.value=/^(\\.\\.\\/)+server(\\/|$)/]',
           message:
-            "Relative server-module imports (../server/, ../../server/, ...) are banned at arbitrary depth — the SPA must reach apps/admin/server/** via the typed apiClient over HTTP, not via direct import. See spec §3.2 + §7.5.",
+            "Relative server-module imports (../server, ../server/foo, ../../server, ...) are banned at arbitrary depth — the SPA must reach apps/admin/server/** via the typed apiClient over HTTP, not via direct import. See spec §3.2 + §7.5.",
         },
         {
-          selector: 'ImportExpression[source.value=/^(\\.\\.\\/)+server\\//]',
+          selector: 'ImportExpression[source.value=/^(\\.\\.\\/)+server(\\/|$)/]',
           message:
-            "Relative dynamic server-module imports (await import('../server/...')) are banned at arbitrary depth — same reason as the static-import ban above.",
+            "Relative dynamic server-module imports (await import('../server'), await import('../server/foo'), ...) are banned at arbitrary depth — same reason as the static-import ban above.",
         },
         {
           // Template-literal dynamic-import specifiers: await import(`../server/foo`).
           // TemplateLiteral nodes have no .value field; access the cooked text
           // of the first quasi. No-expression templates only — multi-quasi /
           // interpolated forms are pathological dynamic indirection.
-          selector: 'ImportExpression[source.type="TemplateLiteral"][source.quasis.0.value.cooked=/^(\\.\\.\\/)+server\\//]',
+          selector: 'ImportExpression[source.type="TemplateLiteral"][source.quasis.0.value.cooked=/^(\\.\\.\\/)+server(\\/|$)/]',
           message:
-            "Template-literal dynamic server-module imports (await import(`../server/...`)) are also banned at arbitrary depth — same boundary as the string-literal variant above.",
+            "Template-literal dynamic server-module imports (await import(`../server`), await import(`../server/...`)) are also banned at arbitrary depth — same boundary as the string-literal variant above.",
         },
         {
           selector: BRAND_CAST_SELECTOR,
