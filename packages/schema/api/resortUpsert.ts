@@ -2,33 +2,61 @@ import { z } from 'zod'
 
 import { ResortLiveSignal } from '../src/liveSignal'
 import { METRIC_FIELDS } from '../src/metricFields'
+import { FieldSource } from '../src/primitives'
 import { Resort } from '../src/resort'
 
 export { ResortDetailResponse, ResortSlugParam } from './resortDetail'
 
-// Identity + status fields are stripped from the upsert body shapes:
+// Identity + status + provenance fields are stripped or constrained on the
+// upsert body shapes:
 //
-//   - resort.slug / resort.schema_version: identity. The path :slug is the
+//   - resort.slug / live_signal.resort_slug: identity. The path :slug is the
 //     authoritative identifier; accepting a body slug creates an ambiguous
 //     source of truth (PUT /api/resorts/foo with body.resort.slug='bar'
-//     would silently disagree). schema_version is set by the writer based
-//     on the workspace contract, never by the client.
+//     would silently disagree).
+//   - resort.schema_version / live_signal.schema_version: writer-set by the
+//     workspace contract, never by the client. Allowing clients to pin a
+//     schema_version through upsert would defeat the writer-side migration
+//     guarantee on future schema bumps.
 //   - resort.publish_state: status managed by the dedicated publish flow
 //     (POST /api/resorts/:slug/publish). Allowing clients to PUT
 //     publish_state='published' directly would bypass the publish
 //     pre-validation gate (validatePublishedDataset) — corruption risk.
-//   - live_signal.resort_slug: same identity reasoning as resort.slug.
+//   - resort.field_sources / live_signal.field_sources: provenance. The
+//     adapter pipeline writes field_sources entries for auto-fetched
+//     values (sources: opensnow, resort-feed, booking, airbnb,
+//     snowforecast). The SPA writes field_sources entries ONLY for
+//     manually-typed values (source: 'manual'). Allowing the SPA to set
+//     non-manual source values would let it forge provenance — e.g.,
+//     stamping a typed-in number with source: 'opensnow' + a fabricated
+//     upstream_hash. Constrained shape (ManualOnlyFieldSource) rejects
+//     any source other than 'manual'; the adapter pipeline writes
+//     field_sources via a different code path, not through this PUT API.
+//
 // .strict() rejects unknown keys (Zod default is "strip silently"). Without
-// strictness the .omit() above only removes the keys from the schema's known
-// shape — extra forbidden keys would still be accepted-then-stripped, defeating
-// the rejection intent.
+// strictness the .omit() removes the keys from the schema's known shape but
+// extras would be accepted-then-stripped, defeating the rejection intent.
+
+const ManualOnlyFieldSource = FieldSource.extend({
+  source: z.literal('manual'),
+})
+const ManualOnlyFieldSources = z.record(z.string(), ManualOnlyFieldSource)
+
 const ResortPartialMutable = Resort.partial().omit({
   slug: true,
   schema_version: true,
   publish_state: true,
+  field_sources: true,
+}).extend({
+  field_sources: ManualOnlyFieldSources.optional(),
 }).strict()
+
 const ResortLiveSignalPartialMutable = ResortLiveSignal.partial().omit({
   resort_slug: true,
+  schema_version: true,
+  field_sources: true,
+}).extend({
+  field_sources: ManualOnlyFieldSources.optional(),
 }).strict()
 
 export const ResortUpsertBody = z

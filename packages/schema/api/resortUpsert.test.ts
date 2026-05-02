@@ -48,6 +48,7 @@ describe('ResortUpsertBody (PR 4.1a, spec §4.3)', (): void => {
       ['resort.schema_version (writer-set)', { resort: { schema_version: 1 } }],
       ['resort.publish_state (managed by publish flow)', { resort: { publish_state: 'published' } }],
       ['live_signal.resort_slug (identity duplicate)', { live_signal: { resort_slug: 'different-slug' } }],
+      ['live_signal.schema_version (writer-set, parallel to resort)', { live_signal: { schema_version: 1 } }],
     ])('rejects %s in upsert body', (_label: string, payload: Record<string, unknown>): void => {
       const r = ResortUpsertBody.safeParse(payload)
       expect(r.success).toBe(false)
@@ -58,9 +59,55 @@ describe('ResortUpsertBody (PR 4.1a, spec §4.3)', (): void => {
       expect(r.success).toBe(true)
     })
 
-    it('still accepts mutable live_signal fields', (): void => {
-      // live_signal partial-mutable shape: resort_slug is forbidden, but other fields pass.
-      const r = ResortUpsertBody.safeParse({ live_signal: { schema_version: 1 } })
+    it('still accepts mutable live_signal fields (e.g., snow_depth_cm)', (): void => {
+      const r = ResortUpsertBody.safeParse({ live_signal: { snow_depth_cm: 42 } })
+      expect(r.success).toBe(true)
+    })
+  })
+
+  describe('field_sources provenance-forge prevention (proactive round-6 P1 fold)', (): void => {
+    const HASH_64 = 'a'.repeat(64)
+    const OBS_AT = '2026-04-26T08:00:00Z'
+
+    const manualEntry = {
+      source: 'manual',
+      source_url: 'https://example.com/x',
+      observed_at: OBS_AT,
+      fetched_at: OBS_AT,
+      upstream_hash: HASH_64,
+      attribution_block: { en: 'manual entry' },
+    }
+
+    it.each(['opensnow', 'resort-feed', 'booking', 'airbnb', 'snowforecast'])(
+      'rejects field_sources entry with non-manual source: %s',
+      (source: string): void => {
+        const forged = { ...manualEntry, source }
+        const r = ResortUpsertBody.safeParse({
+          resort: { field_sources: { 'altitude_m.max': forged } },
+        })
+        expect(r.success).toBe(false)
+      },
+    )
+
+    it('accepts field_sources entry with source: manual (legitimate user-typed value)', (): void => {
+      const r = ResortUpsertBody.safeParse({
+        resort: { field_sources: { 'altitude_m.max': manualEntry } },
+      })
+      expect(r.success).toBe(true)
+    })
+
+    it('rejects forged source on live_signal.field_sources too', (): void => {
+      const forged = { ...manualEntry, source: 'opensnow' }
+      const r = ResortUpsertBody.safeParse({
+        live_signal: { field_sources: { snow_depth_cm: forged } },
+      })
+      expect(r.success).toBe(false)
+    })
+
+    it('accepts manual source on live_signal.field_sources', (): void => {
+      const r = ResortUpsertBody.safeParse({
+        live_signal: { field_sources: { snow_depth_cm: manualEntry } },
+      })
       expect(r.success).toBe(true)
     })
   })

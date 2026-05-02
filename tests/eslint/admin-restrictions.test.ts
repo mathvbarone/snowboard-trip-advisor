@@ -84,6 +84,53 @@ describe('apps/admin ESLint restrictions (PR 4.1a, spec §3.2 + §7.5)', (): voi
   })
 
   it.each([
+    ['fetch.call', `export const x = fetch.call(globalThis, '/api/foo')\n`],
+    ['fetch.apply', `export const x = fetch.apply(globalThis, ['/api/foo'])\n`],
+    ['fetch.bind', `export const f = fetch.bind(globalThis)\n`],
+    ['variable indirection', `const f = fetch\nexport const x = f('/api/foo')\n`],
+  ])('blocks indirect fetch invocation: %s (Codex round-5 P2 fold via no-restricted-globals)', async (_label: string, code: string): Promise<void> => {
+    const [result] = await lintFixture(code, join(ADMIN_SRC, '__eslint_fixture__.ts'))
+    expect(result?.messages.some((m): boolean => m.ruleId === 'no-restricted-globals')).toBe(true)
+  })
+
+  it('blocks template-literal dynamic server import (Codex round-5 P2 fold)', async (): Promise<void> => {
+    const code = 'export const load = async (): Promise<unknown> => (await import(`../../server/foo`))\n'
+    const [result] = await lintFixture(code, join(ADMIN_SRC, '__eslint_fixture__.ts'))
+    expect(result?.messages.some((m): boolean => m.ruleId === 'no-restricted-syntax')).toBe(true)
+  })
+
+  it.each([
+    ['new EventSource', `export const x = new EventSource('/api/events')\n`],
+    ['new WebSocket', `export const x = new WebSocket('wss://example/ws')\n`],
+    ['new window.EventSource', `export const x = new window.EventSource('/api/events')\n`],
+    ['new globalThis.WebSocket', `export const x = new globalThis.WebSocket('wss://example/ws')\n`],
+  ])('blocks streaming-network primitive %s (proactive round-6 P2 fold)', async (_label: string, code: string): Promise<void> => {
+    const [result] = await lintFixture(code, join(ADMIN_SRC, '__eslint_fixture__.ts'))
+    expect(result?.messages.some((m): boolean => m.ruleId === 'no-restricted-syntax')).toBe(true)
+  })
+
+  it('blocks navigator.sendBeacon (proactive round-6 P2 fold)', async (): Promise<void> => {
+    const code = `export const x = navigator.sendBeacon('/api/log', 'data')\n`
+    const [result] = await lintFixture(code, join(ADMIN_SRC, '__eslint_fixture__.ts'))
+    expect(result?.messages.some((m): boolean => m.ruleId === 'no-restricted-syntax')).toBe(true)
+  })
+
+  it.each([
+    ['@snowboard-trip-advisor/admin-server (forward-looking)', `import { x } from '@snowboard-trip-advisor/admin-server'\nvoid x\n`],
+    ['@snowboard-trip-advisor/foo-server (wildcard pattern)', `import { x } from '@snowboard-trip-advisor/foo-server'\nvoid x\n`],
+  ])('blocks future package-name server import: %s', async (_label: string, code: string): Promise<void> => {
+    const [result] = await lintFixture(code, join(ADMIN_SRC, '__eslint_fixture__.ts'))
+    expect(result?.messages.some((m): boolean => m.ruleId === 'no-restricted-imports')).toBe(true)
+  })
+
+  it('apiClient.ts inline-disable mechanism still works for the combined no-restricted-syntax + no-restricted-globals pair', async (): Promise<void> => {
+    const code = `// eslint-disable-next-line no-restricted-syntax, no-restricted-globals\nexport const x = fetch('/api/foo')\n`
+    const [result] = await lintFixture(code, join(ADMIN_SRC, '__eslint_fixture__.ts'))
+    expect(result?.messages.some((m): boolean => m.ruleId === 'no-restricted-syntax')).toBe(false)
+    expect(result?.messages.some((m): boolean => m.ruleId === 'no-restricted-globals')).toBe(false)
+  })
+
+  it.each([
     ['../server/foo (1 level)', `import { x } from '../server/foo'\nvoid x\n`],
     ['../../server/foo (2 levels)', `import { x } from '../../server/foo'\nvoid x\n`],
     ['../../../server/foo (3 levels)', `import { x } from '../../../server/foo'\nvoid x\n`],
@@ -124,7 +171,7 @@ const ALLOWLIST: ReadonlyArray<string> = [
   'apps/admin/src/mocks/realHandlers.test.ts',
 ]
 
-const INLINE_DISABLE_PATTERN = /eslint-disable.*no-restricted-syntax/
+const INLINE_DISABLE_PATTERN = /eslint-disable.*(no-restricted-syntax|no-restricted-globals)/
 
 async function findFiles(dir: string): Promise<ReadonlyArray<string>> {
   const out: string[] = []

@@ -36,7 +36,7 @@ async function request<T>(
   }
   // Tests run under jsdom (apps/admin/vite.config.ts) so relative URLs resolve
   // via window.location. If env moves to 'node', use an absolute base URL.
-  // eslint-disable-next-line no-restricted-syntax -- this IS the typed apiClient (the one allowed call site per spec §3.2 / §7.5)
+  // eslint-disable-next-line no-restricted-syntax, no-restricted-globals -- this IS the typed apiClient (the one allowed call site per spec §3.2 / §7.5)
   const res = await fetch(path, init)
   // Read the body once as text, then attempt JSON parse. A non-JSON body
   // (HTML / plain-text from a proxy/upstream returning 502, an error page,

@@ -413,7 +413,16 @@ export default tseslint.config(
                 'Node built-ins are not available in the admin SPA bundle. Server-side work belongs in apps/admin/server/** behind the Vite middleware; SPA fetches go through the typed apiClient.',
             },
             {
-              group: ['apps/admin/server/*', 'apps/admin/server/**'],
+              group: [
+                'apps/admin/server/*',
+                'apps/admin/server/**',
+                // Forward-looking: if a future package.json at apps/admin/server/
+                // names itself @snowboard-trip-advisor/admin-server (or any
+                // *-server package), bare-specifier imports would bypass the
+                // path-based ban. Block the package-name form preemptively.
+                '@snowboard-trip-advisor/admin-server',
+                '@snowboard-trip-advisor/*-server',
+              ],
               message:
                 "The admin server modules run under the Vite middleware (Node), not in the SPA bundle. Reach them via the typed apiClient over HTTP — never via direct import. See spec §3.2 + §7.5. (Relative `../server/...` imports at arbitrary depth are caught by no-restricted-syntax in Block B below.)",
             },
@@ -438,12 +447,49 @@ export default tseslint.config(
   // mechanism + checked-in test (tests/eslint/admin-restrictions.test.ts)
   // pin the apiClient.ts + mocks/realHandlers.test.ts allowlist.
   //
+  // Out-of-scope by policy (acceptable risk; document here so future review
+  // rounds don't re-litigate):
+  //   - Reflective indirection: `Reflect.get(globalThis, 'fetch')(...)`,
+  //     `Object.entries(globalThis).find(...)`, etc. Perfect static coverage
+  //     of dynamic indirection is unachievable; AST selectors stop here.
+  //   - Eval-style: `eval('fetch(...)')`, `new Function('return fetch')()`.
+  //     Out of scope for the lint surface; defense-in-depth lives at the
+  //     bundle / CSP level (apps/admin will inherit the apps/public CSP
+  //     posture once the admin Vite plugin lands in PR 4.1b).
+  //   - Form/anchor navigation to /api/*: `<form action="/api/...">`,
+  //     `<a href="/api/...">`. The browser navigates away on submit; the
+  //     response never flows through Zod parsing anyway, and an admin SPA
+  //     legitimately needs no such form. Realistic concern: low.
+  //   - ServiceWorker: registration code lives outside apps/admin/src/**
+  //     (the SW file itself), so the lint scope doesn't apply. Phase 1
+  //     ships no SW; flag in this comment for whenever one lands.
+  //
   // Flat-config rule arrays overwrite rather than merge: re-list the apps/**
   // brand-cast / color / raw-HTML selectors so this block does not silently
   // disable them.
   {
     files: ['apps/admin/src/**/*.{ts,tsx}'],
     rules: {
+      // Catches indirect-invocation bypasses that AST selectors can't reach:
+      //   - `fetch.call(globalThis, '/api')`, `fetch.apply(...)`, `fetch.bind(...)`
+      //   - `const f = fetch; f('/api')` (variable indirection)
+      // no-restricted-globals fires on ANY reference to the global identifier,
+      // not just call-site syntax. Local re-declarations (`import { fetch }
+      // from 'x'`, `const fetch = ...`) are scoped bindings and do NOT
+      // trigger the rule.
+      'no-restricted-globals': [
+        'error',
+        {
+          name: 'fetch',
+          message:
+            'Use the typed apiClient (apps/admin/src/lib/apiClient.ts) — direct, indirect (fetch.call/.apply/.bind), or assigned (const f = fetch) global fetch references all bypass the Zod request/response contract.',
+        },
+        {
+          name: 'XMLHttpRequest',
+          message:
+            'XMLHttpRequest is banned in apps/admin SPA — use the typed apiClient.',
+        },
+      ],
       'no-restricted-syntax': [
         'error',
         {
@@ -492,6 +538,27 @@ export default tseslint.config(
             "Template-literal computed-member new XMLHttpRequest (window[`XMLHttpRequest`]) is also banned — use the typed apiClient.",
         },
         {
+          // Other network primitives that bypass fetch entirely. EventSource
+          // (Server-Sent Events) and WebSocket are realistic — if the admin
+          // ever needs streaming, the typed apiClient must add a streaming
+          // surface (or the Vite plugin proxies it), not raw constructors.
+          // navigator.sendBeacon is a fire-and-forget POST channel commonly
+          // used for analytics; admin Phase 1 has none, but cheap to close.
+          selector: 'NewExpression[callee.name=/^(EventSource|WebSocket)$/]',
+          message:
+            'EventSource / WebSocket bypass the typed apiClient — admin SPA Phase 1 has no streaming. If streaming lands, extend the apiClient with a typed surface; do not introduce raw constructors. See spec §3.2.',
+        },
+        {
+          selector: 'NewExpression[callee.type="MemberExpression"][callee.property.name=/^(EventSource|WebSocket)$/]',
+          message:
+            'Member-expression EventSource / WebSocket (window.EventSource, globalThis.WebSocket) is also banned — same reason as the bare-callee form above.',
+        },
+        {
+          selector: 'CallExpression[callee.type="MemberExpression"][callee.object.name="navigator"][callee.property.name="sendBeacon"]',
+          message:
+            'navigator.sendBeacon is a fire-and-forget network channel that bypasses the typed apiClient. Admin SPA Phase 1 has no analytics use case; if one lands, route it through the apiClient.',
+        },
+        {
           // Arbitrary-depth relative server imports: ../server/, ../../server/,
           // ../../../server/, etc. The absolute-path equivalent
           // (apps/admin/server/**) lives in Block A's no-restricted-imports;
@@ -505,6 +572,15 @@ export default tseslint.config(
           selector: 'ImportExpression[source.value=/^(\\.\\.\\/)+server\\//]',
           message:
             "Relative dynamic server-module imports (await import('../server/...')) are banned at arbitrary depth — same reason as the static-import ban above.",
+        },
+        {
+          // Template-literal dynamic-import specifiers: await import(`../server/foo`).
+          // TemplateLiteral nodes have no .value field; access the cooked text
+          // of the first quasi. No-expression templates only — multi-quasi /
+          // interpolated forms are pathological dynamic indirection.
+          selector: 'ImportExpression[source.type="TemplateLiteral"][source.quasis.0.value.cooked=/^(\\.\\.\\/)+server\\//]',
+          message:
+            "Template-literal dynamic server-module imports (await import(`../server/...`)) are also banned at arbitrary depth — same boundary as the string-literal variant above.",
         },
         {
           selector: BRAND_CAST_SELECTOR,
