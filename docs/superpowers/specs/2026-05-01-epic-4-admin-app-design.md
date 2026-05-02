@@ -274,7 +274,9 @@ A "draft resort" is a resort with a workspace file (`data/admin-workspace/<slug>
 
 ### 4.3 Endpoint 3 — `PUT /api/resorts/:slug`
 
-**Request:** `ResortUpsertBody` — `{ resort?: Partial<Resort>, live_signal?: Partial<ResortLiveSignal> | null, editor_modes?: Record<MetricPath, 'manual' | 'auto'> }`. **All three fields are optional** with partial-overlay semantics; absent fields preserve the workspace's existing state. **At least one of the three MUST be present** — the schema enforces this via `.refine()` so an empty PUT body returns `400 invalid-request` rather than silently mutating only `modified_at`. The `editor_modes` slot lets `useModeToggle` (§6.1) persist mode flips through the same PUT path the field edits use — without it, the SPA cannot write mode changes through the typed `apiClient`. Making `resort` optional is what unlocks the mode-only PUT (a `useModeToggle` flip sends `editor_modes` alone; reconstructing the full `Resort` on every toggle would be wasted bandwidth and a contract mismatch with the partial-overlay model the prose describes).
+**Request:** `ResortUpsertBody` — `{ resort?: Partial<Resort>, live_signal?: Partial<ResortLiveSignal> | null, editor_modes?: Partial<Record<MetricPath, 'manual' | 'auto'>> }`. **All three fields are optional** with partial-overlay semantics; absent fields preserve the workspace's existing state. **At least one of the three MUST be present** — the schema enforces this via `.refine()` so an empty PUT body returns `400 invalid-request` rather than silently mutating only `modified_at`. The `editor_modes` slot lets `useModeToggle` (§6.1) persist mode flips through the same PUT path the field edits use — without it, the SPA cannot write mode changes through the typed `apiClient`. Making `resort` optional is what unlocks the mode-only PUT (a `useModeToggle` flip sends `editor_modes` alone; reconstructing the full `Resort` on every toggle would be wasted bandwidth and a contract mismatch with the partial-overlay model the prose describes).
+
+**Sparse-map shape** (per Codex P1 fold on `89271db`): `MetricPath` is a finite TS union (12 literals in `packages/schema/src/metricFields.ts`); `Record<MetricPath, V>` requires all 12 keys, which contradicts the per-field toggle flow. The TS literal is therefore `Partial<Record<MetricPath, 'manual' | 'auto'>>` (sparse). The Zod schema (PR 4.1a) uses `z.partialRecord(z.enum(METRIC_FIELDS), z.enum(['manual', 'auto']))` — Zod v4's `z.record(z.enum(...), v)` is exhaustive, so `z.partialRecord` is the canonical sparse-record constructor for this case. The sparse shape applies wherever `editor_modes` is referenced (§10.2 storage shape, §6.1 hook, §7.5 schema deliverable).
 
 **Response:** `ResortDetailResponse` — same shape as endpoint 2 (returns the post-write state).
 
@@ -414,7 +416,7 @@ Mirrors Epic 3's pattern (one hook per concern; `__resetForTests` exports for is
 - `useResortList()` — wraps `apiClient.listResorts(query)`. Query state via URL params (admin's URL-state lib lives in `apps/admin/src/lib/urlState.ts`, parallel to Epic 3's `apps/public/src/lib/urlState.ts`).
 - `useResortDetail(slug)` — wraps `apiClient.getResort(slug)`. Suspense-friendly via React 19 `use()` (same pattern as Epic 3's `useDataset`; same rejected-promise pinning per [ADR-0010](../../adr/0010-usedataset-rejected-promise-pinning.md)).
 - `useWorkspaceState()` — local UI state for the editor's draft changes BEFORE PUT (debounced auto-save fires PUT through `apiClient`). Backed by `useState` + `useEffect`; not Suspense-driven.
-- `useModeToggle(slug, fieldPath)` — per-field AUTO/MANUAL state. Local UI state; the mode is stored in the workspace file's top-level `editor_modes` map (keyed by metric path, values `'manual' | 'auto'`) per §10.2. The hook reads from `useResortDetail()`'s parsed `WorkspaceFile.editor_modes` (default `'auto'` when the key is missing) and writes through `apiClient.upsertResort()` whose PUT body carries the new map. Cross-key invariant per §10.2: every `editor_modes` key MUST be a key in `resort.field_sources` — the hook computes `validPaths = Object.keys(resort.field_sources)` and no-ops `toggleMode(path)` when `path ∉ validPaths` (with a dev-only `console.warn`) so the SPA never sends a PUT that would fail the schema refinement.
+- `useModeToggle(slug, fieldPath)` — per-field AUTO/MANUAL state. Local UI state; the mode is stored in the workspace file's top-level `editor_modes` map (a sparse `Partial<Record<MetricPath, 'manual' | 'auto'>>` per §10.2 — only metric paths that have been actively toggled appear; missing keys project as `'auto'`). The hook reads from `useResortDetail()`'s parsed `WorkspaceFile.editor_modes` and writes through `apiClient.upsertResort()` whose PUT body carries the (sparse) updated map. Cross-key invariant per §10.2: every `editor_modes` key MUST be a key in `resort.field_sources` — the hook computes `validPaths = Object.keys(resort.field_sources)` and no-ops `toggleMode(path)` when `path ∉ validPaths` (with a dev-only `console.warn`) so the SPA never sends a PUT that would fail the schema refinement.
 - `usePublish()` — wraps `apiClient.publish()`. Returns `{ status: 'idle' | 'publishing' | 'success' | 'error', result?, error? }`.
 - `usePublishes()` — wraps `apiClient.listPublishes()`.
 - `useHealth()` — wraps `apiClient.getHealth()`.
@@ -585,11 +587,11 @@ Tier 5 ─ Closing
 - Create `packages/schema/api/contract.test.ts` (snapshot test; pins every export from `packages/schema/api/index.ts`; updates `__snapshots__/contract.snap`). The snapshot MUST capture endpoint 6's `:slug` path-param schema as the union `z.union([ResortSlug, z.literal('__all__')])` (per §1.1 divergence row + §4.6); a future Phase 2 PR collapsing the union back to `ResortSlug` is then a visible snapshot diff.
 - Create `apps/admin/src/lib/apiClient.test.ts` — MSW-backed unit tests for each endpoint's happy + error paths.
 - Modify `packages/schema/src/resortView.ts` — implement `FieldStateFor<T>` + `toFieldValue<T>` per the test cases; remove the existing "DEFERRED to Epic 4 PR 4.4" comment block (`resortView.ts` lines 2-5).
-- Create `packages/schema/src/workspaceFile.ts` (`WorkspaceFile` Zod schema with `.passthrough()` per §10.2 + a top-level `editor_modes: z.record(MetricPath, z.enum(['manual', 'auto'])).default({})` field + a `.refine()` enforcing the cross-key invariant: every `editor_modes` key MUST be present in `resort.field_sources`. The refinement's error message names the offending paths so `400 invalid-resort` envelopes from `resortUpsert` carry actionable detail).
+- Create `packages/schema/src/workspaceFile.ts` (`WorkspaceFile` Zod schema with `.passthrough()` per §10.2 + a top-level `editor_modes: z.partialRecord(z.enum(METRIC_FIELDS), z.enum(['manual', 'auto'])).default({})` field + a `.refine()` enforcing the cross-key invariant: every `editor_modes` key MUST be present in `resort.field_sources`. The refinement's error message names the offending paths so `400 invalid-resort` envelopes from `resortUpsert` carry actionable detail. Note: `z.partialRecord` (not `z.record`) is required because Zod v4's `z.record(z.enum(...), v)` is exhaustive — see §4.3 sparse-map note for the v4 behavior).
 - Create `packages/schema/api/index.ts` + 6 schema files (`listResorts.ts`, `resortDetail.ts`, `resortUpsert.ts`, `publish.ts`, `listPublishes.ts`, `health.ts`) + `errorEnvelope.ts` + `rateLimitClass.ts` (per §10.5 + C3 P1 fold — exports `RATE_LIMIT_CLASS = { listResorts: 'read', resortDetail: 'read', resortUpsert: 'write', publish: 'write', listPublishes: 'read', health: 'read' } as const`; schemas reference it via `.describe()` annotations so Phase 2 can wire enforcement without re-shaping the schemas).
 - `errorEnvelope.ts`'s `code` field is `z.enum(['invalid-request', 'invalid-resort', 'not-found', 'not-implemented', 'publish-validation-failed', 'workspace-corrupt', 'internal'])` per §4.10 (`'not-implemented'` is the canonical 501-stub code used by PR 4.1b's stubs; `'workspace-corrupt'` per §10.3.1 / P0-4 fold).
 - `publish.ts`'s `:slug` path-param is `z.union([ResortSlug, z.literal('__all__')])` (per §4.6 / §1.1 divergence row); `resortDetail.ts` keeps plain `ResortSlug`.
-- `resortUpsert.ts`'s `ResortUpsertBody` is `{ resort?: Partial<Resort>, live_signal?: Partial<ResortLiveSignal> | null, editor_modes?: Record<MetricPath, 'manual' | 'auto'> }` per §4.3 — all three fields optional, with a Zod `.refine()` enforcing "at least one of the three must be present" (empty bodies return `400 invalid-request`). The `editor_modes` slot lets `useModeToggle` persist mode flips through the typed PUT path; making `resort` optional unlocks mode-only PUTs without forcing the SPA to reconstruct the full Resort on every toggle. URL slug is plain `ResortSlug`. The `apiClient.test.ts` deliverable adds a "PUT with empty body returns `400 invalid-request`" case to pin the refinement; the "shallow-merge happy path" case in PR 4.4c's `resortUpsert.test.ts` verifies the same on the handler side.
+- `resortUpsert.ts`'s `ResortUpsertBody` is `{ resort?: Partial<Resort>, live_signal?: Partial<ResortLiveSignal> | null, editor_modes?: Partial<Record<MetricPath, 'manual' | 'auto'>> }` per §4.3 — all three fields optional, with a Zod `.refine()` enforcing "at least one of the three must be present" (empty bodies return `400 invalid-request`). The Zod schema for the body's `editor_modes` is `z.partialRecord(z.enum(METRIC_FIELDS), z.enum(['manual', 'auto']))` (sparse — Zod v4's `z.record(z.enum(...), v)` is exhaustive; `z.partialRecord` is the canonical sparse-record constructor — Codex P1 fold on `89271db`). The `editor_modes` slot lets `useModeToggle` persist sparse single-key updates through the typed PUT path; making `resort` optional unlocks mode-only PUTs without forcing the SPA to reconstruct the full Resort on every toggle. URL slug is plain `ResortSlug`. The `apiClient.test.ts` deliverable adds a "PUT with empty body returns `400 invalid-request`" case to pin the refinement; the "shallow-merge happy path" case in PR 4.4c's `resortUpsert.test.ts` verifies the same on the handler side and exercises a single-key sparse update.
 - `health.ts`'s `HealthResponse` includes `resorts_with_corrupt_workspace: number` (per §4.8 / P0-4 fold).
 - Modify `packages/schema/src/index.ts` to barrel-export `WorkspaceFile` and the new `resortView` additions.
 - Modify `eslint.config.js`:
@@ -945,7 +947,12 @@ const WorkspaceFile = z.object({
   resort: Resort,
   live_signal: ResortLiveSignal.nullable(),
   modified_at: ISODateTimeString,
-  editor_modes: z.record(MetricPath, z.enum(['manual', 'auto'])).default({}),
+  // Sparse map: only metric paths that have been actively toggled appear.
+  // Zod v4's z.record(z.enum(...), v) is exhaustive (requires all enum keys);
+  // z.partialRecord is the canonical sparse-record constructor.
+  editor_modes: z
+    .partialRecord(z.enum(METRIC_FIELDS), z.enum(['manual', 'auto']))
+    .default({}),
 }).passthrough().refine(
   (wf) => Object.keys(wf.editor_modes).every(
     (path) => path in wf.resort.field_sources
@@ -959,7 +966,7 @@ const WorkspaceFile = z.object({
 )
 ```
 
-The `.passthrough()` permits unknown top-level fields (forward-compat for the analyst-notes follow-up PR). The post-Epic-4 analyst-notes follow-up adds a `notes` field (a `Record<MetricPath, AnalystNote>`); existing workspace files written without `notes` continue to parse.
+The `.passthrough()` permits unknown top-level fields (forward-compat for the analyst-notes follow-up PR). The post-Epic-4 analyst-notes follow-up adds a `notes` field (a sparse `Partial<Record<MetricPath, AnalystNote>>` — only metric paths with authored notes appear); existing workspace files written without `notes` continue to parse.
 
 **`editor_modes` cross-key invariant** (per P0-2 fold): every key in `editor_modes` MUST correspond to a metric path that exists in `resort.field_sources`. You can have a `field_source` without an `editor_mode` (read-time projection: missing entry = `'auto'`, matching §1.1's parent-spec divergence row for §3.6 — Epic 4 displays AUTO by default, MANUAL is the only mutation path). You cannot have an `editor_mode` for a metric path with no corresponding `field_source`.
 
@@ -976,8 +983,8 @@ The invariant is enforced via Zod `.refine()` at `WorkspaceFile.parse()` time, n
   resort: Resort,
   live_signal: ResortLiveSignal | null,
   modified_at: ISODateTimeString,
-  editor_modes: Record<MetricPath, 'manual' | 'auto'>,
-  notes?: { [metricPath: string]: AnalystNote },  // added by post-Epic-4 follow-up
+  editor_modes: Partial<Record<MetricPath, 'manual' | 'auto'>>,  // sparse map per §4.3
+  notes?: { [metricPath: string]: AnalystNote },                 // added by post-Epic-4 follow-up
 }
 ```
 
