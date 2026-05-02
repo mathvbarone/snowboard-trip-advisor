@@ -52,7 +52,7 @@ const ViewSchema = z.enum(VIEW_VALUES)
 const SortSchema = z.enum(SORT_VALUES)
 const SlugSchema = z.string().regex(SLUG_REGEX)
 const CountrySchema = z.string().regex(COUNTRY_REGEX)
-const HighlightSchema = z.enum(METRIC_FIELDS as readonly [MetricPath, ...MetricPath[]])
+const HighlightSchema = z.enum(METRIC_FIELDS)
 
 export const URLStateSchema = z.object({
   view: ViewSchema.default('cards'),
