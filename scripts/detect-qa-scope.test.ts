@@ -166,6 +166,23 @@ describe('parseGitNameStatus', (): void => {
     expect(parseGitNameStatus('M\t\tREADME.md\n')).toEqual(['README.md'])
   })
 
+  it('extracts the path from type-change entries (T) — single-path shape', (): void => {
+    expect(parseGitNameStatus('T\tscripts/run.sh\n')).toEqual([
+      'scripts/run.sh',
+    ])
+  })
+
+  it('end-to-end: type-change on a code file alongside docs classifies as "full" (Codex P2 case)', (): void => {
+    const mixed = 'T\tapp.ts\nM\tREADME.md\n'
+    expect(detectQaScope(parseGitNameStatus(mixed))).toBe('full')
+  })
+
+  it('extracts the path from unmerged (U) entries', (): void => {
+    expect(parseGitNameStatus('U\tsrc/conflict.ts\n')).toEqual([
+      'src/conflict.ts',
+    ])
+  })
+
   it('end-to-end: rename of code → markdown classifies as "full" (Codex P1 case)', (): void => {
     const renameToMd = 'R75\tapps/public/src/main.tsx\tREADME.md\n'
     expect(detectQaScope(parseGitNameStatus(renameToMd))).toBe('full')

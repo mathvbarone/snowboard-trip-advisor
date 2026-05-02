@@ -13,7 +13,11 @@ npm run tokens:generate
 
 # --name-status (not --name-only) so renames carry both old and new
 # paths — see detect-qa-scope.ts header for the rename-bypass rationale.
-staged="$(git diff --cached --name-status --diff-filter=ACMRD)"
+# No --diff-filter: we want every change kind (including T type-changes,
+# U unmerged, etc.) to feed the classifier. Excluding any kind risks
+# silently dropping a code-touching path from the scope decision (Codex
+# P2 finding on PR #71).
+staged="$(git diff --cached --name-status)"
 # Fail-closed: if the classifier crashes (missing tsx, broken import, etc.)
 # we abort the commit rather than silently fall through to the full gate;
 # silent fall-through would mask carve-out misconfiguration indefinitely.

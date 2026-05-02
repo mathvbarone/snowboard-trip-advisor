@@ -41,8 +41,12 @@ jobs:
             head='${{ github.event.pull_request.head.sha }}'
             # --name-status (not --name-only) so renames carry both old
             # and new paths — see detect-qa-scope.ts header for the
-            # rename-bypass rationale (Codex P1 finding on PR #71).
-            paths="$(git diff --name-status --diff-filter=ACMRD "$base" "$head")"
+            # rename-bypass rationale (Codex P1 finding on PR #71). No
+            # --diff-filter: every change kind (including T type-changes
+            # and U unmerged) must feed the classifier; excluding any
+            # would risk silently dropping a code-touching path (Codex
+            # P2 finding on PR #71).
+            paths="$(git diff --name-status "$base" "$head")"
             scope="$(printf '%s\n' "$paths" | npx --no-install tsx scripts/detect-qa-scope.cli.ts)"
           else
             scope=full
