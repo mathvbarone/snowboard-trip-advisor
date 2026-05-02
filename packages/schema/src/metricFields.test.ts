@@ -1,4 +1,5 @@
 import { describe, expect, expectTypeOf, it } from 'vitest'
+import { z } from 'zod'
 
 import { METRIC_FIELDS, type MetricPath } from './metricFields'
 
@@ -14,7 +15,27 @@ describe('METRIC_FIELDS', (): void => {
   it('is a frozen tuple (mutations must throw at runtime)', (): void => {
     expect(Object.isFrozen(METRIC_FIELDS)).toBe(true)
   })
-  it('is typed as ReadonlyArray<MetricPath>', (): void => {
-    expectTypeOf(METRIC_FIELDS).toEqualTypeOf<readonly MetricPath[]>()
+  it('is assignable to ReadonlyArray<MetricPath>', (): void => {
+    expectTypeOf(METRIC_FIELDS).toExtend<readonly MetricPath[]>()
+  })
+})
+
+describe('METRIC_FIELDS literal-tuple typing (PR 4.0)', (): void => {
+  it('z.enum(METRIC_FIELDS) parses every literal and rejects unknown', (): void => {
+    const schema = z.enum(METRIC_FIELDS)
+    expect(schema.safeParse('snow_depth_cm').success).toBe(true)
+    expect(schema.safeParse('not-a-metric').success).toBe(false)
+  })
+
+  it('TS: z.enum(METRIC_FIELDS) output type narrows to MetricPath, not string', (): void => {
+    const schema = z.enum(METRIC_FIELDS)
+    expect(schema.options).toEqual(METRIC_FIELDS)
+    type Inferred = z.infer<typeof schema>
+    expectTypeOf<Inferred>().toEqualTypeOf<MetricPath>()
+  })
+
+  it('TS: METRIC_FIELDS literal tuple is assignable to readonly MetricPath[]', (): void => {
+    const widened: readonly MetricPath[] = METRIC_FIELDS
+    expect(widened.length).toBe(12)
   })
 })
