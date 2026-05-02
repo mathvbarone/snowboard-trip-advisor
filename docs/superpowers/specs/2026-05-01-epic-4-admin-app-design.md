@@ -158,7 +158,7 @@ apps/admin/
 
 - A `Plugin` that registers a `configureServer` hook.
 - The hook installs a Connect-style middleware on `/api/`. The middleware reads the request body (JSON), parses through the matching Zod schema from `packages/schema/api/*`, dispatches to the matching `server/*` handler, parses the handler's return value through the response Zod schema, and writes the response.
-- Errors are caught and shaped into a standard `{ error: { code, message, details? } }` envelope (see §4.8 below).
+- Errors are caught and shaped into a standard `{ error: { code, message, details? } }` envelope (see §4.10 below).
 - Phase-1 specifics inline (rate-limit class is advisory; role checks are no-ops).
 
 Plugin scope: only on `apps/admin/`'s Vite dev server. `apps/public/`'s Vite server has no admin-api middleware — the public app reads the published file via `fetch('/data/current.v1.json')` per Epic 3 spec §10.2.
@@ -280,7 +280,7 @@ A "draft resort" is a resort with a workspace file (`data/admin-workspace/<slug>
 **Handler logic** (`apps/admin/server/resortUpsert.ts`):
 - Read existing workspace file (or fall back to published doc + workspace creation).
 - Merge incoming partial onto existing state (deep merge for `field_sources`, shallow merge for top-level `Resort` fields).
-- Run **client-side-equivalent validation**: parse the merged `Resort` (and `ResortLiveSignal` if present) through the schema. Reject on parse failure with `400 invalid-resort` envelope (see §4.8).
+- Run **client-side-equivalent validation**: parse the merged `Resort` (and `ResortLiveSignal` if present) through the schema. Reject on parse failure with `400 invalid-resort` envelope (see §4.10).
 - **Atomic-write** the workspace file (temp file + rename, see §10.3).
 - Respond with the post-write `ResortDetailResponse`.
 
@@ -297,9 +297,12 @@ To surface blocking state to the user **before** they click Publish:
   - Number of workspace files missing required `field_sources` entries.
   - Total number of would-publish resorts.
 - Client-side re-validation is **explicitly NOT done** — the SPA does not import `validatePublishedDataset`. Server-side health is the single source of truth.
-- Publish disabled-state: the dialog's confirm button is `disabled` when `health.resorts_with_failed_fields > 0`; tooltip explains "fix failures or switch fields to MANUAL before publishing."
+- Publish disabled-state: the dialog's confirm button is `disabled` when ANY of the following:
+  - `health.resorts_with_failed_fields > 0` — tooltip: "fix failures or switch fields to MANUAL before publishing."
+  - `health.resorts_with_missing_provenance > 0` — tooltip: "every metric field needs a matching `field_sources` entry; check the editor's StatusPill column for missing-provenance markers."
+  - `health.resorts_total === 0` — tooltip: "no resorts staged for publish. Add resorts in the editor before publishing." (Phase 1 cold-start case: `PublishedDataset.resorts` is `z.array(Resort).min(1)` per `packages/schema/src/published.ts:15`'s `EMPTY_DATASET_ZOD_MESSAGE = 'dataset_empty'` invariant — publishing an empty dataset would fail validation server-side; the dialog catches this client-side as a friendlier UX affordance.)
 
-### 4.4 Endpoint 6 — `POST /api/resorts/:slug/publish`
+### 4.6 Endpoint 6 — `POST /api/resorts/:slug/publish`
 
 **Request:** `PublishBody` — `{ confirm: true }`. The boolean is a guard against accidental publish; the SPA's confirm dialog sets it.
 
@@ -312,27 +315,27 @@ To surface blocking state to the user **before** they click Publish:
 - Compose the `PublishedDataset` envelope shape (per `packages/schema/src/published.ts`).
 - Call `publishDataset(...)` from `@snowboard-trip-advisor/schema/node` — which runs `parse → validatePublishedDataset → atomic write → archive`.
 - On success: respond with the version metadata.
-- On `validatePublishedDataset` failure: respond `400 publish-validation-failed` with the issue list in `details`.
+- On `validatePublishedDataset` failure: respond `400 publish-validation-failed` with the issue list in `details`. The `dataset_empty` Zod issue (per `packages/schema/src/published.ts:15`'s `EMPTY_DATASET_ZOD_MESSAGE` constant — fires when `resorts.length === 0`) maps to a non-failure UI affordance: §4.3.1's `<PublishDialog>` disables the confirm button when `health.resorts_total === 0`, so the operator sees the friendlier "no resorts staged" tooltip before they ever submit. If a request reaches the handler with an empty dataset (e.g., the dialog disabled-state was bypassed), the response is still `400 publish-validation-failed` with `details` carrying the `dataset_empty` code so the SPA can fall back to the friendlier message.
 
 **Draft resort inclusion in publish:** the publish handler reads ALL workspace files (drafts + edited-published), runs `validatePublishedDataset` against the composed envelope. A draft missing required fields (per `Resort` schema or `field_sources` invariants) fails the publish with `400 publish-validation-failed`. This is the intended UX: drafts must be complete before they can publish.
 
-### 4.5 Endpoint 7 — `GET /api/publishes`
+### 4.7 Endpoint 7 — `GET /api/publishes`
 
 **Request:** `ListPublishesQuery` — `{ page?: { offset, limit } }`. Default `{ offset: 0, limit: 20 }`.
 
-**Response:** `ListPublishesResponse` — `{ items: PublishMetadata[], page: { ... } }`. `PublishMetadata` includes `version_id`, `published_at`, `archive_path`, `resort_count`, `published_by` (Phase 1: hostname fingerprint per spec §4.5.1's `manifest.generated_by`).
+**Response:** `ListPublishesResponse` — `{ items: PublishMetadata[], page: { ... } }`. `PublishMetadata` includes `version_id`, `published_at`, `archive_path`, `resort_count`, `published_by` (Phase 1: hostname fingerprint per parent spec §4.5.1's `manifest.generated_by`).
 
 **Handler logic:** read the history directory under `data/published/history/` (the directory `publishDataset` writes archived versions into; see `packages/schema/src/publishDataset.ts:30` — `HISTORY_DIR_NAME = 'history'`); list versions newest-first; respond.
 
-### 4.6 Endpoint 8 — `GET /api/health`
+### 4.8 Endpoint 8 — `GET /api/health`
 
 **Request:** `HealthQuery` — `{}`.
 
-**Response:** `HealthResponse` — `{ resorts_total, resorts_with_stale_fields, resorts_with_failed_fields, pending_integration_errors, last_published_at, archive_size_bytes }`.
+**Response:** `HealthResponse` — `{ resorts_total, resorts_with_stale_fields, resorts_with_failed_fields, resorts_with_missing_provenance, pending_integration_errors, last_published_at, archive_size_bytes }`. `resorts_with_missing_provenance` counts workspace files where one or more `METRIC_FIELDS` entries lack a matching `field_sources` entry — this is the count surfaced to `<PublishDialog>` per §4.3.1's pre-publish blocking-state UX (Codex P1 finding on commit `7439e6b`).
 
 **Handler logic:** read all workspace files (or fall back to published doc); aggregate per-field statuses; respond.
 
-### 4.7 Contract invariants (parent §8.4.1, enforced in Epic 4)
+### 4.9 Contract invariants (parent §8.4.1, enforced in Epic 4)
 
 1. **Every Phase 1 endpoint has a Zod schema pair** in `packages/schema/api/*.ts`. The contract-snapshot test (4.1a) enforces this mechanically — `__snapshots__/contract.snap` lists every export from `packages/schema/api/index.ts`; diffs require maintainer review.
 2. **`apps/admin` fetches go through the typed `apiClient`** generated from those schemas. ESLint rule (4.1a) bans `fetch(` and `XMLHttpRequest` references outside `apiClient.ts`.
@@ -340,14 +343,14 @@ To surface blocking state to the user **before** they click Publish:
 4. **Phase 2 route registration uses the same schemas** — when Phase 2 lands, route registration imports from `packages/schema/api/*` so a schema change is a Phase 2 compile error.
 5. **`GET`/`HEAD` are idempotent and safe.** `PUT`/`POST` carry an `Idempotency-Key` header on destructive operations (publish, sync — sync is Epic 5). Phase 1's in-process middleware honors but does not enforce idempotency keys; Phase 2 enforces.
 
-### 4.8 Error envelope
+### 4.10 Error envelope
 
 All error responses share a single shape:
 
 ```ts
 {
   error: {
-    code: string,           // 'invalid-request' | 'invalid-resort' | 'not-found' | 'publish-validation-failed' | 'internal'
+    code: string,           // 'invalid-request' | 'invalid-resort' | 'not-found' | 'publish-validation-failed' | 'workspace-corrupt' | 'internal'
     message: string,        // human-readable summary
     details?: unknown,      // Zod issue list, validator issues, etc.
   }
@@ -384,7 +387,7 @@ Per Epic 3 spec §5.1 "Out of Epic 3" — these components are admin-only in Pha
   - **`LivePanel`** — renders the latest `ResortLiveSignal` per field via `<FieldRow>`.
   - **`FieldRow`** — `<StatusPill>` + value display (or edit input in MANUAL mode) + `<ModeToggle>` + `<SourceBadge>` (the Epic-3 design-system component).
   - **`ModeToggle`** — `AUTO` ↔ `MANUAL` toggle. **Interactive in Epic 4** (lands in PR 4.4d): clicking flips a field's mode in the workspace state, and MANUAL mode exposes the edit input that PR 4.4c wires to PUT. What is **absent** in Epic 4 is the AUTO-side adapter-action buttons (Test / Sync) — those land in Epic 5 alongside the first real adapter per [ADR-0011](../../adr/0011-defer-test-sync-ux-to-epic-5.md). §1.1's parent-spec divergence row for §3.6 ("`AUTO` mode in Epic 4 displays the most recent value with `SourceBadge` (read-only); no refresh-from-adapter button. `MANUAL` mode is the only edit path.") is the canonical Epic 4 behavior. PRs 4.4a–4.4b ship the toggle in a render-only state (visible, no PUT yet); 4.4d makes it interactive.
-- **`PublishDialog`** — modal confirm dialog before `POST /api/resorts/:slug/publish` (the canonical endpoint per §4.4; Phase 1 publish is all-or-nothing per §1 row 5). Phase 1's SPA calls `apiClient.publish()` with no slug arg per the B4 P1 fold — the route's `:slug` is ignored in Phase 1's all-or-nothing publish. Lists workspace state (number of changed resorts; number of resorts with `Failed` fields blocking publish per parent §3.7 + §4.3.1).
+- **`PublishDialog`** — modal confirm dialog before `POST /api/resorts/:slug/publish` (the canonical endpoint per §4.6; Phase 1 publish is all-or-nothing per §1 row 5, so the SPA hard-codes a sentinel slug `'__all__'` in the URL path while exposing a no-arg `apiClient.publish()` per §7.5 / B4 P1 fold). Lists workspace state (number of changed resorts; number of resorts with `Failed` fields blocking publish per parent §3.7 + §4.3.1).
 - **`PublishHistory`** — list of past publishes from `GET /api/publishes`. Phase 1 read-only — no rollback action.
 
 ---
@@ -453,7 +456,7 @@ PRs touching these paths require an independent subagent review per AGENTS.md:
 ### 7.3 Cross-cutting assignments (every PR)
 
 - **TDD** per the deliverable ordering.
-- **README evaluation** — admin app is internal-only and not user-facing, so README updates are minimal. PRs 4.5b (publish UI) and 4.6b (integration tests) MAY warrant a README mention of the admin app's existence + how to start it; lower-numbered PRs may skip with a one-line note in the PR description.
+- **README evaluation** — admin app is internal-only and not user-facing, so README updates are minimal. PRs 4.5b (publish UI) and 4.6 (closing PR with integration tests) MAY warrant a README mention of the admin app's existence + how to start it; lower-numbered PRs may skip with a one-line note in the PR description.
 - **DCO sign-off** on every commit (`git commit -s`, or auto-added by the `prepare-commit-msg` hook installed from `scripts/prepare-commit-msg` via `npm run setup`).
 - **Subagent Review Discipline** — per the §7.2 matrix.
 - **Pre-commit `npm run qa`** — runs before each commit.
@@ -518,7 +521,7 @@ Rollback is `git revert <merge-sha>` directly on `main`, per parent spec §10.4 
   - Allow `apps/admin/src/**` to import `@snowboard-trip-advisor/schema/api`.
   - Ban `apps/admin/src/**` from importing `@snowboard-trip-advisor/schema/node` (Node-only; mirrors public app's restriction).
   - Ban `apps/admin/src/**` from raw `fetch(` references (must use `apiClient`).
-- Create `apps/admin/src/lib/apiClient.ts` — typed client. Each endpoint is one async function (`listResorts(q): Promise<ListResortsResponse>`, etc.). Per B4 P1 fold: `publish()` takes **no slug arg** in Phase 1 — the route's `:slug` is ignored because Phase 1 publish is all-or-nothing. Document this convention in the apiClient module comment so future Phase 2 maintenance does not accidentally promote the slug to a meaningful argument.
+- Create `apps/admin/src/lib/apiClient.ts` — typed client. Each endpoint is one async function (`listResorts(q): Promise<ListResortsResponse>`, etc.). Per B4 P1 fold: `publish()` takes **no slug arg** in Phase 1 — the route's `:slug` is ignored because Phase 1 publish is all-or-nothing. Implementation: the `publish` wrapper hard-codes the sentinel slug `'__all__'` in the URL path (`fetch('/api/resorts/__all__/publish', …)`) so the route's typed schema-driven generation still produces a slugged URL while the SPA caller sees a no-arg function. The handler at `apps/admin/server/publish.ts` ignores the slug entirely in Phase 1 (rebuilds the full published doc) and asserts `slug === '__all__'` to catch accidental per-slug calls until Phase 2 widens the contract. Document this convention in the apiClient module comment so future Phase 2 maintenance does not accidentally promote the slug to a meaningful argument.
 
 **Subagent review trigger:** YES — `packages/schema/**`, `eslint.config.js`.
 
@@ -540,7 +543,7 @@ Rollback is `git revert <merge-sha>` directly on `main`, per parent spec §10.4 
 - Modify `apps/admin/src/App.tsx` — replace stub `<main className="app-shell" />` with `<Shell><Outlet /></Shell>` composition (or the equivalent without a router until 4.2/4.3 — the App could initially render `<Shell><Dashboard />` placeholder).
 - Create `apps/admin/src/views/Shell.tsx` — composes `<Sidebar>` (placeholder until 4.1c) + `<HeaderBar>` (placeholder) + `<main>{children}</main>`. The component is a placeholder shell until 4.1c lands the design-system pieces.
 - Modify `apps/admin/src/main.tsx` — mount with `<StrictMode>` (already existed); no extra setup.
-- Create `apps/admin/src/test-setup.ts` extension — admin-specific MSW server setup (similar to public app's pattern).
+- Modify `apps/admin/src/test-setup.ts` — extend with admin-specific MSW server setup (the file already exists per the §2.3 file-tree comment "test-setup.ts # exists"; this PR adds the admin-side handlers; pattern mirrors the public app's `test-setup.ts`).
 - Create `apps/admin/src/mocks/server.ts` — MSW handlers stubs for all 6 endpoints (return canned data; tests override per-suite).
 
 **Subagent review trigger:** YES — `apps/admin/vite.config.ts` (binding decision), `apps/admin/vite-plugin-admin-api.ts` (new middleware surface).
@@ -659,10 +662,10 @@ Rollback is `git revert <merge-sha>` directly on `main`, per parent spec §10.4 
 
 **Files (tests first):**
 
-- Create `apps/admin/server/__tests__/resortUpsert.test.ts` — validation failures + happy path + idempotency + assertion that `modified_at` is set to `new Date().toISOString()` before the atomic write (per G3 P1 fold).
+- Create `apps/admin/server/__tests__/resortUpsert.test.ts` — validation failures + happy path + idempotency + assertion that `modified_at` is set to `ISODateTimeString.parse(new Date().toISOString())` before the atomic write (per G3 P1 fold; the brand parse is required because `ISODateTimeString` is a branded Zod type per `packages/schema/src/branded.ts:12` — assigning a bare `string` to the slot fails strict TypeScript).
 - Extend `apps/admin/server/__tests__/workspace.test.ts` — add atomic-write helper tests asserting all four steps from §10.3 (write tmp → fsync(fd) → rename → fsync(parent_dir)) and the macOS APFS `EBADF` tolerance.
 - Create `apps/admin/src/state/useWorkspaceState.test.ts`.
-- Implement `apps/admin/server/resortUpsert.ts` — replace 4.1b's 501 stub. Read existing workspace; merge incoming partial; per-resort schema validation; set `modified_at` to current ISO datetime; atomic-write workspace file.
+- Implement `apps/admin/server/resortUpsert.ts` — replace 4.1b's 501 stub. Read existing workspace; merge incoming partial; per-resort schema validation; set `modified_at = ISODateTimeString.parse(new Date().toISOString())` (brand parse required — see test deliverable above); atomic-write workspace file.
 - Modify `apps/admin/server/workspace.ts` — add atomic-write helper matching `packages/schema/src/publishDataset.ts:162-211` (`atomicWriteText`) byte-for-byte (§10.3).
 - Create `apps/admin/src/state/useWorkspaceState.ts` — local UI state for in-flight edits with debounced PUT (default debounce: 500ms).
 
@@ -697,12 +700,12 @@ Rollback is `git revert <merge-sha>` directly on `main`, per parent spec §10.4 
 
 **Files (tests first):**
 
-- Create `apps/admin/server/__tests__/publish.test.ts` — happy path + `validatePublishedDataset` failure (assert error envelope + status 400 with code `publish-validation-failed` per §4.4).
+- Create `apps/admin/server/__tests__/publish.test.ts` — happy path + `validatePublishedDataset` failure (assert error envelope + status 400 with code `publish-validation-failed` per §4.6).
 - Create `apps/admin/server/__tests__/listPublishes.test.ts` — verifies history-dir entries returned newest-first.
 - Create `apps/admin/src/state/usePublish.test.ts`.
 - Create `apps/admin/src/state/usePublishes.test.ts`.
-- Implement `apps/admin/server/publish.ts` — replace 4.1b's 501 stub. Read all workspace files; compose `PublishedDataset`; call `publishDataset()`; respond per §4.4 (drafts must be complete before they can publish).
-- Implement `apps/admin/server/listPublishes.ts` — replace 4.1b's 501 stub. Read `data/published/history/`; respond per §4.5.
+- Implement `apps/admin/server/publish.ts` — replace 4.1b's 501 stub. Read all workspace files; compose `PublishedDataset`; call `publishDataset()`; respond per §4.6 (drafts must be complete before they can publish).
+- Implement `apps/admin/server/listPublishes.ts` — replace 4.1b's 501 stub. Read `data/published/history/`; respond per §4.7.
 - Create `apps/admin/src/state/usePublish.ts`.
 - Create `apps/admin/src/state/usePublishes.ts`.
 
@@ -747,12 +750,14 @@ Rollback is `git revert <merge-sha>` directly on `main`, per parent spec §10.4 
 - Create / extend `tests/integration/apps/admin/resorts-table.test.tsx`.
 - Create `tests/integration/apps/admin/full-flow.test.tsx` — composite: open admin → navigate to Resorts → click row → MANUAL edit → save → publish → see in history.
 - Create `apps/admin/src/lib/shortcuts.ts` — global keyboard shortcut handler implementing the test cases.
-- Create / modify `apps/admin/src/views/Shell.responsive.css.ts` — at viewport `< md` (900px), edit controls receive `tabindex={-1}` and inputs/selects have `disabled aria-readonly`. Implementation per parent §3.2: edit controls must be **removed from tab order**, not merely visually hidden.
-- Modify `apps/admin/src/views/ResortEditor/FieldRow.tsx` — gate the edit input rendering on viewport via `useMediaQuery`; below md, render a read-only span instead.
+- Create / modify `apps/admin/src/views/Shell.responsive.css.ts` — visual breakpoint styles only (e.g., grid → stacked layout, header collapse). **CSS cannot apply `tabindex` or `disabled` attributes**; the tab-order discipline lives in TSX render gates below.
+- Create `apps/admin/src/lib/useResponsiveTabOrder.ts` + `.test.ts` — hook returning `{ readOnly: boolean }` keyed off `useMediaQuery('(max-width: <md>)')`. Test asserts the hook flips at the break.
+- Modify `apps/admin/src/views/ResortEditor/FieldRow.tsx` — when `useResponsiveTabOrder().readOnly === true`, render a read-only `<span>` instead of the edit input/select; this is the "removed from tab order" path per parent §3.2 (the edit controls aren't in the DOM at all below `md`, so they cannot receive focus).
+- Modify `apps/admin/src/views/Shell.tsx` (or the relevant header/sidebar components) — apply `tabIndex={-1}` and `aria-disabled` JSX props on any header/sidebar action buttons that DO render below `md` but must not be tabbable. Tests assert the rendered DOM carries `tabindex="-1"` (not just CSS visibility).
 
 **Subagent review trigger:** NO (no CODEOWNERS-protected paths; the original Dockerfile guard is deferred to Epic 6 per §10.7).
 
-**Acceptance gate:** All integration tests green; keyboard shortcuts test green; responsive test asserts tab-order at simulated `md`-1 viewport; `npm run qa` green.
+**Acceptance gate:** All integration tests green; keyboard shortcuts test green; responsive test asserts the rendered DOM at simulated `md`-1 viewport contains read-only `<span>` (not edit input) for `<FieldRow>` and `tabindex="-1"` JSX attributes (not CSS-only) on any header/sidebar action that still renders; `npm run qa` green.
 
 ---
 
@@ -784,6 +789,7 @@ If new architectural decisions emerge during implementation (e.g., a sanitizer-e
 - **`prefers-reduced-motion`** beyond what design-system primitives already enforce — Epic 6 polish.
 - **Visual regression testing** for admin (Playwright + Storybook) — Epic 6 (parallels Epic 3's deferral per parent §6.5).
 - **Publish-time diff preview** (per-field diff between current workspace state and last-published state, shown inline in `<PublishDialog>`) — Phase 2 concern; per parent §3.7's eventual UX, but not in Phase 1's `<PublishDialog>`. Phase 1's PublishDialog shows aggregate counts only (per §4.3.1's pre-publish blocking-state surface); per-field diff preview is a Phase 2 admin enhancement.
+- **Resort deletion** (`DELETE /api/resorts/:slug`) — Phase 2 endpoint. Phase 1 deletion is manual: `rm data/admin-workspace/<slug>.json` removes a draft from the workspace, but already-published resorts cannot be removed via the admin UI without a fresh publish (which would still re-include them unless the published doc is also edited out-of-band). Designing the deletion UX safely (cascade rules, audit trail, soft-delete vs hard-delete) is gated on the audit-log + auth surfaces that are Phase-2-only.
 
 ---
 
@@ -855,6 +861,19 @@ Both workspace files (`data/admin-workspace/<slug>.json`) and the published file
 `publishDataset()` already implements this pattern. The admin workspace write helper (`apps/admin/server/workspace.ts`, PR 4.4c — see §7's PR breakdown) MUST use the same pattern; subagent review on 4.4c verifies this byte-for-byte against `atomicWriteText`'s structure.
 
 **Lock semantics:** Phase 1 is single-process. `strictPort: true` on the dev server (§3.1, §2.5) blocks two-instance startup, so concurrent workspace writes are not a concern. If a future Phase 1 use case introduces concurrent writes, see `packages/schema/src/publishDataset.lockTimeout.test.ts` for the lock-timeout pattern reference. Phase 2 ships proper distributed locking when admin moves to a real service.
+
+### 10.3.1 Workspace file corruption + recovery (Phase 1)
+
+A workspace file (`data/admin-workspace/<slug>.json`) can become unparseable for three Phase 1 reasons: a partial disk fill that corrupted the rename's destination (rare given the §10.3 atomic write), a manual hand-edit by the analyst that violates the `WorkspaceFile` Zod schema, or external tooling deleting the file mid-edit.
+
+**Handler behavior on corrupt workspace files:**
+
+- **`GET /api/resorts` (endpoint 1, §4.1) + `GET /api/health` (endpoint 8, §4.8)** — these handlers iterate every workspace file. On Zod parse failure for any one file, the handler logs the failing slug (and the Zod issue list) to stderr, **excludes the corrupt file from the response**, and continues. This degrades gracefully rather than failing the whole list. The health endpoint surfaces the corrupt-file count via a new `resorts_with_corrupt_workspace` field if the count is non-zero (Phase 1 logs only; the field is added when the first corruption case lands in practice rather than speculatively).
+- **`GET /api/resorts/:slug` (endpoint 2, §4.2)** — single-slug read. On Zod parse failure of the corresponding workspace file, the handler responds `500 workspace-corrupt` (new error code, added to the `errorEnvelope.ts` schema in PR 4.1a) with `details` carrying the failing slug + the Zod issue list. The admin UI surfaces this via the existing error-envelope handling in the `<ResortEditor>` route.
+- **`PUT /api/resorts/:slug` (endpoint 3, §4.3)** — write path. If the target workspace file is corrupt, the handler responds `500 workspace-corrupt` and refuses to overwrite (so the corrupted state is preserved for forensic recovery rather than silently masked). The analyst must `rm` the file manually before re-saving.
+- **`POST /api/resorts/:slug/publish` (endpoint 6, §4.6)** — publish path. Per all-or-nothing publish, a single corrupt workspace file would otherwise block all publishing. On Zod parse failure, the publish handler responds `500 workspace-corrupt` with the failing slug; the operator must `rm` the corrupt file (which removes the resort from the next publish) or repair it before retrying. The error envelope's `details` includes the failing slug so the SPA can surface a "remove or repair `<slug>.json`" affordance.
+
+**Recovery:** Phase 1 recovery is manual `rm` + re-edit (or `rm` + accept the deletion). Workspace backups / snapshots / point-in-time recovery are out of scope for Phase 1; if those are needed before Phase 2's real backing store, the Epic 4 post-milestone handoff should re-evaluate. The new `workspace-corrupt` error code is documented in §4.10 (error envelope code inventory).
 
 ### 10.4 Publish pipeline reuse
 
