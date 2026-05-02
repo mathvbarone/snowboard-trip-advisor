@@ -12,13 +12,18 @@ This repo enforces its rules with mechanical gates, not convention:
 
 - CI required status check `quality-gate / qa` — runs `npm run qa`
   (lint → check:agent-discipline-sync → typecheck → coverage
-  → tokens:check → test:hooks → test:integration) on every PR.
+  → tokens:check → test:hooks → test:integration) on PRs that change
+  code. Docs-only PRs (every path under docs/ or ending in .md, and
+  none under .github/ / .claude/ / scripts/) run only
+  check:agent-discipline-sync. Classifier:
+  scripts/detect-qa-scope.cli.ts.
 - CI required status check `dco` — verifies every commit carries a
   `Signed-off-by:` trailer. Missing trailer fails the PR.
 - CI status check `quality-gate / analyze` — bundle-budget warn +
   preload-hrefs error + dist-dataset error (informational; not on
   the required-status set today).
-- Pre-commit hook — `npm run qa` runs before every local commit.
+- Pre-commit hook — `npm run qa` runs before every local commit
+  (same docs-only carve-out as `quality-gate / qa`).
 - Prepare-commit-msg hook — auto-appends a DCO `Signed-off-by:`
   trailer when git identity is configured.
 - PreToolUse:Bash hook — blocks `--no-verify` and `git push --force`
