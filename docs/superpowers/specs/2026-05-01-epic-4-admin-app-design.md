@@ -186,7 +186,7 @@ export default defineConfig({
 
 ### 2.6 Engines pin
 
-Inherits the root `engines.node ≥ 20.11` pin. No new engine constraints.
+Inherits the root `package.json` `engines.node` constraint: `^20.19.0 || >=22.12.0`. No new engine constraints. (Spec was previously written as `≥ 20.11`, a stale lower floor that pre-dated the root pin's tightening — fixed per Codex P2 fold on `e1453b2`.)
 
 ---
 
