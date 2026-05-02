@@ -20,7 +20,7 @@
 
 ## Quality gate
 
-- [ ] `npm run qa` passes locally (lint → typecheck → coverage → test:hooks)
+- [ ] `npm run qa` passes locally (lint → typecheck → coverage → tokens:check → test:hooks → test:integration)
 - [ ] All commits signed off with DCO (`git commit -s`)
 - [ ] Coverage remains at 100% (lines / branches / functions / statements)
 - [ ] No `/* istanbul ignore */` comments introduced
@@ -28,14 +28,12 @@
 
 ## Scope discipline
 
-- [ ] `README.md` drift assessed per CLAUDE.md Documentation Discipline
-- [ ] Applicable Post-Pivot Rules (CLAUDE.md) followed for this PR's paths
+- [ ] `README.md` drift assessed per AGENTS.md Documentation Discipline
+- [ ] Applicable rules from AGENTS.md followed for this PR's paths
 - [ ] If this PR touches a CODEOWNERS-protected path, maintainer review is requested
 - [ ] If this is a schema PR: `schema_version` is bumped when the change is breaking
-- [ ] If this PR touches a Subagent Review Discipline trigger path (CLAUDE.md), a subagent review has been run and findings addressed before requesting maintainer review
+- [ ] If this PR touches a Subagent Review Discipline trigger path (AGENTS.md), a subagent review has been run and findings addressed before requesting maintainer review
 
 ## Screenshots / artifacts
 
 <!-- For UI changes, attach screenshots at 360 / 900 / 1280 viewports -->
-
-<!-- https://claude.ai/code -->
