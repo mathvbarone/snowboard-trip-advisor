@@ -1,8 +1,35 @@
 #!/bin/sh
 # scripts/pre-commit — runs the project quality gate.
 # Installed by `npm run setup` into .git/hooks/pre-commit.
+#
+# Docs-only carve-out: when every staged path is under docs/ or ends in .md
+# (excluding the policy-surface roots .github/, .claude/, scripts/), only
+# the AGENTS.md ↔ CLAUDE.md drift checker runs. See AGENTS.md → Quality
+# Gate. The classifier (scripts/detect-qa-scope.{ts,cli.ts}) is the single
+# source of truth shared with .github/workflows/quality-gate.yml.
 set -eu
 echo "Generating design tokens (drift check)…"
 npm run tokens:generate
-echo "Running quality gate (lint → typecheck → coverage → drift → test:hooks)…"
-npm run qa
+
+staged="$(git diff --cached --name-only --diff-filter=ACMRD)"
+# Fail-closed: if the classifier crashes (missing tsx, broken import, etc.)
+# we abort the commit rather than silently fall through to the full gate;
+# silent fall-through would mask carve-out misconfiguration indefinitely.
+if ! scope="$(printf '%s\n' "$staged" | npx --no-install tsx scripts/detect-qa-scope.cli.ts)"; then
+  echo "pre-commit: scope detection failed; aborting commit (run 'npm install' if devDependencies are stale)" >&2
+  exit 2
+fi
+case "$scope" in
+  docs-only)
+    echo "Docs-only commit — running drift check only (check:agent-discipline-sync)…"
+    npm run check:agent-discipline-sync
+    ;;
+  full)
+    echo "Running full quality gate (lint → drift → typecheck → coverage → tokens → test:hooks → test:integration)…"
+    npm run qa
+    ;;
+  *)
+    echo "pre-commit: scope detector returned invalid value: '$scope'" >&2
+    exit 2
+    ;;
+esac

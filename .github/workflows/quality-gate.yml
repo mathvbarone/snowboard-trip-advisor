@@ -11,6 +11,10 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+        with:
+          # fetch-depth: 0 so the scope-detect step can `git diff` between
+          # PR base and head to classify the change set.
+          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -21,7 +25,44 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run quality gate
+      # Docs-only carve-out: when every PR-changed path is under docs/ or
+      # ends in .md (excluding policy roots .github/, .claude/, scripts/),
+      # only the AGENTS.md ↔ CLAUDE.md drift checker runs. The classifier
+      # in scripts/detect-qa-scope.{ts,cli.ts} is shared with the local
+      # pre-commit hook so the two surfaces cannot drift. Push events to
+      # main always run the full gate.
+      - name: Detect QA scope
+        id: scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base='${{ github.event.pull_request.base.sha }}'
+            head='${{ github.event.pull_request.head.sha }}'
+            paths="$(git diff --name-only --diff-filter=ACMRD "$base" "$head")"
+            scope="$(printf '%s\n' "$paths" | npx --no-install tsx scripts/detect-qa-scope.cli.ts)"
+          else
+            scope=full
+          fi
+          # Fail-closed: a corrupted classifier output must not silently
+          # become "full" (masking the carve-out indefinitely) nor
+          # "docs-only" (smuggling code through the gate).
+          case "$scope" in
+            docs-only|full) ;;
+            *)
+              echo "::error::QA scope detector produced invalid value: '$scope'"
+              exit 1
+              ;;
+          esac
+          echo "scope=$scope" >> "$GITHUB_OUTPUT"
+          echo "Detected QA scope: $scope"
+
+      - name: Run drift check (docs-only)
+        if: steps.scope.outputs.scope == 'docs-only'
+        run: npm run check:agent-discipline-sync
+
+      - name: Run quality gate (full)
+        if: steps.scope.outputs.scope != 'docs-only'
         run: npm run qa
 
   # Bundle analysis — builds apps/public with rollup-plugin-visualizer and
