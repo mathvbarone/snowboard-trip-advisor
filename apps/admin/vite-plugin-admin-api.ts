@@ -1,0 +1,125 @@
+import type { IncomingMessage, ServerResponse } from 'node:http'
+
+import type { Plugin, ViteDevServer } from 'vite'
+
+import type { dispatch as DispatchFn, resolveWorkspaceRoot as ResolveFn } from './server/dispatch'
+
+// ------------------------------------------------------------------
+// Vite Plugin lifecycle adapter. This file is imported by
+// apps/admin/vite.config.ts at config-load time; it must NOT statically
+// import the schema package (whose internal cross-references are
+// extension-less and break Node's ESM resolver during config bundling).
+//
+// The dispatch helper + route table live in ./server/dispatch.ts. We
+// lazy-load that module via server.ssrLoadModule(...) at first request,
+// by which time the Vite dev server is up and TS resolution is handled
+// by Vite's SSR pipeline (not Node's bare ESM resolver). Tests import
+// dispatch directly from ./server/dispatch (vitest also handles TS).
+//
+// The whole adapter body is /* v8 ignore */-marked because it can only
+// be exercised by booting Vite; coverage of dispatch + resolveWorkspaceRoot
+// is on the unit-tested core.
+// ------------------------------------------------------------------
+
+/* v8 ignore start -- Vite Plugin lifecycle runs only at Vite boot. */
+async function readJsonBody(req: IncomingMessage): Promise<unknown> {
+  if (req.method === 'GET' || req.method === 'HEAD') {
+    return undefined
+  }
+  const chunks: Buffer[] = []
+  for await (const chunk of req) {
+    chunks.push(chunk as Buffer)
+  }
+  if (chunks.length === 0) {
+    return undefined
+  }
+  const text = Buffer.concat(chunks).toString('utf8')
+  if (text.length === 0) {
+    return undefined
+  }
+  try {
+    return JSON.parse(text) as unknown
+  } catch {
+    return undefined
+  }
+}
+
+interface DispatchModule {
+  readonly dispatch: typeof DispatchFn
+  readonly resolveWorkspaceRoot: typeof ResolveFn
+}
+
+export function adminApiPlugin(): Plugin {
+  return {
+    name: 'admin-api',
+    configureServer(server: ViteDevServer): void {
+      // Register without a path prefix so req.url is unstripped. Connect's
+      // `use(prefix, handler)` strips the prefix from req.url; the dispatch
+      // helper matches against the full pathname including /api/.
+      server.middlewares.use((req: IncomingMessage, res: ServerResponse, next: () => void): void => {
+        if (req.url === undefined || !req.url.startsWith('/api/')) {
+          next()
+          return
+        }
+        void (async (): Promise<void> => {
+          // Defensive try/catch (subagent round-1 P1-3 fold): an unhandled
+          // rejection inside this IIFE would leave the response hanging.
+          // dispatch's own error path maps known classes (Zod, coded
+          // errors, ensureWorkspaceDir) to envelopes; this catch covers
+          // the residual "something threw before dispatch could catch"
+          // class — e.g., resolveWorkspaceRoot throws on a runaway
+          // process.cwd(), ssrLoadModule throws on a malformed dispatch
+          // module, JSON.stringify throws on a circular result body.
+          try {
+            // ssrLoadModule uses Vite's TS-aware resolver; the module + its
+            // schema imports load correctly even though the schema package's
+            // internal imports are extension-less.
+            const mod = await server.ssrLoadModule('/server/dispatch.ts') as unknown as DispatchModule
+            const body = await readJsonBody(req)
+            const url = new URL(req.url ?? '/', 'http://127.0.0.1')
+            const result = await mod.dispatch(
+              {
+                method: req.method ?? 'GET',
+                pathname: url.pathname,
+                search: url.search,
+                body,
+              },
+              { workspaceRoot: mod.resolveWorkspaceRoot() },
+            )
+            if (result === null) {
+              // Wire-contract parity with the MSW bridge harness
+              // (apps/admin/src/mocks/realHandlers.ts:60-65, pinned by
+              // realHandlers.test.ts:105-115). Codex round-2 P1 fold:
+              // calling next() here lets Vite's SPA fallback serve
+              // index.html with HTTP 200 for an unmatched /api/* path,
+              // diverging from the bridge (which returns JSON 404). That
+              // divergence masks broken client calls as successful
+              // responses. The 404 envelope literal is duplicated across
+              // bridge + middleware on purpose: both files are tiny
+              // adapters around dispatch and inlining the envelope keeps
+              // the wire-contract decision visible at the call site
+              // rather than hidden behind a shared constant.
+              res.statusCode = 404
+              res.setHeader('Content-Type', 'application/json')
+              res.end(JSON.stringify({ error: { code: 'not-found', message: 'no route' } }))
+              return
+            }
+            res.statusCode = result.status
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify(result.body))
+          } catch (err: unknown) {
+            res.statusCode = 500
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify({
+              error: {
+                code: 'internal',
+                message: `unhandled middleware error: ${(err as Error).message}`,
+              },
+            }))
+          }
+        })()
+      })
+    },
+  }
+}
+/* v8 ignore stop */

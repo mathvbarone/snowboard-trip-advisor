@@ -84,6 +84,18 @@ export default defineConfig({
         // PR 3.1c. Excluding it keeps coverage honest while the SPA still has
         // no fetch call site.
         'apps/public/src/mocks/**',
+        // `apps/admin/src/mocks/server.ts` — same rationale as apps/public
+        // above. The canned MSW handlers (PR 4.1b §2.5) are fallback defaults;
+        // SPA tests (apiClient.test.ts and the future view tests) override
+        // every endpoint they hit via server.use(...). The canned handler
+        // closures therefore don't fire in tests. Exercising them would
+        // require dedicated round-trip tests that pin canned-default
+        // behavior — overkill for what is essentially boilerplate.
+        //
+        // `apps/admin/src/mocks/realHandlers.ts` (PR 4.1b §2.6 bridge harness)
+        // IS in coverage — its tests exercise the dispatch-bridge round trip
+        // directly. Only the canned defaults are skipped.
+        'apps/admin/src/mocks/server.ts',
         // `apps/public/src/state/useDataset.hmr.ts` — HMR-only safety net.
         // `import.meta.hot` is undefined in vitest (the entire module body
         // is dead code), so coverage measurement against it is structurally
