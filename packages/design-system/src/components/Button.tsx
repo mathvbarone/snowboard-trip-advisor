@@ -1,4 +1,4 @@
-import type { JSX, ReactNode } from 'react'
+import type { JSX, MouseEvent, ReactNode } from 'react'
 
 // Minimal Button wrapper. apps/** ESLint rules ban raw <button> (spec §6.3 +
 // CLAUDE.md "UI Code Rules"); this is the design-system entry point so call
@@ -20,7 +20,13 @@ export type ButtonVariant = 'primary' | 'secondary' | 'ghost'
 
 export interface ButtonProps {
   children: ReactNode
-  onClick: () => void
+  // Optional so wrapper components (e.g. <DropdownMenu trigger={<Button>…}>)
+  // that override the click handler via React.cloneElement don't force callers
+  // to supply a placeholder. Receives the click event so consumers can call
+  // `event.preventDefault()` (e.g. to gate a wrapper's toggle behavior); pass-
+  // through call sites that don't need the event can still use `() => void`
+  // since fewer-args functions are assignable to more-args function types.
+  onClick?: (event: MouseEvent<HTMLButtonElement>) => void
   type?: 'button' | 'submit' | 'reset'
   disabled?: boolean
   variant?: ButtonVariant

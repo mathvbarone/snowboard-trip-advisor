@@ -58,3 +58,25 @@ export {
   type ExternalLinkProps,
   type ExternalLinkVariant,
 } from './components/ExternalLink'
+export { Sidebar, type SidebarProps, type SidebarItem } from './components/Sidebar'
+export {
+  StatusPill,
+  type StatusPillProps,
+  type StatusPillVariant,
+} from './components/StatusPill'
+export {
+  Tabs,
+  TabList,
+  Tab,
+  TabPanel,
+  type TabsProps,
+  type TabListProps,
+  type TabProps,
+  type TabPanelProps,
+} from './primitives/Tabs'
+export { Popover, type PopoverProps } from './primitives/Popover'
+export {
+  DropdownMenu,
+  type DropdownMenuProps,
+  type DropdownMenuItem,
+} from './components/DropdownMenu'
