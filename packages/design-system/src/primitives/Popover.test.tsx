@@ -71,11 +71,35 @@ describe('Popover', (): void => {
     expect(screen.getByText('Body')).toBeInTheDocument()
   })
 
-  it('moves focus into the popover on open (focus trap auto-focus)', async (): Promise<void> => {
+  it('moves focus into the popover on open (non-modal auto-focus)', async (): Promise<void> => {
     render(<ControlledHarness withInsideButtons />)
     expect(await screen.findByRole('dialog')).toBeInTheDocument()
     // FocusScope auto-focuses the first focusable inside on mount.
+    // (Non-modal: focus is moved INTO the popover for keyboard users, but the
+    // scope is not trapped — Tab from inside escapes naturally; covered below.)
     expect(document.activeElement?.closest('[role="dialog"]')).not.toBeNull()
+  })
+
+  it('Tab from inside the popover escapes to surrounding focusables (non-modal contract)', async (): Promise<void> => {
+    const user = userEvent.setup()
+    function HarnessWithAfter(): JSX.Element {
+      const [open, setOpen] = useState<boolean>(true)
+      return (
+        <>
+          <Popover open={open} onOpenChange={setOpen} label="x">
+            <button type="button">inside</button>
+          </Popover>
+          <button type="button" data-testid="after">after</button>
+        </>
+      )
+    }
+    render(<HarnessWithAfter />)
+    // FocusScope auto-focuses the inside button on mount.
+    expect(screen.getByRole('button', { name: 'inside' })).toHaveFocus()
+    // Tab progresses out of the popover to the next page focusable — proves
+    // FocusScope is not configured with `trapped` / `loop`.
+    await user.tab()
+    expect(screen.getByTestId('after')).toHaveFocus()
   })
 
   it('is axe-clean when open', async (): Promise<void> => {

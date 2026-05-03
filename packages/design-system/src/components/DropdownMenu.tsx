@@ -78,6 +78,14 @@ export function DropdownMenu({ trigger, label, items }: DropdownMenuProps): JSX.
   }
 
   function onMenuKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
+    // Tab closes the menu and advances focus to the next page control
+    // (WAI-ARIA APG menubutton pattern). We do NOT preventDefault — the
+    // browser's default Tab behavior handles the focus move; close() just
+    // tears down the menu DOM after.
+    if (event.key === 'Tab') {
+      close()
+      return
+    }
     if (items.length === 0) {
       return
     }
@@ -137,7 +145,13 @@ export function DropdownMenu({ trigger, label, items }: DropdownMenuProps): JSX.
       <div className="sta-dropdown-menu">
         {enhancedTrigger}
         {open ? (
-          <FocusScope asChild loop>
+          // FocusScope without `loop` / `trapped`: auto-focus the first item
+          // on open (so keyboard users land in the menu), but Tab can still
+          // escape to surrounding page controls per the WAI-ARIA APG dropdown
+          // menu pattern. Tab also fires our onMenuKeyDown handler which
+          // closes the menu — a more conventional UX than letting the menu
+          // hang open after focus moves away.
+          <FocusScope asChild>
             <div
               role="menu"
               id={menuId}

@@ -126,6 +126,26 @@ describe('DropdownMenu', (): void => {
     expect(screen.queryByRole('menu')).toBeNull()
   })
 
+  it('Tab from inside the menu closes the menu and advances focus (WAI-ARIA APG menu pattern)', async (): Promise<void> => {
+    const user = userEvent.setup()
+    function HarnessWithAfter(): JSX.Element {
+      return (
+        <>
+          <Harness />
+          <button type="button" data-testid="after">after</button>
+        </>
+      )
+    }
+    render(<HarnessWithAfter />)
+    await user.click(screen.getByRole('button', { name: 'Account' }))
+    await user.keyboard('{ArrowDown}')
+    expect(screen.getByRole('menuitem', { name: 'Sources' })).toHaveFocus()
+    // Tab from the focused menuitem closes the menu (default Tab behavior
+    // continues so focus advances to the next page control).
+    await user.tab()
+    expect(screen.queryByRole('menu')).toBeNull()
+  })
+
   it('Escape on a closed dropdown is a no-op (does not throw)', async (): Promise<void> => {
     const user = userEvent.setup()
     render(<Harness />)

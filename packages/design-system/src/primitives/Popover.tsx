@@ -6,11 +6,17 @@ import type { JSX, ReactNode } from 'react'
 // actions menu (PR 4.4b's `FieldRow`) and indirectly by `<DropdownMenu>`,
 // which composes this primitive with menu-item semantics.
 //
-// Composes the same Radix lower-level primitives `<Modal>` already wraps —
-// `<FocusScope>` for the focus trap, `<DismissableLayer>` for Escape +
-// outside-click dismissal. This avoids depending on a higher-level Radix
-// package for the popover surface itself; the consumer owns positioning
-// (Phase 1 has no positioning-library dependency per Epic 4 spec §5.1).
+// Composes two Radix lower-level primitives:
+//   - `<FocusScope>` (no `trapped`, no `loop`) auto-focuses the first
+//     focusable inside the popover on mount and auto-restores focus to
+//     the previously-focused element on unmount. Tab progression OUT of
+//     the popover is left intact — non-modal popovers must allow normal
+//     keyboard tabbing to surrounding controls (per WAI-ARIA non-modal
+//     dialog pattern).
+//   - `<DismissableLayer>` for Escape + outside-click dismissal.
+// This avoids depending on a higher-level Radix package for the popover
+// surface itself; the consumer owns positioning (Phase 1 has no
+// positioning-library dependency per Epic 4 spec §5.1).
 //
 // `aria-modal` is intentionally NOT set: a popover is non-modal — content
 // outside remains technically reachable, just dismisses the popover when
@@ -33,7 +39,7 @@ export function Popover({ open, onOpenChange, label, children }: PopoverProps): 
     return null
   }
   return (
-    <FocusScope asChild loop trapped>
+    <FocusScope asChild>
       <DismissableLayer
         role="dialog"
         aria-label={label}
