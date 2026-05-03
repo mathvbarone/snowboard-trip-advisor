@@ -1,0 +1,380 @@
+import { readFileSync } from 'node:fs'
+import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { z } from 'zod'
+
+import {
+  dispatch,
+  resolveWorkspaceRoot,
+  type DispatchDeps,
+  type Route,
+} from '../dispatch'
+
+describe('dispatch (PR 4.1b §2.1, spec §10.1 + §7.6)', (): void => {
+  let workspaceRoot: string
+
+  beforeEach(async (): Promise<void> => {
+    workspaceRoot = await mkdtemp(join(tmpdir(), 'dispatch-'))
+  })
+
+  afterEach(async (): Promise<void> => {
+    await rm(workspaceRoot, { recursive: true, force: true })
+  })
+
+  it('routes GET /api/resorts to listResortsHandler (501 stub in 4.1b)', async (): Promise<void> => {
+    const r = await dispatch(
+      { method: 'GET', pathname: '/api/resorts', search: '', body: undefined },
+      { workspaceRoot },
+    )
+    expect(r?.status).toBe(501)
+    expect(r?.body).toMatchObject({ error: { code: 'not-implemented' } })
+  })
+
+  it('routes GET /api/resorts/:slug to resortDetailHandler with parsed slug', async (): Promise<void> => {
+    const r = await dispatch(
+      { method: 'GET', pathname: '/api/resorts/kotelnica-bialczanska', search: '', body: undefined },
+      { workspaceRoot },
+    )
+    expect(r?.status).toBe(501)
+  })
+
+  it('routes PUT /api/resorts/:slug to resortUpsertHandler with parsed slug + body', async (): Promise<void> => {
+    const r = await dispatch(
+      {
+        method: 'PUT',
+        pathname: '/api/resorts/kotelnica-bialczanska',
+        search: '',
+        body: { editor_modes: { snow_depth_cm: 'manual' } },
+      },
+      { workspaceRoot },
+    )
+    expect(r?.status).toBe(501)
+  })
+
+  it('returns 400 invalid-request on body Zod parse fail (empty PUT body — refine requires at-least-one)', async (): Promise<void> => {
+    const r = await dispatch(
+      {
+        method: 'PUT',
+        pathname: '/api/resorts/kotelnica-bialczanska',
+        search: '',
+        body: {},
+      },
+      { workspaceRoot },
+    )
+    expect(r?.status).toBe(400)
+    expect(r?.body).toMatchObject({ error: { code: 'invalid-request' } })
+  })
+
+  it('returns 400 invalid-request on URL-param Zod parse fail (slug regex rejects underscore)', async (): Promise<void> => {
+    const r = await dispatch(
+      { method: 'GET', pathname: '/api/resorts/has_underscore', search: '', body: undefined },
+      { workspaceRoot },
+    )
+    expect(r?.status).toBe(400)
+    expect(r?.body).toMatchObject({ error: { code: 'invalid-request' } })
+  })
+
+  it('routes POST /api/resorts/__all__/publish (Phase-1 sentinel union accepted)', async (): Promise<void> => {
+    const r = await dispatch(
+      {
+        method: 'POST',
+        pathname: '/api/resorts/__all__/publish',
+        search: '',
+        body: { confirm: true },
+      },
+      { workspaceRoot },
+    )
+    expect(r?.status).toBe(501)  // STUB; real publish handler lands in PR 4.5a
+  })
+
+  it('routes POST /api/resorts/:slug/publish for valid named slug too (forward-compat for Phase 2)', async (): Promise<void> => {
+    const r = await dispatch(
+      {
+        method: 'POST',
+        pathname: '/api/resorts/kotelnica-bialczanska/publish',
+        search: '',
+        body: { confirm: true },
+      },
+      { workspaceRoot },
+    )
+    expect(r?.status).toBe(501)
+  })
+
+  it('returns 400 on POST publish with body { confirm: false } (literal(true) rejects)', async (): Promise<void> => {
+    const r = await dispatch(
+      {
+        method: 'POST',
+        pathname: '/api/resorts/__all__/publish',
+        search: '',
+        body: { confirm: false },
+      },
+      { workspaceRoot },
+    )
+    expect(r?.status).toBe(400)
+  })
+
+  it('routes GET /api/health to healthHandler (501 stub)', async (): Promise<void> => {
+    const r = await dispatch(
+      { method: 'GET', pathname: '/api/health', search: '', body: undefined },
+      { workspaceRoot },
+    )
+    expect(r?.status).toBe(501)
+  })
+
+  it('routes GET /api/publishes to listPublishesHandler (501 stub)', async (): Promise<void> => {
+    const r = await dispatch(
+      { method: 'GET', pathname: '/api/publishes', search: '', body: undefined },
+      { workspaceRoot },
+    )
+    expect(r?.status).toBe(501)
+  })
+
+  it('passes workspaceRoot through to handler deps (verified via injected route)', async (): Promise<void> => {
+    let receivedWorkspaceRoot: string | undefined
+    const spyRoute: Route = {
+      method: 'GET',
+      pathPattern: '/api/spy',
+      handler: async (_input, deps): Promise<{ ok: true }> => {
+        await Promise.resolve()
+        receivedWorkspaceRoot = deps.workspaceRoot
+        return { ok: true }
+      },
+    }
+    const r = await dispatch(
+      { method: 'GET', pathname: '/api/spy', search: '', body: undefined },
+      { workspaceRoot, routes: [spyRoute] },
+    )
+    expect(r?.status).toBe(200)
+    expect(receivedWorkspaceRoot).toBe(workspaceRoot)
+  })
+
+  it('returns 500 internal on unhandled handler throw (non-coded Error)', async (): Promise<void> => {
+    const throwRoute: Route = {
+      method: 'GET',
+      pathPattern: '/api/throw',
+      handler: async (): Promise<never> => {
+        await Promise.resolve()
+        throw new Error('boom')
+      },
+    }
+    const r = await dispatch(
+      { method: 'GET', pathname: '/api/throw', search: '', body: undefined },
+      { workspaceRoot, routes: [throwRoute] },
+    )
+    expect(r?.status).toBe(500)
+    expect(r?.body).toMatchObject({ error: { code: 'internal' } })
+  })
+
+  it('encodes Error with unknown code as 500 internal (defensive — code present but not in STATUS_FOR_CODE)', async (): Promise<void> => {
+    const unknownCodeRoute: Route = {
+      method: 'GET',
+      pathPattern: '/api/unknown-code',
+      handler: async (): Promise<never> => {
+        await Promise.resolve()
+        const err = new Error('upstream returned a code we do not recognize')
+        ;(err as Error & { code?: string }).code = 'made-up-error-code'
+        throw err
+      },
+    }
+    const r = await dispatch(
+      { method: 'GET', pathname: '/api/unknown-code', search: '', body: undefined },
+      { workspaceRoot, routes: [unknownCodeRoute] },
+    )
+    expect(r?.status).toBe(500)
+    expect(r?.body).toMatchObject({ error: { code: 'internal' } })
+  })
+
+  it.each([
+    ['invalid-resort', 400],
+    ['not-found', 404],
+    ['workspace-corrupt', 500],
+    ['publish-validation-failed', 400],
+  ])('maps coded error %s to status %s', async (code: string, status: number): Promise<void> => {
+    const codedRoute: Route = {
+      method: 'GET',
+      pathPattern: '/api/coded',
+      handler: async (): Promise<never> => {
+        await Promise.resolve()
+        const err = new Error(`coded ${code}`)
+        ;(err as Error & { code?: string }).code = code
+        throw err
+      },
+    }
+    const r = await dispatch(
+      { method: 'GET', pathname: '/api/coded', search: '', body: undefined },
+      { workspaceRoot, routes: [codedRoute] },
+    )
+    expect(r?.status).toBe(status)
+    expect(r?.body).toMatchObject({ error: { code } })
+  })
+
+  it('lazy-creates data/admin-workspace/ on first invocation (§10.9)', async (): Promise<void> => {
+    await dispatch(
+      { method: 'GET', pathname: '/api/health', search: '', body: undefined },
+      { workspaceRoot },
+    )
+    const s = await stat(join(workspaceRoot, 'data', 'admin-workspace'))
+    expect(s.isDirectory()).toBe(true)
+  })
+
+  it('returns null when path does not match /api/* prefix (caller falls through to next())', async (): Promise<void> => {
+    const r = await dispatch(
+      { method: 'GET', pathname: '/index.html', search: '', body: undefined },
+      { workspaceRoot },
+    )
+    expect(r).toBeNull()
+  })
+
+  it('returns null on /api/* with no matching route (caller falls through)', async (): Promise<void> => {
+    const r = await dispatch(
+      { method: 'GET', pathname: '/api/unknown-endpoint', search: '', body: undefined },
+      { workspaceRoot },
+    )
+    expect(r).toBeNull()
+  })
+
+  it('parseQueryString stores raw value when JSON.parse fails (defensive — non-JSON query value)', async (): Promise<void> => {
+    // ?filter=not-json — JSON.parse fails, raw string is stored, then schema
+    // rejects (filter is supposed to be an object); 400 invalid-request.
+    const r = await dispatch(
+      { method: 'GET', pathname: '/api/resorts', search: '?filter=not-json', body: undefined },
+      { workspaceRoot },
+    )
+    expect(r?.status).toBe(400)
+  })
+
+  it('rethrows non-Zod parse errors (programmer error — dispatch does not synthesize 500 for these)', async (): Promise<void> => {
+    // A schema that throws a plain Error instead of ZodError. Dispatch's
+    // request-parsing catch block re-throws non-Zod errors; the caller
+    // (Vite middleware) handles them via its own error path.
+    const brokenSchema = {
+      parse: (): never => {
+        throw new Error('not a zod error')
+      },
+    } as unknown as z.ZodType
+    const brokenRoute: Route = {
+      method: 'GET',
+      pathPattern: '/api/broken',
+      paramSchema: brokenSchema,
+      handler: async (): Promise<unknown> => {
+        await Promise.resolve()
+        return { ok: true }
+      },
+    }
+    await expect(
+      dispatch(
+        { method: 'GET', pathname: '/api/broken', search: '', body: undefined },
+        { workspaceRoot, routes: [brokenRoute] },
+      ),
+    ).rejects.toThrow('not a zod error')
+  })
+
+  it('encodes handler-thrown ZodError as 400 invalid-request (response validation)', async (): Promise<void> => {
+    // A handler that runs runtime Zod validation and rejects — e.g., the real
+    // PR 4.2/4.3 handlers will Zod-parse data they read from disk; if the
+    // workspace file is shape-corrupt, ZodError surfaces as 400.
+    const zodThrowRoute: Route = {
+      method: 'GET',
+      pathPattern: '/api/zod-throw',
+      handler: async (): Promise<never> => {
+        await Promise.resolve()
+        z.string().parse(123)  // throws ZodError
+        throw new Error('unreachable')
+      },
+    }
+    const r = await dispatch(
+      { method: 'GET', pathname: '/api/zod-throw', search: '', body: undefined },
+      { workspaceRoot, routes: [zodThrowRoute] },
+    )
+    expect(r?.status).toBe(400)
+    expect(r?.body).toMatchObject({ error: { code: 'invalid-request' } })
+  })
+
+  it('returns null on method-mismatch for an existing path (caller falls through)', async (): Promise<void> => {
+    const r = await dispatch(
+      // /api/resorts only accepts GET; DELETE has no matching route entry.
+      { method: 'DELETE', pathname: '/api/resorts', search: '', body: undefined },
+      { workspaceRoot },
+    )
+    expect(r).toBeNull()
+  })
+})
+
+describe('resolveWorkspaceRoot (PR 4.1b §2.1, P0 #7 from second review)', (): void => {
+  let originalCwd: string
+  let originalEnv: string | undefined
+
+  beforeEach((): void => {
+    originalCwd = process.cwd()
+    originalEnv = process.env.ADMIN_WORKSPACE_ROOT
+  })
+
+  afterEach((): void => {
+    process.chdir(originalCwd)
+    if (originalEnv === undefined) {
+      delete process.env.ADMIN_WORKSPACE_ROOT
+    } else {
+      process.env.ADMIN_WORKSPACE_ROOT = originalEnv
+    }
+  })
+
+  it('finds a path whose package.json declares a workspaces array', (): void => {
+    // The result is the worktree/repo root. Verify it actually has the
+    // sentinel (package.json with "workspaces"). Cwd-agnostic — works whether
+    // vitest runs us from apps/admin/ (workspace test) or from the repo root
+    // (npm run qa with --coverage merging projects).
+    const root = resolveWorkspaceRoot()
+    const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { workspaces?: unknown }
+    expect(Array.isArray(pkg.workspaces)).toBe(true)
+  })
+
+  it('returns the same root deterministically across calls', (): void => {
+    expect(resolveWorkspaceRoot()).toBe(resolveWorkspaceRoot())
+  })
+
+  it('still resolves the repo root from a deeper cwd (P0 #7: cd <subdir> && npm run dev should not break)', (): void => {
+    // Chdir into apps/admin under the resolved repo root, then re-resolve.
+    // The result must match — proves walking up works regardless of starting depth.
+    const repoRoot = resolveWorkspaceRoot()
+    process.chdir(join(repoRoot, 'apps', 'admin'))
+    expect(resolveWorkspaceRoot()).toBe(repoRoot)
+  })
+
+  it('honors ADMIN_WORKSPACE_ROOT env override (test-rig escape hatch)', async (): Promise<void> => {
+    const tmpRoot = await mkdtemp(join(tmpdir(), 'env-override-'))
+    try {
+      process.env.ADMIN_WORKSPACE_ROOT = tmpRoot
+      expect(resolveWorkspaceRoot()).toBe(tmpRoot)
+    } finally {
+      await rm(tmpRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('throws when no workspace-declaring package.json is found above cwd', async (): Promise<void> => {
+    // Use a tmp dir far away from any package.json with "workspaces".
+    const orphan = await mkdtemp(join(tmpdir(), 'orphan-'))
+    try {
+      process.chdir(orphan)
+      delete process.env.ADMIN_WORKSPACE_ROOT
+      expect((): string => resolveWorkspaceRoot()).toThrow(/repo root/i)
+    } finally {
+      await rm(orphan, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('dispatch deps shape (compile-time pin)', (): void => {
+  it('DispatchDeps requires workspaceRoot and accepts optional routes', (): void => {
+    const deps: DispatchDeps = { workspaceRoot: '/x' }
+    expect(deps.workspaceRoot).toBe('/x')
+  })
+})
+
+// File-level note: a workspace fixture (writeFile to root/data/admin-workspace/foo.json)
+// is not exercised in these dispatch tests — handlers are stubs and return 501 without
+// reading the workspace. The lazy-mkdir test confirms the dir exists; per-handler reads
+// land in PRs 4.2+ alongside their integration tests.
+void writeFile
