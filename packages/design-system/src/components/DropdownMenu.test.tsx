@@ -41,11 +41,18 @@ describe('DropdownMenu', (): void => {
     expect(screen.getByRole('menuitem', { name: 'Sources' })).toBeInTheDocument()
   })
 
-  it('Down-arrow on open focuses the first item; cycles through items', async (): Promise<void> => {
+  it('opening the menu auto-focuses the first item (WAI-ARIA APG menubutton pattern)', async (): Promise<void> => {
     const user = userEvent.setup()
     render(<Harness />)
     await user.click(screen.getByRole('button', { name: 'Account' }))
-    await user.keyboard('{ArrowDown}')
+    expect(screen.getByRole('menuitem', { name: 'Sources' })).toHaveFocus()
+  })
+
+  it('Down-arrow advances focus through items and wraps at the end', async (): Promise<void> => {
+    const user = userEvent.setup()
+    render(<Harness />)
+    await user.click(screen.getByRole('button', { name: 'Account' }))
+    // Open auto-focuses Sources (item 0); ArrowDown advances from there.
     expect(screen.getByRole('menuitem', { name: 'Sources' })).toHaveFocus()
     await user.keyboard('{ArrowDown}')
     expect(screen.getByRole('menuitem', { name: 'Integrations' })).toHaveFocus()
@@ -59,18 +66,19 @@ describe('DropdownMenu', (): void => {
     const user = userEvent.setup()
     render(<Harness />)
     await user.click(screen.getByRole('button', { name: 'Account' }))
+    // Open auto-focuses item 0; ArrowUp wraps to last (History).
     await user.keyboard('{ArrowUp}')
     expect(screen.getByRole('menuitem', { name: 'History' })).toHaveFocus()
     await user.keyboard('{ArrowUp}')
     expect(screen.getByRole('menuitem', { name: 'Integrations' })).toHaveFocus()
   })
 
-  it('Enter on a focused item invokes onSelect and closes the menu', async (): Promise<void> => {
+  it('Enter on the auto-focused first item invokes onSelect and closes the menu', async (): Promise<void> => {
     const user = userEvent.setup()
     const onSelect = vi.fn()
     render(<Harness onSelect={onSelect} />)
     await user.click(screen.getByRole('button', { name: 'Account' }))
-    await user.keyboard('{ArrowDown}')
+    // No arrow press needed — open auto-focuses Sources, Enter activates it.
     await user.keyboard('{Enter}')
     expect(onSelect).toHaveBeenCalledTimes(1)
     expect(screen.queryByRole('menu')).toBeNull()
@@ -138,7 +146,7 @@ describe('DropdownMenu', (): void => {
     }
     render(<HarnessWithAfter />)
     await user.click(screen.getByRole('button', { name: 'Account' }))
-    await user.keyboard('{ArrowDown}')
+    // Sources is auto-focused on open.
     expect(screen.getByRole('menuitem', { name: 'Sources' })).toHaveFocus()
     // Tab from the focused menuitem closes the menu (default Tab behavior
     // continues so focus advances to the next page control).

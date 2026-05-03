@@ -3,6 +3,7 @@ import { FocusScope } from '@radix-ui/react-focus-scope'
 import {
   cloneElement,
   useCallback,
+  useEffect,
   useId,
   useRef,
   useState,
@@ -68,6 +69,19 @@ export function DropdownMenu({ trigger, label, items }: DropdownMenuProps): JSX.
     itemRefs.current[index]?.focus()
   }
 
+  // WAI-ARIA APG menubutton pattern: opening the menu places focus on the
+  // first menu item so keyboard users who activate the trigger via Enter /
+  // Space can activate a command without an extra arrow press. With roving
+  // tabindex (only the focused item has tabIndex=0), FocusScope's default
+  // first-tabbable auto-focus can't land here on its own — we drive it.
+  useEffect((): void => {
+    if (!open || items.length === 0) {
+      return
+    }
+    setFocusedIndex(0)
+    itemRefs.current[0]?.focus()
+  }, [open, items.length])
+
   function onTriggerClick(): void {
     if (open) {
       close()
@@ -89,17 +103,18 @@ export function DropdownMenu({ trigger, label, items }: DropdownMenuProps): JSX.
     if (items.length === 0) {
       return
     }
+    // The auto-focus useEffect sets focusedIndex to 0 the moment the menu
+    // opens with at least one item, so by the time a keydown event reaches
+    // the menu div, focusedIndex is >= 0. No defensive arm needed for the
+    // initial -1 case — that state never coincides with a user keystroke.
     if (event.key === 'ArrowDown') {
       event.preventDefault()
-      const next = focusedIndex < 0 ? 0 : (focusedIndex + 1) % items.length
-      focusItem(next)
+      focusItem((focusedIndex + 1) % items.length)
       return
     }
     if (event.key === 'ArrowUp') {
       event.preventDefault()
-      const next =
-        focusedIndex < 0 ? items.length - 1 : (focusedIndex - 1 + items.length) % items.length
-      focusItem(next)
+      focusItem((focusedIndex - 1 + items.length) % items.length)
     }
   }
 
