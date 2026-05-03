@@ -58,6 +58,13 @@ export function bridgeHandlers(workspaceDir: string): ReadonlyArray<HttpHandler>
         { workspaceRoot: workspaceDir },
       )
       if (result === null) {
+        // Wire-contract parity invariant: this 404 envelope MUST match
+        // apps/admin/vite-plugin-admin-api.ts's null-result branch
+        // byte-for-byte (code, message, status). The bridge is the
+        // canonical assertion of this contract — realHandlers.test.ts
+        // pins it; the runtime middleware is /* v8 ignore */-marked
+        // because it requires booting Vite. If you change one envelope,
+        // change the other in the same commit (Codex round-2 P1 fold).
         return HttpResponse.json(
           { error: { code: 'not-found', message: 'no route' } },
           { status: 404 },

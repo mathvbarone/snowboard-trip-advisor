@@ -87,7 +87,21 @@ export function adminApiPlugin(): Plugin {
               { workspaceRoot: mod.resolveWorkspaceRoot() },
             )
             if (result === null) {
-              next()
+              // Wire-contract parity with the MSW bridge harness
+              // (apps/admin/src/mocks/realHandlers.ts:60-65, pinned by
+              // realHandlers.test.ts:105-115). Codex round-2 P1 fold:
+              // calling next() here lets Vite's SPA fallback serve
+              // index.html with HTTP 200 for an unmatched /api/* path,
+              // diverging from the bridge (which returns JSON 404). That
+              // divergence masks broken client calls as successful
+              // responses. The 404 envelope literal is duplicated across
+              // bridge + middleware on purpose: both files are tiny
+              // adapters around dispatch and inlining the envelope keeps
+              // the wire-contract decision visible at the call site
+              // rather than hidden behind a shared constant.
+              res.statusCode = 404
+              res.setHeader('Content-Type', 'application/json')
+              res.end(JSON.stringify({ error: { code: 'not-found', message: 'no route' } }))
               return
             }
             res.statusCode = result.status
