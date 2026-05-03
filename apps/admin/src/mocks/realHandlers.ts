@@ -1,5 +1,11 @@
 import { http, HttpResponse, type HttpHandler } from 'msw'
 
+// Note: no `no-restricted-globals` disable — the bridge does NOT
+// reference global fetch/XMLHttpRequest. If a future change adds raw
+// `fetch(...)` here (uncommon, since dispatch already does the work),
+// the lint rule will fire and the disable list (and the per-file
+// allowlist rules in tests/eslint/admin-restrictions.test.ts) MUST be
+// updated together (subagent round-1 P1-6 fold acknowledgement).
 // eslint-disable-next-line no-restricted-syntax -- bridge harness intentionally imports the real dispatch helper to invoke server handlers from SPA-side integration tests; allowlisted at tests/eslint/admin-restrictions.test.ts.
 import { dispatch } from '../../server/dispatch'
 

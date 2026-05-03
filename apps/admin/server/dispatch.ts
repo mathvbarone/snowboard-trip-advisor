@@ -156,11 +156,27 @@ function matchRoute(
 // Query-string parser: inverse of apiClient's serializeQuery.
 // Each top-level URLSearchParam value is JSON-encoded; JSON.parse it
 // back. Values that don't parse are kept as raw strings (defensive).
-// ------------------------------------------------------------------
-
+//
+// Wire contract (pinned by dispatch.test.ts):
+//   - apiClient sends each value via JSON.stringify(...). Primitives
+//     ROUND-TRIP cleanly through JSON (numbers, booleans, nested
+//     objects). Strings sent as JSON-quoted ('"foo"') decode back as
+//     strings; raw-text strings ('foo') hit the fallback and stay
+//     as strings.
+//   - Repeated keys (`?status=a&status=b`) are NOT supported in the
+//     contract. URLSearchParams.entries() yields both; the loop's
+//     last-write-wins assignment keeps the FINAL value. apiClient
+//     uses params.set(...) and never produces repeats. Documented +
+//     pinned by a test so a Phase-2 contract bump doesn't drift.
+//
+// Prototype-key safety (subagent round-1 P0-1 fold): the destination
+// object is constructed via Object.create(null) so a query like
+// ?__proto__=...&constructor=... cannot pollute Object.prototype
+// through a user-controlled key. Belt-and-braces against a future
+// schema that doesn't strict-reject unknown top-level keys.
 function parseQueryString(search: string): Record<string, unknown> {
   const params = new URLSearchParams(search)
-  const result: Record<string, unknown> = {}
+  const result = Object.create(null) as Record<string, unknown>
   for (const [key, value] of params.entries()) {
     try {
       result[key] = JSON.parse(value) as unknown
@@ -173,17 +189,22 @@ function parseQueryString(search: string): Record<string, unknown> {
 
 // ------------------------------------------------------------------
 // Error code → HTTP status map (per spec §4.10).
+//
+// Map (not Record): a string-keyed Map cannot be probed via prototype-
+// chain keys ('__proto__', 'constructor', 'toString'). Map.get(key)
+// returns undefined for any key not explicitly inserted, regardless of
+// Object.prototype contents. Subagent round-1 P0-2 fold.
 // ------------------------------------------------------------------
 
-const STATUS_FOR_CODE: Readonly<Record<string, number>> = {
-  'invalid-request': 400,
-  'invalid-resort': 400,
-  'not-found': 404,
-  'not-implemented': 501,
-  'publish-validation-failed': 400,
-  'workspace-corrupt': 500,
-  internal: 500,
-}
+const STATUS_FOR_CODE: ReadonlyMap<string, number> = new Map([
+  ['invalid-request', 400],
+  ['invalid-resort', 400],
+  ['not-found', 404],
+  ['not-implemented', 501],
+  ['publish-validation-failed', 400],
+  ['workspace-corrupt', 500],
+  ['internal', 500],
+])
 
 function errorEnvelope(code: string, message: string, details?: unknown): { error: { code: string; message: string; details?: unknown } } {
   if (details === undefined) {
@@ -215,7 +236,22 @@ export async function dispatch(
   // ai-clean-code-adherence §5 a one-shot promise would be hidden
   // module-level state. Unconditional call is the cleaner choice in
   // Phase 1's loopback / single-analyst topology.
-  await ensureWorkspaceDir(deps.workspaceRoot)
+  //
+  // ensureWorkspaceDir failure (read-only fs, EACCES, etc.) is mapped
+  // to the workspace-corrupt envelope (subagent round-1 P1-3 fold) —
+  // otherwise the rejection would propagate as an unhandled promise
+  // in the plugin's IIFE and the response would never be written.
+  try {
+    await ensureWorkspaceDir(deps.workspaceRoot)
+  } catch (err: unknown) {
+    return {
+      status: 500,
+      body: errorEnvelope(
+        'workspace-corrupt',
+        `failed to ensure workspace dir: ${(err as Error).message}`,
+      ),
+    }
+  }
 
   const { route, params: rawParams } = matched
 
@@ -256,7 +292,10 @@ export async function dispatch(
     }
     const code = (err as Error & { code?: string }).code
     if (code !== undefined) {
-      const status = STATUS_FOR_CODE[code]
+      // Map.get returns undefined for any non-inserted key — including
+      // prototype-chain probes like '__proto__' / 'constructor'. Subagent
+      // round-1 P0-2 fold (Map replaces Record for prototype safety).
+      const status = STATUS_FOR_CODE.get(code)
       if (status !== undefined) {
         return {
           status,

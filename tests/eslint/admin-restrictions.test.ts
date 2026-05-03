@@ -210,11 +210,46 @@ describe('apps/admin ESLint restrictions (PR 4.1a, spec §3.2 + §7.5)', (): voi
   })
 })
 
-const ALLOWLIST: ReadonlyArray<string> = [
-  'apps/admin/src/lib/apiClient.ts',
-  'apps/admin/src/mocks/realHandlers.ts',
-  'apps/admin/src/mocks/realHandlers.test.ts',
-]
+// Per-file expected disabled-rule set. Each allowlisted file MUST disable
+// EXACTLY these rules — extending the disabled set requires updating this
+// map AND a justifying review (subagent round-1 P1-5 fold). Prevents
+// scope creep: a maintainer adding `eslint-disable @typescript-eslint/...`
+// to an allowlisted file would now fail the test.
+//
+// All three entries currently disable the same pair (no-restricted-syntax
+// + no-restricted-globals) because that's the SPA-discipline class. If a
+// future allowlist entry needs a different rule, this table grows.
+const ALLOWLIST: ReadonlyMap<string, ReadonlyArray<string>> = new Map([
+  ['apps/admin/src/lib/apiClient.ts', ['no-restricted-syntax', 'no-restricted-globals']],
+  // realHandlers.ts only disables no-restricted-syntax (server-import
+  // ban); it does not reference global fetch/XMLHttpRequest so
+  // no-restricted-globals would be an unused-disable per ESLint.
+  ['apps/admin/src/mocks/realHandlers.ts', ['no-restricted-syntax']],
+  ['apps/admin/src/mocks/realHandlers.test.ts', ['no-restricted-syntax', 'no-restricted-globals']],
+])
+
+// Extracts every rule name listed in any eslint-disable directive in the
+// file. Multi-rule directives ('// eslint-disable-next-line a, b, c')
+// expand to ['a', 'b', 'c']. Used to verify allowlisted files only
+// disable the rules pinned in ALLOWLIST.
+function extractDisabledRules(content: string): ReadonlySet<string> {
+  const rules = new Set<string>()
+  // Match all eslint-disable directives (line, next-line, or block) and
+  // capture the rule list. The 'g' + 's' flags allow multiple directives
+  // and multiline block-comment forms.
+  const directivePattern = /eslint-disable(?:-next-line|-line)?\s+([^*\n]+?)(?:\n|--|$|\*\/)/gs
+  let match: RegExpExecArray | null
+  while ((match = directivePattern.exec(content)) !== null) {
+    const ruleList = match[1] ?? ''
+    for (const name of ruleList.split(',')) {
+      const trimmed = name.trim()
+      if (trimmed.length > 0) {
+        rules.add(trimmed)
+      }
+    }
+  }
+  return rules
+}
 
 // `s` flag (dotall): `.` matches newline characters too. Block-comment
 // directives can span multiple lines: `/* eslint-disable\n no-restricted-
@@ -272,11 +307,36 @@ describe('apps/admin/src/** inline-disable allowlist (PR 4.1a, P1-10 + second-re
       const content = await readFile(filePath, 'utf8')
       if (INLINE_DISABLE_PATTERN.test(content)) {
         const relPath = relative(REPO_ROOT, filePath)
-        if (!ALLOWLIST.includes(relPath)) {
+        if (!ALLOWLIST.has(relPath)) {
           offenders.push(relPath)
         }
       }
     }
-    expect(offenders, `Files with no-restricted-syntax inline-disables outside the allowlist (${ALLOWLIST.join(', ')}): ${offenders.join(', ')}`).toEqual([])
+    expect(offenders, `Files with no-restricted-syntax inline-disables outside the allowlist (${[...ALLOWLIST.keys()].join(', ')}): ${offenders.join(', ')}`).toEqual([])
+  })
+
+  it('each allowlisted file disables EXACTLY the pinned rule set (subagent round-1 P1-5 fold — no scope creep)', async (): Promise<void> => {
+    // For files that exist on disk, scan the inline-disable directives and
+    // verify the rule set matches the per-file expected list. Files in the
+    // allowlist that do not yet exist (e.g., realHandlers.test.ts pre-§2.6)
+    // are skipped — the scope-check fires once the file lands.
+    const drift: string[] = []
+    for (const [relPath, expectedRules] of ALLOWLIST.entries()) {
+      const fullPath = join(REPO_ROOT, relPath)
+      let content: string
+      try {
+        content = await readFile(fullPath, 'utf8')
+      } catch {
+        continue  // file not on disk yet; allowlist pre-allocates
+      }
+      const actualRules = extractDisabledRules(content)
+      const expected = new Set(expectedRules)
+      const extra = [...actualRules].filter((r): boolean => !expected.has(r))
+      const missing = [...expected].filter((r): boolean => !actualRules.has(r))
+      if (extra.length > 0 || missing.length > 0) {
+        drift.push(`${relPath}: extra=[${extra.join(', ')}] missing=[${missing.join(', ')}]`)
+      }
+    }
+    expect(drift, `Allowlist drift — files disable rules outside the per-file pinned set: ${drift.join('; ')}`).toEqual([])
   })
 })

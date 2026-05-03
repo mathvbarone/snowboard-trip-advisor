@@ -168,6 +168,31 @@ describe('dispatch (PR 4.1b §2.1, spec §10.1 + §7.6)', (): void => {
     expect(r?.body).toMatchObject({ error: { code: 'internal' } })
   })
 
+  it.each([
+    ['__proto__', 500],
+    ['constructor', 500],
+    ['toString', 500],
+  ])('treats prototype-key error code %s as 500 internal (subagent round-1 P0-2 fold)', async (code: string, expectedStatus: number): Promise<void> => {
+    // Object.hasOwn guard prevents STATUS_FOR_CODE['__proto__'] from
+    // resolving through Object.prototype to a non-number value.
+    const route: Route = {
+      method: 'GET',
+      pathPattern: '/api/proto-probe',
+      handler: async (): Promise<never> => {
+        await Promise.resolve()
+        const err = new Error(`probe ${code}`)
+        ;(err as Error & { code?: string }).code = code
+        throw err
+      },
+    }
+    const r = await dispatch(
+      { method: 'GET', pathname: '/api/proto-probe', search: '', body: undefined },
+      { workspaceRoot, routes: [route] },
+    )
+    expect(r?.status).toBe(expectedStatus)
+    expect(r?.body).toMatchObject({ error: { code: 'internal' } })
+  })
+
   it('encodes Error with unknown code as 500 internal (defensive — code present but not in STATUS_FOR_CODE)', async (): Promise<void> => {
     const unknownCodeRoute: Route = {
       method: 'GET',
@@ -234,6 +259,112 @@ describe('dispatch (PR 4.1b §2.1, spec §10.1 + §7.6)', (): void => {
       { workspaceRoot },
     )
     expect(r).toBeNull()
+  })
+
+  describe('parseQueryString contract pinning (subagent round-1 P0-1 + P1-1/P1-2)', (): void => {
+    it('a ?__proto__=<polluting-payload> query does NOT pollute Object.prototype', async (): Promise<void> => {
+      // The crucial property: parseQueryString uses Object.create(null) for
+      // its destination, so `result['__proto__'] = ...` sets an own property
+      // (no prototype to pollute). Zod's z.object().parse(...) strips
+      // unknown keys; the request flows through to the stub handler which
+      // throws 'not-implemented' → 501. The status is incidental — the
+      // assertion is that Object.prototype is unchanged.
+      const before = Object.prototype.hasOwnProperty.call(Object.prototype, 'polluted')
+      try {
+        await dispatch(
+          {
+            method: 'GET',
+            pathname: '/api/resorts',
+            search: '?__proto__=' + encodeURIComponent(JSON.stringify({ polluted: true })),
+            body: undefined,
+          },
+          { workspaceRoot },
+        )
+        const after = Object.prototype.hasOwnProperty.call(Object.prototype, 'polluted')
+        expect(after).toBe(before)
+        expect(({} as Record<string, unknown>).polluted).toBeUndefined()
+      } finally {
+        // Belt-and-braces: even if a regression corrupts the prototype,
+        // delete the key so subsequent tests are not affected.
+        delete (Object.prototype as Record<string, unknown>).polluted
+      }
+    })
+
+    it('captures echo route to verify wire contract: numbers, strings, booleans round-trip', async (): Promise<void> => {
+      // The wire contract: apiClient sends each value via JSON.stringify.
+      // Numbers/booleans/objects round-trip cleanly. JSON-quoted strings
+      // ('"foo"') decode back as strings; raw-text strings ('foo') hit
+      // the fallback and stay as strings (lenient, but documented).
+      let captured: unknown
+      const echoSchema = z.object({
+        n: z.number().optional(),
+        b: z.boolean().optional(),
+        s: z.string().optional(),
+        o: z.object({ a: z.number() }).optional(),
+      })
+      const echoRoute: Route = {
+        method: 'GET',
+        pathPattern: '/api/echo',
+        querySchema: echoSchema,
+        handler: async (args): Promise<{ ok: true }> => {
+          await Promise.resolve()
+          captured = args.query
+          return { ok: true }
+        },
+      }
+      // Number, boolean, JSON-string ("foo"), object — all JSON-encoded.
+      await dispatch(
+        {
+          method: 'GET',
+          pathname: '/api/echo',
+          search: '?n=42&b=true&s=' + encodeURIComponent('"foo"') + '&o=' + encodeURIComponent('{"a":1}'),
+          body: undefined,
+        },
+        { workspaceRoot, routes: [echoRoute] },
+      )
+      expect(captured).toEqual({ n: 42, b: true, s: 'foo', o: { a: 1 } })
+    })
+
+    it('repeated query keys: last value wins (single-value contract; apiClient never produces repeats)', async (): Promise<void> => {
+      // URLSearchParams.entries() yields each pair; the parser's last-write-
+      // wins assignment keeps the FINAL value. apiClient.serializeQuery
+      // uses params.set(...) so repeats are NOT produced; this test pins
+      // the policy for any future contract bump.
+      let captured: unknown
+      const route: Route = {
+        method: 'GET',
+        pathPattern: '/api/echo-repeat',
+        querySchema: z.object({ status: z.string().optional() }),
+        handler: async (args): Promise<{ ok: true }> => {
+          await Promise.resolve()
+          captured = args.query
+          return { ok: true }
+        },
+      }
+      await dispatch(
+        {
+          method: 'GET',
+          pathname: '/api/echo-repeat',
+          search: '?status=' + encodeURIComponent('"draft"') + '&status=' + encodeURIComponent('"published"'),
+          body: undefined,
+        },
+        { workspaceRoot, routes: [route] },
+      )
+      // Last value wins.
+      expect(captured).toEqual({ status: 'published' })
+    })
+  })
+
+  it('maps ensureWorkspaceDir failure to workspace-corrupt envelope (subagent round-1 P1-3 fold)', async (): Promise<void> => {
+    // Pass a workspace path that mkdir cannot create. On most systems,
+    // /dev/null/<anything> rejects with ENOTDIR. mkdir -p still fails
+    // because /dev/null is not a directory.
+    const r = await dispatch(
+      { method: 'GET', pathname: '/api/health', search: '', body: undefined },
+      { workspaceRoot: '/dev/null/cannot-create-here' },
+    )
+    expect(r?.status).toBe(500)
+    expect(r?.body).toMatchObject({ error: { code: 'workspace-corrupt' } })
   })
 
   it('parseQueryString stores raw value when JSON.parse fails (defensive — non-JSON query value)', async (): Promise<void> => {

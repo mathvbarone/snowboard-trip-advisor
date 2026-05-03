@@ -62,28 +62,47 @@ export function adminApiPlugin(): Plugin {
           return
         }
         void (async (): Promise<void> => {
-          // ssrLoadModule uses Vite's TS-aware resolver; the module + its
-          // schema imports load correctly even though the schema package's
-          // internal imports are extension-less.
-          const mod = await server.ssrLoadModule('/server/dispatch.ts') as unknown as DispatchModule
-          const body = await readJsonBody(req)
-          const url = new URL(req.url ?? '/', 'http://127.0.0.1')
-          const result = await mod.dispatch(
-            {
-              method: req.method ?? 'GET',
-              pathname: url.pathname,
-              search: url.search,
-              body,
-            },
-            { workspaceRoot: mod.resolveWorkspaceRoot() },
-          )
-          if (result === null) {
-            next()
-            return
+          // Defensive try/catch (subagent round-1 P1-3 fold): an unhandled
+          // rejection inside this IIFE would leave the response hanging.
+          // dispatch's own error path maps known classes (Zod, coded
+          // errors, ensureWorkspaceDir) to envelopes; this catch covers
+          // the residual "something threw before dispatch could catch"
+          // class — e.g., resolveWorkspaceRoot throws on a runaway
+          // process.cwd(), ssrLoadModule throws on a malformed dispatch
+          // module, JSON.stringify throws on a circular result body.
+          try {
+            // ssrLoadModule uses Vite's TS-aware resolver; the module + its
+            // schema imports load correctly even though the schema package's
+            // internal imports are extension-less.
+            const mod = await server.ssrLoadModule('/server/dispatch.ts') as unknown as DispatchModule
+            const body = await readJsonBody(req)
+            const url = new URL(req.url ?? '/', 'http://127.0.0.1')
+            const result = await mod.dispatch(
+              {
+                method: req.method ?? 'GET',
+                pathname: url.pathname,
+                search: url.search,
+                body,
+              },
+              { workspaceRoot: mod.resolveWorkspaceRoot() },
+            )
+            if (result === null) {
+              next()
+              return
+            }
+            res.statusCode = result.status
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify(result.body))
+          } catch (err: unknown) {
+            res.statusCode = 500
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify({
+              error: {
+                code: 'internal',
+                message: `unhandled middleware error: ${(err as Error).message}`,
+              },
+            }))
           }
-          res.statusCode = result.status
-          res.setHeader('Content-Type', 'application/json')
-          res.end(JSON.stringify(result.body))
         })()
       })
     },
