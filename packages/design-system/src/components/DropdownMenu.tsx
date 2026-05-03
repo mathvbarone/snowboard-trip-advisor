@@ -32,7 +32,12 @@ export interface DropdownMenuItem {
 }
 
 export interface DropdownMenuProps {
-  /** The trigger element. Cloned to inject `aria-haspopup`, `aria-expanded`, and click toggle. */
+  /** The trigger element. Cloned to inject `aria-haspopup`, `aria-expanded`,
+   *  click toggle, and a ref so DropdownMenu can return focus to it on close.
+   *  The `ref` slot is in the typed shape because React 19's `cloneElement`
+   *  requires it there, but DropdownMenu **owns** the ref — any consumer-
+   *  supplied ref on the trigger is silently overwritten. If you need a ref
+   *  to the trigger element, render the button yourself outside DropdownMenu. */
   trigger: ReactElement<{
     onClick?: (event: MouseEvent<HTMLButtonElement>) => void
     'aria-haspopup'?: 'menu'

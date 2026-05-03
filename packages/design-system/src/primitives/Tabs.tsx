@@ -9,8 +9,6 @@ import {
   type ReactNode,
 } from 'react'
 
-
-
 // Tabs primitive (Epic 4 §5.1). Compound component shape mirrors the existing
 // `<ToggleButtonGroup>` keyboard model — Left/Right wrap, Home/End jump —
 // adapted to the WAI-ARIA tabs pattern (role="tablist" / "tab" / "tabpanel"
@@ -20,22 +18,23 @@ import {
 //
 // Why Context: the compound shape (Tabs → TabList → Tab; Tabs → TabPanel)
 // puts Tab and TabPanel at different depths under Tabs, and they need to
-// share the active value, the per-tab id mapping, and the focus-management
-// callback. Prop-drilling that asymmetry is awkward; component-local Context
+// share the active value, the deterministic id prefix, and the focus-management
+// callbacks. Prop-drilling that asymmetry is awkward; component-local Context
 // is the canonical React idiom and does not introduce module-level state.
-
-interface TabRegistration {
-  value: string
-  tabId: string
-  panelId: string
-}
+//
+// IDs are derived deterministically from a Tabs-level `useId()` prefix +
+// the consumer-supplied `value` so Tab and TabPanel agree without a
+// registration step. Tab order is read from the callback-ref Map's insertion
+// order at event time (`Map` preserves insertion order); the callback refs
+// run at commit time, so by the time the user presses an arrow key every
+// mounted Tab has populated the Map. This keeps the render path pure
+// (no side effects during render — concurrent / StrictMode safe).
 
 interface TabsContextShape {
   value: string
   label: string
+  idPrefix: string
   onValueChange: (next: string) => void
-  registerTab: (entry: TabRegistration) => void
-  getIds: (value: string) => { tabId: string; panelId: string }
   setTabRef: (value: string, el: HTMLButtonElement | null) => void
   focusTabAtOffset: (currentValue: string, offset: number) => void
   focusFirstTab: () => void
@@ -52,28 +51,8 @@ export interface TabsProps {
 }
 
 export function Tabs({ value, onValueChange, label, children }: TabsProps): JSX.Element {
-  const orderRef = useRef<Array<TabRegistration>>([])
+  const idPrefix = useId()
   const refsRef = useRef<Map<string, HTMLButtonElement>>(new Map())
-
-  const registerTab = useCallback((entry: TabRegistration): void => {
-    const list = orderRef.current
-    if (!list.some((e): boolean => e.value === entry.value)) {
-      list.push(entry)
-    }
-  }, [])
-
-  const getIds = useCallback(
-    (tabValue: string): { tabId: string; panelId: string } => {
-      const found = orderRef.current.find((e): boolean => e.value === tabValue)
-      /* v8 ignore next 3 -- unreachable: TabPanel calls getIds only after
-         ctx.value === value matches, implying the corresponding Tab registered. */
-      if (found === undefined) {
-        throw new Error(`Tabs: no registration for value=${tabValue}`)
-      }
-      return { tabId: found.tabId, panelId: found.panelId }
-    },
-    [],
-  )
 
   const setTabRef = useCallback((tabValue: string, el: HTMLButtonElement | null): void => {
     if (el === null) {
@@ -84,46 +63,41 @@ export function Tabs({ value, onValueChange, label, children }: TabsProps): JSX.
   }, [])
 
   const focusTabAtOffset = useCallback((currentValue: string, offset: number): void => {
-    const order = orderRef.current
-    /* v8 ignore next 3 -- unreachable: focusTabAtOffset is only called from
-       Tab.onKeyDown, so at least one Tab is registered and order is non-empty. */
-    if (order.length === 0) {
-      return
-    }
-    const idx = order.findIndex((e): boolean => e.value === currentValue)
-    /* v8 ignore next 3 -- unreachable: currentValue is the calling Tab's own
-       `value` prop, registered during the same render via registerTab(). */
+    const keys = Array.from(refsRef.current.keys())
+    const idx = keys.indexOf(currentValue)
+    /* v8 ignore next 3 -- unreachable: focusTabAtOffset is called from
+       Tab.onKeyDown, so currentValue is a registered tab and idx >= 0. */
     if (idx === -1) {
       return
     }
-    const nextIdx = (idx + offset + order.length) % order.length
-    const target = order[nextIdx]
-    /* v8 ignore next 3 -- unreachable: nextIdx is bounded into [0, order.length)
-       by the modulo above; order[nextIdx] is always defined. */
-    if (target === undefined) {
+    const nextKey = keys[(idx + offset + keys.length) % keys.length]
+    /* v8 ignore next 3 -- unreachable: nextKey index is bounded into [0, keys.length)
+       by the modulo above, and keys is non-empty when idx !== -1. */
+    if (nextKey === undefined) {
       return
     }
-    refsRef.current.get(target.value)?.focus()
+    refsRef.current.get(nextKey)?.focus()
   }, [])
 
   const focusFirstTab = useCallback((): void => {
-    const first = orderRef.current[0]
-    /* v8 ignore next 3 -- unreachable: focusFirstTab is only called from
-       Tab.onKeyDown, and Tab rendering implies at least one registered tab. */
-    if (first === undefined) {
+    const first = refsRef.current.keys().next()
+    /* v8 ignore next 3 -- unreachable: focusFirstTab is called from a registered
+       Tab's onKeyDown, so the refs Map has at least one entry. */
+    if (first.done === true) {
       return
     }
     refsRef.current.get(first.value)?.focus()
   }, [])
 
   const focusLastTab = useCallback((): void => {
-    const last = orderRef.current[orderRef.current.length - 1]
-    /* v8 ignore next 3 -- unreachable: focusLastTab is only called from
-       Tab.onKeyDown, and Tab rendering implies at least one registered tab. */
+    const keys = Array.from(refsRef.current.keys())
+    const last = keys[keys.length - 1]
+    /* v8 ignore next 3 -- unreachable: focusLastTab is called from a registered
+       Tab's onKeyDown, so the refs Map has at least one entry. */
     if (last === undefined) {
       return
     }
-    refsRef.current.get(last.value)?.focus()
+    refsRef.current.get(last)?.focus()
   }, [])
 
   return (
@@ -131,9 +105,8 @@ export function Tabs({ value, onValueChange, label, children }: TabsProps): JSX.
       value={{
         value,
         label,
+        idPrefix,
         onValueChange,
-        registerTab,
-        getIds,
         setTabRef,
         focusTabAtOffset,
         focusFirstTab,
@@ -168,16 +141,12 @@ export interface TabProps {
 
 export function Tab({ value, children }: TabProps): JSX.Element | null {
   const ctx = useContext(TabsContext)
-  const generatedId = useId()
-  const tabId = `tab-${generatedId}`
-  const panelId = `tabpanel-${generatedId}`
-
   if (ctx === null) {
     return null
   }
 
-  ctx.registerTab({ value, tabId, panelId })
-
+  const tabId = `${ctx.idPrefix}-tab-${value}`
+  const panelId = `${ctx.idPrefix}-panel-${value}`
   const selected = ctx.value === value
 
   function onKeyDown(event: KeyboardEvent<HTMLButtonElement>): void {
@@ -237,12 +206,13 @@ export function TabPanel({ value, children }: TabPanelProps): JSX.Element | null
   if (ctx.value !== value) {
     return null
   }
-  const ids = ctx.getIds(value)
+  const tabId = `${ctx.idPrefix}-tab-${value}`
+  const panelId = `${ctx.idPrefix}-panel-${value}`
   return (
     <div
       role="tabpanel"
-      id={ids.panelId}
-      aria-labelledby={ids.tabId}
+      id={panelId}
+      aria-labelledby={tabId}
       className="sta-tabs__panel"
     >
       {children}
