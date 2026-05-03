@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { axe } from 'jest-axe'
 import { useState } from 'react'
@@ -134,6 +134,44 @@ describe('Tabs', (): void => {
     const panelId = panel.id
     expect(tab.getAttribute('aria-controls')).toBe(panelId)
     expect(panel.getAttribute('aria-labelledby')).toBe(tabId)
+  })
+
+  it('calls onValueChange with the first registered tab when value does not match any Tab (stale-value recovery)', async (): Promise<void> => {
+    // Consumer passes an invalid value (e.g., stale URL state, async-loaded
+    // tabs that haven't mounted yet). The tablist would otherwise have no
+    // tabbable tab and no active tabpanel; the defensive useEffect pushes
+    // the consumer back to a valid state by calling onValueChange('one').
+    const onValueChange = vi.fn()
+    render(
+      <Tabs value="nonexistent" onValueChange={onValueChange} label="x">
+        <TabList>
+          <Tab value="one">One</Tab>
+          <Tab value="two">Two</Tab>
+        </TabList>
+        <TabPanel value="one">one</TabPanel>
+        <TabPanel value="two">two</TabPanel>
+      </Tabs>,
+    )
+    await waitFor((): void => {
+      expect(onValueChange).toHaveBeenCalledWith('one')
+    })
+  })
+
+  it('does NOT call onValueChange when value already matches a registered Tab', (): void => {
+    const onValueChange = vi.fn()
+    render(
+      <Tabs value="one" onValueChange={onValueChange} label="x">
+        <TabList>
+          <Tab value="one">One</Tab>
+          <Tab value="two">Two</Tab>
+        </TabList>
+        <TabPanel value="one">one</TabPanel>
+        <TabPanel value="two">two</TabPanel>
+      </Tabs>,
+    )
+    // useEffect runs synchronously inside render() via testing-library's
+    // act wrapper. A valid initial value should not trigger the recovery path.
+    expect(onValueChange).not.toHaveBeenCalled()
   })
 
   it('TabPanel rendered without a Tabs ancestor renders nothing (defensive)', (): void => {

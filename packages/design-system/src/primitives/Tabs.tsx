@@ -2,6 +2,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useId,
   useRef,
   type JSX,
@@ -67,6 +68,38 @@ export interface TabsProps {
 export function Tabs({ value, onValueChange, label, children }: TabsProps): JSX.Element {
   const idPrefix = useId()
   const refsRef = useRef<Map<string, HTMLButtonElement>>(new Map())
+
+  // Defensive recovery for stale / async-loaded `value`. If the consumer passes
+  // a value that doesn't match any rendered Tab (URL state pointing at a tab
+  // that hasn't loaded yet, an outdated route param, etc.), the tablist would
+  // otherwise have no tabbable tab and no active panel — broken keyboard
+  // entry. This effect pushes the consumer's controlled state back to a valid
+  // value (the first registered tab); the resulting re-render lands the
+  // tablist in a usable state.
+  // The ref pattern avoids re-running the effect when consumers pass an inline
+  // `onValueChange` prop that recreates each render.
+  const onValueChangeRef = useRef(onValueChange)
+  useEffect((): void => {
+    onValueChangeRef.current = onValueChange
+  })
+  useEffect((): void => {
+    const valid = Array.from(refsRef.current.keys())
+    /* v8 ignore next 3 -- unreachable: useEffect runs post-commit, by which
+       point children's callback refs have populated refsRef. Tabs without
+       children is meaningless. */
+    if (valid.length === 0) {
+      return
+    }
+    if (valid.includes(value)) {
+      return
+    }
+    const fallback = valid[0]
+    /* v8 ignore next 3 -- unreachable: valid.length > 0 ⇒ valid[0] defined. */
+    if (fallback === undefined) {
+      return
+    }
+    onValueChangeRef.current(fallback)
+  }, [value])
 
   const setTabRef = useCallback((tabValue: string, el: HTMLButtonElement | null): void => {
     if (el === null) {
