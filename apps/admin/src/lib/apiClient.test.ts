@@ -1,8 +1,12 @@
 import { http, HttpResponse } from 'msw'
-import { setupServer } from 'msw/node'
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
+
+import { server } from '../mocks/server'
 
 import { apiClient, ApiClientError } from './apiClient'
+
+// MSW lifecycle is wired globally in src/test-setup.ts (PR 4.1b §2.5).
+// Per-test handler overrides via server.use(...) inside individual tests.
 
 const HASH_64 = 'a'.repeat(64)
 const OBS_AT = '2026-04-26T08:00:00Z'
@@ -30,18 +34,6 @@ const cannedResort = {
     },
   },
 }
-
-const server = setupServer()
-
-beforeAll((): void => {
-  server.listen({ onUnhandledRequest: 'error' })
-})
-afterEach((): void => {
-  server.resetHandlers()
-})
-afterAll((): void => {
-  server.close()
-})
 
 describe('apiClient (PR 4.1a, spec §3.2 + §7.5)', (): void => {
   it('listResorts() returns parsed ListResortsResponse', async (): Promise<void> => {

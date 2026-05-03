@@ -212,6 +212,7 @@ describe('apps/admin ESLint restrictions (PR 4.1a, spec §3.2 + §7.5)', (): voi
 
 const ALLOWLIST: ReadonlyArray<string> = [
   'apps/admin/src/lib/apiClient.ts',
+  'apps/admin/src/mocks/realHandlers.ts',
   'apps/admin/src/mocks/realHandlers.test.ts',
 ]
 
