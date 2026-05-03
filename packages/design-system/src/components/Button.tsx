@@ -20,7 +20,12 @@ export type ButtonVariant = 'primary' | 'secondary' | 'ghost'
 
 export interface ButtonProps {
   children: ReactNode
-  onClick: () => void
+  // Optional so wrapper components (e.g. <DropdownMenu trigger={<Button>…}>)
+  // that override the click handler via React.cloneElement don't force callers
+  // to supply a placeholder. Direct call sites should still pass one — TS
+  // doesn't complain either way, but a Button without click handling is rarely
+  // useful outside the cloned-trigger pattern.
+  onClick?: () => void
   type?: 'button' | 'submit' | 'reset'
   disabled?: boolean
   variant?: ButtonVariant
