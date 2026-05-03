@@ -9,6 +9,7 @@
     "packages/*/src/**/*",
     "packages/*/vite.config.ts",
     "tests/integration/**/*",
+    "tests/eslint/**/*",
     "config/**/*",
     "scripts/**/*",
     "vitest.config.ts",

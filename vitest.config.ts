@@ -41,7 +41,7 @@ export default defineConfig({
       // package workspace.
       '.',
     ],
-    include: ['scripts/**/*.test.ts', 'config/**/*.test.ts'],
+    include: ['scripts/**/*.test.ts', 'config/**/*.test.ts', 'tests/eslint/**/*.test.ts'],
     coverage: {
       provider: 'v8',
       include: [
