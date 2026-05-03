@@ -43,6 +43,20 @@ interface TabsContextShape {
 
 const TabsContext = createContext<TabsContextShape | null>(null)
 
+// Both Tab and TabPanel derive their ARIA ids from idPrefix + value. The
+// raw value can carry consumer-controlled characters (spaces, punctuation)
+// that aren't valid in HTML id / aria-controls IDREFs; encodeURIComponent
+// produces a deterministic, IDREF-safe transformation that both Tab and
+// TabPanel agree on. Encoding is bijective per character class, so distinct
+// values produce distinct ids — no collision risk.
+function makeTabId(prefix: string, value: string): string {
+  return `${prefix}-tab-${encodeURIComponent(value)}`
+}
+
+function makePanelId(prefix: string, value: string): string {
+  return `${prefix}-panel-${encodeURIComponent(value)}`
+}
+
 export interface TabsProps {
   value: string
   onValueChange: (next: string) => void
@@ -145,8 +159,8 @@ export function Tab({ value, children }: TabProps): JSX.Element | null {
     return null
   }
 
-  const tabId = `${ctx.idPrefix}-tab-${value}`
-  const panelId = `${ctx.idPrefix}-panel-${value}`
+  const tabId = makeTabId(ctx.idPrefix, value)
+  const panelId = makePanelId(ctx.idPrefix, value)
   const selected = ctx.value === value
 
   function onKeyDown(event: KeyboardEvent<HTMLButtonElement>): void {
@@ -206,8 +220,8 @@ export function TabPanel({ value, children }: TabPanelProps): JSX.Element | null
   if (ctx.value !== value) {
     return null
   }
-  const tabId = `${ctx.idPrefix}-tab-${value}`
-  const panelId = `${ctx.idPrefix}-panel-${value}`
+  const tabId = makeTabId(ctx.idPrefix, value)
+  const panelId = makePanelId(ctx.idPrefix, value)
   return (
     <div
       role="tabpanel"

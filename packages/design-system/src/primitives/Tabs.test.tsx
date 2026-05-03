@@ -97,6 +97,35 @@ describe('Tabs', (): void => {
     expect(one).toHaveFocus()
   })
 
+  it('encodes ID-unsafe characters in value when composing aria-controls / aria-labelledby (regression: HTML id whitespace ban)', (): void => {
+    function HarnessWithUnsafeValue(): JSX.Element {
+      const [value, setValue] = useState<string>('snow conditions')
+      return (
+        <Tabs value={value} onValueChange={setValue} label="Editor">
+          <TabList>
+            <Tab value="snow conditions">Snow</Tab>
+            <Tab value="snow-conditions">Snow Hyphen</Tab>
+          </TabList>
+          <TabPanel value="snow conditions">whitespace panel</TabPanel>
+          <TabPanel value="snow-conditions">hyphen panel</TabPanel>
+        </Tabs>
+      )
+    }
+    render(<HarnessWithUnsafeValue />)
+    const tab = screen.getByRole('tab', { name: 'Snow' })
+    const panel = screen.getByRole('tabpanel')
+    // ID must not contain whitespace per HTML5 id rules.
+    expect(tab.id).not.toMatch(/\s/)
+    expect(panel.id).not.toMatch(/\s/)
+    // Tab and TabPanel use the SAME encoding so the linkage holds.
+    expect(tab.getAttribute('aria-controls')).toBe(panel.id)
+    expect(panel.getAttribute('aria-labelledby')).toBe(tab.id)
+    // Two tabs with values "snow conditions" and "snow-conditions" must not
+    // collide (encodeURIComponent preserves distinctness).
+    const sister = screen.getByRole('tab', { name: 'Snow Hyphen' })
+    expect(sister.id).not.toBe(tab.id)
+  })
+
   it('panels are linked to their tabs via aria-controls / aria-labelledby', (): void => {
     render(<Harness />)
     const tab = screen.getByRole('tab', { name: 'One' })
