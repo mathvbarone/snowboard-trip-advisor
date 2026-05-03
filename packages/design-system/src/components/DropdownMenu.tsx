@@ -131,13 +131,24 @@ export function DropdownMenu({ trigger, label, items }: DropdownMenuProps): JSX.
   }
 
   // Clone the trigger to inject menu-control attributes + click handler.
-  // The trigger ref is shared so the focus-return-to-trigger behavior on
-  // dismiss works whether the consumer passed a `ref` or not.
+  // The composed click handler calls the consumer's onClick first (so any
+  // analytics, side effects, or guards stay attached), then toggles the
+  // menu — unless the consumer called `event.preventDefault()`, in which
+  // case the toggle is skipped. The trigger ref is captured here for the
+  // focus-return-to-trigger behavior on dismiss; per the trigger prop
+  // doc, DropdownMenu owns this ref slot.
+  const consumerOnClick = trigger.props.onClick
   const enhancedTrigger = cloneElement(trigger, {
     'aria-haspopup': 'menu',
     'aria-expanded': open,
     'aria-controls': menuId,
-    onClick: onTriggerClick,
+    onClick: (event: MouseEvent<HTMLButtonElement>): void => {
+      consumerOnClick?.(event)
+      if (event.defaultPrevented) {
+        return
+      }
+      onTriggerClick()
+    },
     ref: (el: HTMLButtonElement | null): void => {
       triggerRef.current = el
     },

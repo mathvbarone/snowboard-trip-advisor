@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { axe } from 'jest-axe'
-import type { JSX } from 'react'
+import type { JSX, MouseEvent } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { Button } from './Button'
@@ -121,6 +121,40 @@ describe('DropdownMenu', (): void => {
     // No items to focus; the menu region remains active and the test verifies
     // the keydown handler returned cleanly (no throw).
     expect(screen.getByRole('menu')).toBeInTheDocument()
+  })
+
+  it('preserves the trigger\'s onClick handler when toggling open', async (): Promise<void> => {
+    const user = userEvent.setup()
+    const triggerOnClick = vi.fn()
+    render(
+      <DropdownMenu
+        trigger={<Button onClick={triggerOnClick}>Account</Button>}
+        label="Account menu"
+        items={makeItems(vi.fn())}
+      />,
+    )
+    await user.click(screen.getByRole('button', { name: 'Account' }))
+    expect(triggerOnClick).toHaveBeenCalledTimes(1)
+    // Composition: consumer onClick fires AND the menu still opens.
+    expect(screen.getByRole('menu', { name: 'Account menu' })).toBeInTheDocument()
+  })
+
+  it('skips the toggle when the trigger\'s onClick calls event.preventDefault', async (): Promise<void> => {
+    const user = userEvent.setup()
+    const triggerOnClick = vi.fn((event: MouseEvent<HTMLButtonElement>): void => {
+      event.preventDefault()
+    })
+    render(
+      <DropdownMenu
+        trigger={<Button onClick={triggerOnClick}>Account</Button>}
+        label="Account menu"
+        items={makeItems(vi.fn())}
+      />,
+    )
+    await user.click(screen.getByRole('button', { name: 'Account' }))
+    expect(triggerOnClick).toHaveBeenCalledTimes(1)
+    // preventDefault gates the toggle — menu does NOT open.
+    expect(screen.queryByRole('menu')).toBeNull()
   })
 
   it('clicking the trigger again while open closes the menu', async (): Promise<void> => {
