@@ -333,28 +333,29 @@ describe('healthHandler (PR 4.2)', (): void => {
   // P1 fix: published-only resorts must be included in per-field aggregates
   // ---------------------------------------------------------------------------
 
-  it('P1: published-only resort with stale field_sources → resorts_with_stale_fields === 1', async (): Promise<void> => {
+  it('P1: published-only resort with stale live field_sources → resorts_with_stale_fields === 1', async (): Promise<void> => {
     // Empty workspace dir — no workspace files at all.
     await mkdir(join(workspaceRoot, 'data', 'admin-workspace'), { recursive: true })
     await mkdir(join(workspaceRoot, 'data', 'published'), { recursive: true })
 
-    // Published doc has one resort with stale durable field_sources.
-    // A matching live_signal is provided with fresh field_sources, so stale
-    // detection depends on the durable paths (Option C: combined sources).
-    const staleResort = makeResort('ischgl', {
-      ...durableFieldSources(STALE_OBSERVED_AT),  // durable paths stale
+    // Published doc has one resort with fresh durable field_sources and a
+    // matching live_signal with stale live field_sources. Only live paths are
+    // subject to clock-based staleness (durable paths are never-stale-by-clock
+    // per loadResortDatasetFromObject.ts:83-99).
+    const freshResort = makeResort('ischgl', {
+      ...durableFieldSources(FRESH_OBSERVED_AT),  // durable paths fresh (never stale by clock)
     })
     const publishedDoc = {
       schema_version: 1,
       published_at: '2026-04-26T08:00:00Z',
-      resorts: [staleResort],
+      resorts: [freshResort],
       live_signals: [
         {
           schema_version: 1,
           resort_slug: 'ischgl',
-          observed_at: FRESH_OBSERVED_AT,
-          fetched_at: FRESH_OBSERVED_AT,
-          field_sources: liveFieldSources(FRESH_OBSERVED_AT),  // live paths fresh
+          observed_at: STALE_OBSERVED_AT,
+          fetched_at: STALE_OBSERVED_AT,
+          field_sources: liveFieldSources(STALE_OBSERVED_AT),  // live paths stale → triggers count
         },
       ],
       manifest: { resort_count: 1, generated_by: 'test', validator_version: '0.0.0' },
@@ -366,7 +367,7 @@ describe('healthHandler (PR 4.2)', (): void => {
 
     const result = await healthHandler({ query: {} }, { workspaceRoot })
 
-    // The published-only resort has stale durable paths — should be counted.
+    // The published-only resort has stale live paths — should be counted.
     expect(result.resorts_with_stale_fields).toBe(1)
     expect(result.resorts_total).toBe(1)
     expect(result.resorts_with_corrupt_workspace).toBe(0)
@@ -419,7 +420,7 @@ describe('healthHandler (PR 4.2)', (): void => {
     // Published: workspace resort is also in the published doc (workspace takes
     // precedence — it must NOT be double-counted) + one published-only stale resort.
     const publishedWorkspaceResort = makeResort('kotelnica', durableFieldSources(FRESH_OBSERVED_AT))
-    const publishedOnlyResort = makeResort('livigno', durableFieldSources(STALE_OBSERVED_AT))
+    const publishedOnlyResort = makeResort('livigno', durableFieldSources(FRESH_OBSERVED_AT))
     const publishedDoc = {
       schema_version: 1,
       published_at: '2026-04-26T08:00:00Z',
@@ -428,9 +429,9 @@ describe('healthHandler (PR 4.2)', (): void => {
         {
           schema_version: 1,
           resort_slug: 'livigno',
-          observed_at: FRESH_OBSERVED_AT,
-          fetched_at: FRESH_OBSERVED_AT,
-          field_sources: liveFieldSources(FRESH_OBSERVED_AT),  // live paths fresh; durable stale
+          observed_at: STALE_OBSERVED_AT,
+          fetched_at: STALE_OBSERVED_AT,
+          field_sources: liveFieldSources(STALE_OBSERVED_AT),  // live paths stale — triggers count
         },
       ],
       manifest: { resort_count: 2, generated_by: 'test', validator_version: '0.0.0' },
@@ -443,7 +444,7 @@ describe('healthHandler (PR 4.2)', (): void => {
     const result = await healthHandler({ query: {} }, { workspaceRoot })
 
     // Both the workspace resort (stale live paths) and the published-only resort
-    // (stale durable paths) contribute to the stale count.
+    // (stale live paths) contribute to the stale count.
     expect(result.resorts_with_stale_fields).toBe(2)
     // kotelnica (workspace) + livigno (published-only) = 2 total
     expect(result.resorts_total).toBe(2)
@@ -482,5 +483,59 @@ describe('healthHandler (PR 4.2)', (): void => {
     expect(result.resorts_total).toBe(1)
     expect(result.resorts_with_corrupt_workspace).toBe(0)
     expect(result.resorts_with_stale_fields).toBe(0)
+  })
+
+  // ---------------------------------------------------------------------------
+  // Round-3 Codex fix: durable paths are never-stale-by-clock
+  // ---------------------------------------------------------------------------
+
+  it('round-3 fix: durable path (slopes_km) with stale observed_at → resorts_with_stale_fields === 0', async (): Promise<void> => {
+    // Pins the fix: durable resort attributes do not go stale by clock.
+    // Only live paths (snow_depth_cm etc.) are subject to the TTL check.
+    await mkdir(join(workspaceRoot, 'data', 'admin-workspace'), { recursive: true })
+
+    // All durable paths are stale (30 days old); all live paths are fresh.
+    // After the fix, only live paths are checked → no stale resort counted.
+    const resort = makeResort('stale-durable', durableFieldSources(STALE_OBSERVED_AT))
+    await writeFile(
+      join(workspaceRoot, 'data', 'admin-workspace', 'stale-durable.json'),
+      makeWorkspaceFileJson('stale-durable', resort, liveFieldSources(FRESH_OBSERVED_AT)),
+    )
+
+    const result = await healthHandler({ query: {} }, { workspaceRoot })
+
+    // Durable paths are never-stale-by-clock → not counted as stale.
+    expect(result.resorts_with_stale_fields).toBe(0)
+    expect(result.resorts_total).toBe(1)
+    expect(result.resorts_with_corrupt_workspace).toBe(0)
+    expect(result.resorts_with_missing_provenance).toBe(0)
+  })
+
+  it('round-3 fix: mixed durable-stale + live-stale → resorts_with_stale_fields === 1 (only live-path staleness counts)', async (): Promise<void> => {
+    // Two workspace resorts: one with both durable and live paths stale (should
+    // count once — the live path is what triggers it), one with only durable
+    // paths stale and live paths fresh (should NOT count).
+    await mkdir(join(workspaceRoot, 'data', 'admin-workspace'), { recursive: true })
+
+    // Resort A: durable stale + live stale → counts (live path triggers it).
+    const resortA = makeResort('both-stale', durableFieldSources(STALE_OBSERVED_AT))
+    await writeFile(
+      join(workspaceRoot, 'data', 'admin-workspace', 'both-stale.json'),
+      makeWorkspaceFileJson('both-stale', resortA, liveFieldSources(STALE_OBSERVED_AT)),
+    )
+
+    // Resort B: durable stale + live fresh → does NOT count (live path is fresh).
+    const resortB = makeResort('durable-stale-only', durableFieldSources(STALE_OBSERVED_AT))
+    await writeFile(
+      join(workspaceRoot, 'data', 'admin-workspace', 'durable-stale-only.json'),
+      makeWorkspaceFileJson('durable-stale-only', resortB, liveFieldSources(FRESH_OBSERVED_AT)),
+    )
+
+    const result = await healthHandler({ query: {} }, { workspaceRoot })
+
+    // Only the resort with stale live paths contributes to the stale count.
+    expect(result.resorts_with_stale_fields).toBe(1)
+    expect(result.resorts_total).toBe(2)
+    expect(result.resorts_with_corrupt_workspace).toBe(0)
   })
 })

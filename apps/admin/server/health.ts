@@ -12,6 +12,23 @@ import type { HealthQuery, HealthResponse } from '@snowboard-trip-advisor/schema
 
 import type { HandlerDeps } from './listResorts'
 
+// File-local: paths subject to clock-based staleness per
+// packages/schema/src/loadResortDatasetFromObject.ts:83-99 (durableField vs liveField).
+// Durable resort attributes (slopes_km, season.*, altitude_m.*, lift_count,
+// skiable_terrain_ha) are explicitly never-stale-by-clock — editorial review
+// is the Phase-2 stale-detection signal for those, not observed_at age.
+// TODO(PR 4.3 / Tier 3): when listResorts.ts (PR 4.3) and resortDetail.ts
+// (PR 4.4a) need the same subset, extract this to packages/schema/src/metricFields.ts
+// alongside METRIC_FIELDS as the canonical source. Until then, file-local per
+// ai-clean-code §3 (duplicate freely until burned twice).
+const LIVE_METRIC_FIELDS = [
+  'snow_depth_cm',
+  'lifts_open.count',
+  'lifts_open.total',
+  'lift_pass_day',
+  'lodging_sample.median_eur',
+] as const
+
 export interface HealthInput {
   readonly query: HealthQuery
 }
@@ -60,10 +77,11 @@ export async function healthHandler(
       missingProvenanceCount++
     }
 
-    // Stale fields: any METRIC_FIELDS path in the combined sources whose
-    // observed_at is older than FRESHNESS_TTL_DAYS.default days.
-    // Mirrors the canonical pattern at packages/schema/src/loadResortDatasetFromObject.ts:113-118.
-    const hasStaleField = METRIC_FIELDS.some((p): boolean => {
+    // Stale fields: only LIVE_METRIC_FIELDS paths are subject to clock-based staleness.
+    // Durable resort attributes (slopes_km, season.*, etc.) return state: 'fresh'
+    // unconditionally per loadResortDatasetFromObject.ts:83-99 — editorial review
+    // is the Phase-2 stale-detection signal for those, not observed_at age.
+    const hasStaleField = LIVE_METRIC_FIELDS.some((p): boolean => {
       const fs = combinedSources[p]
       if (fs === undefined) {
         return false
@@ -102,9 +120,11 @@ export async function healthHandler(
         missingProvenanceCount++
       }
 
-      // Stale fields: any METRIC_FIELDS path in combined sources whose
-      // observed_at is older than FRESHNESS_TTL_DAYS.default days.
-      const hasStaleField = METRIC_FIELDS.some((p): boolean => {
+      // Stale fields: only LIVE_METRIC_FIELDS paths are subject to clock-based staleness.
+      // Durable resort attributes (slopes_km, season.*, etc.) return state: 'fresh'
+      // unconditionally per loadResortDatasetFromObject.ts:83-99 — editorial review
+      // is the Phase-2 stale-detection signal for those, not observed_at age.
+      const hasStaleField = LIVE_METRIC_FIELDS.some((p): boolean => {
         const fs = combinedSources[p]
         if (fs === undefined) {
           return false
