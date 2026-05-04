@@ -50,17 +50,19 @@ Branch names per spec §7.8 / §7.9: `epic-4/pr-4.2-dashboard`, `epic-4/pr-4.3-r
 2. Post `@codex review` as a PR comment (per project memory: `feedback_codex_review_per_pr.md`).
 3. Wait ~5 minutes; fold every Codex finding on the same branch; reply to each thread with the fix-commit SHA.
 4. Run a tailored local-acceptance test plan (qa, build smoke, dev probes; for Tier 2 specifically, `curl` probes against the new real handlers + browser smoke of the Dashboard / Resorts table). Per project memory: execute the steps yourself, do not just describe them.
-5. **Per-PR Subagent Review Discipline:** spec §7.8 + §7.9 explicitly state **NO subagent review** for either Tier 2 PR. AGENTS.md `Subagent Review Discipline` trigger list (lines 53–73) does NOT include `apps/admin/server/**` or `apps/admin/src/**` — only `packages/schema/**`, `packages/schema/api/**`, `eslint.config.js`, plus the meta-agent / hook / workflow paths. Tier 2 touches none of these. If the implementer touches a triggered path mid-PR (e.g., needing to amend a `packages/schema/api/*.ts` schema), the trigger fires and the implementer dispatches the subagent review per the Tier 1 plan §1.99 / §2.99 / §3.99 reviewer-brief pattern. Document the trigger-touch in the PR description either way.
+5. **Per-PR Subagent Review Discipline:** spec §7.8 + §7.9 narratively suggest "NO subagent review" for either Tier 2 PR's *handler / view code*, but **PR 4.2 IS triggered** because the §0.6 doc-drift fold edits `docs/superpowers/specs/2026-05-01-epic-4-admin-app-design.md` — a `docs/superpowers/specs/**` path that AGENTS.md L57 lists as a Subagent Review Discipline trigger. The implementer MUST dispatch the §1.99 reviewer brief on PR 4.2 before requesting maintainer review. PR 4.3 has no triggered paths (no spec / schema / eslint / hooks / workflow edits). If the implementer touches a triggered path mid-PR (e.g., needing to amend a `packages/schema/api/*.ts` schema), the additional trigger fires and the implementer dispatches the subagent review per the Tier 1 plan §1.99 / §2.99 / §3.99 reviewer-brief pattern. Document the trigger-touch in the PR description either way.
 6. Surface to maintainer for merge.
 
 ### 0.4 Subagent-review trigger matrix (Tier 2)
 
 | PR | Triggered paths (per AGENTS.md L53-73 + spec §7.8 / §7.9) | Reviewer brief in this plan |
 |---|---|---|
-| 4.2 | NONE | N/A — see §0.3 step 5 |
+| 4.2 | `docs/superpowers/specs/**` (the §0.6 doc-drift fold edits the Epic 4 spec) | §1.99 |
 | 4.3 | NONE | N/A — see §0.3 step 5 |
 
-If the implementer's diff incidentally touches `packages/schema/**`, `packages/schema/api/**`, `eslint.config.js`, or any `.github/` / `scripts/hooks/` / agent-discipline path, the trigger fires for that PR and the implementer writes a subagent reviewer brief inline before requesting maintainer review.
+**Codex pass-1 fold:** the prior version of this matrix listed PR 4.2 as "NONE", but §0.6 explicitly adds a 1-line edit to `docs/superpowers/specs/2026-05-01-epic-4-admin-app-design.md`, which is a `docs/superpowers/specs/**` trigger per AGENTS.md L57. The implementer MUST dispatch the §1.99 reviewer brief before requesting maintainer review on PR 4.2.
+
+If the implementer's diff incidentally touches `packages/schema/**`, `packages/schema/api/**`, `eslint.config.js`, or any `.github/` / `scripts/hooks/` / agent-discipline path beyond what §0.4 already lists, the additional trigger fires for that PR and the implementer writes a subagent reviewer brief inline before requesting maintainer review.
 
 ### 0.5 Hook-shape decision: `T | null + error` over Suspense-`use()` for useHealth + useResortList
 
@@ -464,7 +466,7 @@ async function readPublishedDocOrNull(path: string): Promise<PublishedDataset | 
 
 Concrete aggregation rules for `health.ts` and `listResorts.ts`:
 
-- **`resorts_with_stale_fields`:** count workspace files where ≥1 `METRIC_FIELDS` path has a `field_sources` entry whose `observed_at` is older than `FRESHNESS_TTL_DAYS.default`. Reference the canonical staleness computation at [`packages/schema/src/loadResortDatasetFromObject.ts:100-133`](../../../packages/schema/src/loadResortDatasetFromObject.ts:100) (`liveField<T>`'s `ageDays > FRESHNESS_TTL_DAYS.default` branch). The implementer can either inline the same `(now - observed_at) / day_ms` computation or import the threshold constant from the schema package.
+- **`resorts_with_stale_fields`:** count workspace files where ≥1 `METRIC_FIELDS` path has a `field_sources` entry whose `observed_at` is older than `FRESHNESS_TTL_DAYS.default`. Reference the canonical staleness computation at [`packages/schema/src/loadResortDatasetFromObject.ts` lines 100–133](../../../packages/schema/src/loadResortDatasetFromObject.ts#L100-L133) (`liveField<T>`'s `ageDays > FRESHNESS_TTL_DAYS.default` branch). The implementer can either inline the same `(now - observed_at) / day_ms` computation or import the threshold constant from the schema package.
 - **`resorts_with_failed_fields`:** **always `0` in Phase 1.** `FieldStateFor.failed` (`packages/schema/src/resortView.ts:30`) carries a `reason: string` populated by upstream-adapter failures; Phase 1 ships with **zero adapters** (per spec §10.5 + parent-spec §3 — adapters land in Epic 5). No code path can produce a failed FieldStateFor in Tier 2. Implementer hardcodes `0` and the test cases assert `0` in every fixture. When Epic 5 lands, this becomes a real computation — leave a comment in `health.ts` calling that out.
 - **`resorts_with_missing_provenance`:** count workspace files where ≥1 `METRIC_FIELDS` path has NO `field_sources` entry (i.e., `path in wf.resort.field_sources` is `false`). Already handled correctly by the sketch's `METRIC_FIELDS.filter((p) => !(p in wf.resort.field_sources))`.
 
@@ -671,7 +673,7 @@ git commit -s -m "feat(admin): add Dashboard view + cold-start empty state (PR 4
 
 ### 1.5 Task: `apps/admin/src/state/useURLState.ts` + App.tsx routing wire-up
 
-**React-state plan-review fold (critical).** The prior version of this section had `App.tsx` subscribe to `popstate` only. Browsers do NOT fire `popstate` for `history.pushState` / `replaceState`, so any programmatic navigation (PR 4.3 row-click ships `pushState` per §2.4) would silently fail to re-render. Epic 3 solves this in [`apps/public/src/state/useURLState.ts:16-63`](../../../apps/public/src/state/useURLState.ts:16) with a module-scoped subscriber Set + a `notify()` call inside `setURLState`. Tier 2 mirrors that pattern in `apps/admin/src/state/useURLState.ts` (smaller surface — admin has no shareable-state-normalization invariant, so we skip the `normalizeIfNeeded` helper Epic 3 uses).
+**React-state plan-review fold (critical).** The prior version of this section had `App.tsx` subscribe to `popstate` only. Browsers do NOT fire `popstate` for `history.pushState` / `replaceState`, so any programmatic navigation (PR 4.3 row-click ships `pushState` per §2.4) would silently fail to re-render. Epic 3 solves this in [`apps/public/src/state/useURLState.ts` lines 16–63](../../../apps/public/src/state/useURLState.ts#L16-L63) with a module-scoped subscriber Set + a `notify()` call inside `setURLState`. Tier 2 mirrors that pattern in `apps/admin/src/state/useURLState.ts` (smaller surface — admin has no shareable-state-normalization invariant, so we skip the `normalizeIfNeeded` helper Epic 3 uses).
 
 **Why this is one task, not two.** `useURLState.ts` exists solely to host the `setRoute` writer + the subscriber bridge that `App.tsx` consumes. Splitting them would force `App.tsx` to live without a subscriber for the duration of the in-between commit (untested half-state); combining keeps the URL-routing infrastructure landing as one atomic change. The task's commit step bundles 3 files (useURLState.ts, useURLState.test.ts, App.tsx + App.test.tsx).
 
@@ -911,7 +913,49 @@ EOF
 
 - [ ] **Step 5: Run the local-acceptance test plan** per the body's "Test plan" — execute, do not just describe.
 
-- [ ] **Step 6: Surface to maintainer for merge.**
+- [ ] **Step 6: Dispatch the §1.99 subagent reviewer brief** (the §0.6 spec edit triggers `docs/superpowers/specs/**` per AGENTS.md L57). Fold findings on the same branch.
+
+- [ ] **Step 7: Surface to maintainer for merge.**
+
+### 1.99 Subagent reviewer brief — PR 4.2
+
+```
+Subject: Subagent review — Epic 4 PR 4.2 (Dashboard view + GET /api/health endpoint).
+
+Trigger. PR 4.2 includes a 1-line edit to docs/superpowers/specs/2026-05-01-epic-4-admin-app-design.md
+(line 6: "ADRs in flight" → "Related ADRs (merged):") as part of the §0.6 doc-drift fold. That spec path
+is in AGENTS.md L57's Subagent Review Discipline trigger list, so this brief is required even though
+the spec narrative for PR 4.2 (spec §7.8) said "Subagent review trigger: NO" (the spec was written
+before the doc-drift fold was scoped here).
+
+Context. PR 4.2 lands the real /api/health handler (replacing PR 4.1b's 501 stub), the Dashboard view
+that consumes it, the URL-state foundation (lib/urlState.ts pure parser/serializer + state/useURLState.ts
+hook with subscribers Set + setRoute writer), and the useHealth state hook. Spec:
+docs/superpowers/specs/2026-05-01-epic-4-admin-app-design.md §7.8 + §4.8 + §10.9 + §6.1. Plan §1 of
+docs/superpowers/plans/2026-05-03-epic-4-tier-2-navigation-plan.md.
+
+Your job. Independent review of three load-bearing things.
+
+1. The spec edit on line 6 is the right wording change. The original text "ADRs in flight: ADR-0011 ...,
+   ADR-0012 ..." was stale because both ADRs merged before Tier 1 began (PRs #63 + #64). The fold
+   changes it to "Related ADRs (merged):". Verify the new text accurately describes the post-merge
+   state and doesn't lose any information from the original. Cite the spec line numbers in your finding.
+
+2. The Tier 1 → Tier 2 boundary documentation drift was correctly scoped. The fold also touches
+   apps/admin/server/resortDetail.ts (PR 4.2 → PR 4.4a) and apps/admin/server/listPublishes.ts
+   (PR 4.6a → PR 4.5a). Verify these stub-message PR refs match what spec §7.10 + §7.14 actually say.
+
+3. The /api/health real handler (apps/admin/server/health.ts) correctly aggregates per spec §4.8:
+   - resorts_total = workspace ∪ published union count
+   - resorts_with_corrupt_workspace counts WorkspaceFile.parse() failures and excludes those files
+     from per-field aggregates (per §10.3.1)
+   - resorts_with_failed_fields = 0 hardcoded in Phase 1 (no upstream adapters per spec §10.5);
+     verify NO code path in PR 4.2 produces a non-zero failed count
+   - last_published_at + archive_size_bytes handle the missing-published-doc case per §10.9
+   Cite handler-test cases that pin each assertion.
+
+Cite file:line for every finding. Verdict: APPROVED or REQUEST CHANGES with P0/P1 list. Hard cap 60 lines.
+```
 
 ---
 
