@@ -1,8 +1,13 @@
 import '@testing-library/jest-dom/vitest'
 
-import { afterAll, afterEach, beforeAll } from 'vitest'
+import { toHaveNoViolations } from 'jest-axe'
+import { afterAll, afterEach, beforeAll, expect } from 'vitest'
 
 import { server } from './mocks/server'
+
+// Extend vitest's `expect` with jest-axe's `toHaveNoViolations` matcher.
+// Mirrors the pattern in apps/public/src/test-setup.ts.
+expect.extend(toHaveNoViolations)
 
 // Global MSW lifecycle. Every admin test file inherits the canned harness;
 // per-test overrides via server.use(http.get(...)) inside individual tests.

@@ -1,19 +1,17 @@
 import type { JSX } from 'react'
 
+import { useURLState } from './state/useURLState'
+import { Dashboard } from './views/Dashboard'
 import { Shell } from './views/Shell'
 
-// Inline DashboardPlaceholder until PR 4.2 lands the real Dashboard view.
-// Per ai-clean-code-adherence §2: do not extract this until there's a
-// second consumer (the real Dashboard module IS the second consumer; it
-// will replace this inline element when it lands).
-function DashboardPlaceholder(): JSX.Element {
-  return <div>Admin (dashboard placeholder — coming in PR 4.2)</div>
-}
-
 export default function App(): JSX.Element {
+  const route = useURLState()
+  // PR 4.3: switch on route.route — when ROUTE_VALUES extends with 'resorts',
+  // add: {route.route === 'dashboard' ? <Dashboard /> : <ResortsTable />}
+  void route // silence no-unused-vars until PR 4.3 (single-value enum)
   return (
     <Shell>
-      <DashboardPlaceholder />
+      <Dashboard />
     </Shell>
   )
 }

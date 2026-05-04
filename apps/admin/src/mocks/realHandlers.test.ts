@@ -32,12 +32,22 @@ describe('bridgeHandlers (PR 4.1b §2.6, spec §6.3 P0-3)', (): void => {
     server.use(...bridgeHandlers(workspaceDir))
   })
 
-  it('GET /api/health invokes the real handler (501 stub returns not-implemented)', async (): Promise<void> => {
+  it('GET /api/health invokes the real handler (returns 200 with HealthResponse since PR 4.2)', async (): Promise<void> => {
     // eslint-disable-next-line no-restricted-syntax, no-restricted-globals -- bridge harness intentionally exercises raw fetch through MSW; allowlisted via tests/eslint/admin-restrictions.test.ts
     const res = await fetch('http://127.0.0.1/api/health')
-    expect(res.status).toBe(501)
+    expect(res.status).toBe(200)
     const json: unknown = await res.json()
-    expect(json).toMatchObject({ error: { code: 'not-implemented' } })
+    // Cold-start: workspaceDir has no workspace files — all aggregates are 0.
+    expect(json).toMatchObject({
+      resorts_total: 0,
+      resorts_with_stale_fields: 0,
+      resorts_with_failed_fields: 0,
+      resorts_with_missing_provenance: 0,
+      resorts_with_corrupt_workspace: 0,
+      pending_integration_errors: 0,
+      last_published_at: null,
+      archive_size_bytes: 0,
+    })
   })
 
   it('GET /api/resorts routes through dispatch to the listResorts stub (501)', async (): Promise<void> => {
