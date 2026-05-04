@@ -30,9 +30,13 @@
 
 ### 0.1 Worktree + branch conventions
 
-Per AGENTS.md "Worktree discipline" and project memory: each PR gets its own worktree under `.worktrees/<short-name>/`, branched from `origin/main` at the time of the PR's start. Stacked-PR phantom-merge avoidance (AGENTS.md "PR Sizing Discipline") — **rebase onto `main` after each predecessor merges**, do not stack branches.
+Per AGENTS.md "Worktree discipline": each PR gets its own worktree under `.worktrees/<short-name>/`. Branch names per spec §7.8 / §7.9: `epic-4/pr-4.2-dashboard`, `epic-4/pr-4.3-resorts-table`. Worktrees: `.worktrees/epic-4-pr-4.2/`, `.worktrees/epic-4-pr-4.3/`.
 
-Branch names per spec §7.8 / §7.9: `epic-4/pr-4.2-dashboard`, `epic-4/pr-4.3-resorts-table`. Worktrees: `.worktrees/epic-4-pr-4.2/`, `.worktrees/epic-4-pr-4.3/`.
+**Branch base — sequential rebase vs. stacked PR (AGENTS.md tension, decided).** AGENTS.md L108 prefers stacked PRs (`gh pr create --base <foundation-branch>`) when concerns have a hard dependency order, and PR 4.3 does depend on PR 4.2 (shares `lib/urlState.ts` + consumes `useURLState`). However, AGENTS.md L117 documents the **stacked-PR phantom-merge hazard** (when the parent merges + its branch is deleted, GitHub can mark the stacked PR "MERGED" while its `mergeCommit.oid` is unreachable from `main` — losing the diff). The project has been burned by this: PRs #58–#62 had to be re-landed via the recovery commit #66 ("recovery: re-land agent-discipline migration stack — phantom-merge fix"). The Tier 1 plan adopted a sequential-rebase posture in response, and Tier 1 shipped clean (PRs 4.0/4.1a/4.1b/4.1c).
+
+**This plan picks sequential-rebase by default**: PR 4.2 branches from `origin/main` at time T1, merges at T2; PR 4.3 then branches from `origin/main` at T2 (or later — including PR 4.2's commits) and merges at T3. The cost is wall-clock serialization (no parallel review of 4.2 + 4.3); the benefit is no phantom-merge risk.
+
+**If the implementer prefers stacking** (e.g., to enable parallel review and is willing to apply L117's mitigation), it's also valid per AGENTS.md L108: open PR 4.3 with `--base epic-4/pr-4.2-dashboard`, then **after PR 4.2 merges**, run `gh pr view <PR-4.3-number> --json baseRefName,mergeCommit` to confirm the diff is intact. If the parent branch was deleted and `mergeCommit.oid` is unreachable from `main`, re-apply via `git cherry-pick` onto a fresh branch off `main`. Document the choice in the PR 4.3 body either way.
 
 **Edit-tool path discipline (project memory).** When working in a worktree, prefix `Edit` paths with the worktree directory or you'll silently edit the main checkout. Verify with `git status` *inside the worktree*, not `Read` against the main checkout.
 
@@ -892,7 +896,7 @@ gh pr create --title "Epic 4 PR 4.2 — Dashboard view + GET /api/health endpoin
 ## Scope discipline
 
 - [x] Applicable AGENTS.md rules followed (explicit return types, no `any`, no non-null assertions, no raw `<button>` / `<a>` in `apps/**`).
-- [x] Subagent Review Discipline triggers checked: NONE touched (per spec §7.8 + AGENTS.md L53-73).
+- [x] Subagent Review Discipline triggers checked: `docs/superpowers/specs/**` (the §0.6 doc-drift fold edits the Epic 4 spec). §1.99 reviewer brief dispatched; findings folded before requesting maintainer review.
 - [x] Not a schema PR.
 
 ## What we are NOT building in this PR
@@ -961,7 +965,7 @@ Cite file:line for every finding. Verdict: APPROVED or REQUEST CHANGES with P0/P
 
 ## 2. PR 4.3 — Resorts table + GET /api/resorts endpoint
 
-**Branch.** `epic-4/pr-4.3-resorts-table`. **Worktree.** `.worktrees/epic-4-pr-4.3/`. **Depends on.** PR 4.2 merged on `origin/main`. **Rebase from `origin/main`** after 4.2 lands; do NOT stack on the 4.2 branch (phantom-merge avoidance per AGENTS.md).
+**Branch.** `epic-4/pr-4.3-resorts-table`. **Worktree.** `.worktrees/epic-4-pr-4.3/`. **Depends on.** PR 4.2 merged on `origin/main`. **Branch base** — sequential-rebase by default per §0.1 (branch from `origin/main` AFTER 4.2 lands). Stacked-PR alternative (`--base epic-4/pr-4.2-dashboard` per AGENTS.md L108) is also valid if the implementer applies the L117 phantom-merge check after 4.2 merges; document the choice in the PR body.
 
 **Goal.** Replace `apps/admin/server/listResorts.ts`'s 501 stub with the real `/api/resorts` handler (workspace ∪ published union with `publish_state` discriminator per spec §4.1.1); ship `apps/admin/src/views/ResortsTable.tsx` rendering a sortable / filterable list using Epic 3's `Table` design-system primitive (already shipped); extend `apps/admin/src/lib/urlState.ts` with the `resorts` route + filter params.
 
