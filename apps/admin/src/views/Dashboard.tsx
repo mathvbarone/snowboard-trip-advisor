@@ -13,8 +13,21 @@ import { useHealth } from '../state/useHealth'
 // ---------------------------------------------------------------------------
 
 function DashboardSkeleton(): JSX.Element {
+  // 8 skeleton cards mirror the 8 HealthMetricsGrid cards so the loading-to-
+  // content transition doesn't cause a jarring layout shift. Pattern matches
+  // Epic 3's DatasetLoading.tsx (3 cards for its 3-card layout).
+  // The <section> wrapper mirrors HealthMetricsGrid's structure; individual
+  // <Skeleton> components carry role="status" + aria-busy="true" per the
+  // design-system WCAG live-region pattern.
   return (
     <section aria-label="Loading dashboard">
+      <Skeleton variant="card" />
+      <Skeleton variant="card" />
+      <Skeleton variant="card" />
+      <Skeleton variant="card" />
+      <Skeleton variant="card" />
+      <Skeleton variant="card" />
+      <Skeleton variant="card" />
       <Skeleton variant="card" />
     </section>
   )
@@ -53,7 +66,7 @@ function formatLastPublished(value: string | null): string {
   if (value === null) {
     return 'Never'
   }
-  return new Date(value).toLocaleString()
+  return new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
 }
 
 // Format archive_size_bytes: bytes → KB or MB for readability.

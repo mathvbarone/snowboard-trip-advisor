@@ -160,9 +160,15 @@ describe('healthHandler (PR 4.2)', (): void => {
   it('missing-provenance: workspace file lacks field_sources entry → resorts_with_missing_provenance === 1', async (): Promise<void> => {
     await mkdir(join(workspaceRoot, 'data', 'admin-workspace'), { recursive: true })
 
-    // Omit 'slopes_km' from resort.field_sources — provenance gap in durable paths.
-    // live_signal is null (exercises the wf.live_signal?.field_sources ?? {} null-branch on
-    // line 51 of health.ts: live_signal is null → combined sources = resort.field_sources only).
+    // Fixture: resort.field_sources omits slopes_km; live_signal is null
+    // (so live_signal.field_sources is also empty). Combined missing paths:
+    // slopes_km (durable) + snow_depth_cm + lifts_open.count + lifts_open.total
+    // + lift_pass_day + lodging_sample.median_eur (5 live) = 6 missing total.
+    // resorts_with_missing_provenance counts RESORTS with ≥1 missing path,
+    // not paths — so the assertion is === 1 (one resort with missing
+    // provenance), not === 6.
+    // Also exercises the wf.live_signal?.field_sources ?? {} null-branch on
+    // health.ts: live_signal is null → combined sources = resort.field_sources only.
     const incompleteFieldSources: Record<string, ReturnType<typeof makeFieldSource>> = {
       'altitude_m.min': makeFieldSource(FRESH_OBSERVED_AT),
       'altitude_m.max': makeFieldSource(FRESH_OBSERVED_AT),

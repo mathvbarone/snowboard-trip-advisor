@@ -3,7 +3,7 @@
 **Spec date:** 2026-05-01.
 **Parent product spec:** [`docs/superpowers/specs/2026-04-22-product-pivot-design.md`](2026-04-22-product-pivot-design.md) §3 (admin app product surface), §4 (data model — already in `packages/schema`), §5 (`ResortView` projection — already shipped), §8 (`/api/*` contract).
 **Predecessor:** [`docs/superpowers/specs/2026-04-28-epic-3-public-app-design.md`](2026-04-28-epic-3-public-app-design.md) (Epic 3 — public app, shipped).
-**ADRs in flight:** [ADR-0011](../../adr/0011-defer-test-sync-ux-to-epic-5.md) (Test / Sync deferral), [ADR-0012](../../adr/0012-defer-analyst-notes-to-post-epic-4-followup.md) (Analyst notes deferral).
+**Related ADRs (merged):** [ADR-0011](../../adr/0011-defer-test-sync-ux-to-epic-5.md) (Test / Sync deferral), [ADR-0012](../../adr/0012-defer-analyst-notes-to-post-epic-4-followup.md) (Analyst notes deferral).
 **Authoritative agent rules:** [`AGENTS.md`](../../../AGENTS.md). `CLAUDE.md` is now a Claude-specific compatibility shim that points at AGENTS.md.
 
 ## 0. Executive Summary

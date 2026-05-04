@@ -35,9 +35,11 @@ describe('Dashboard (PR 4.2 §1.4)', (): void => {
     // on the first render. No need to hold the server response in-flight.
     const { container } = render(<Dashboard />)
 
-    // The skeleton ARIA pattern: role="status" + aria-busy="true"
-    expect(screen.getByRole('status')).toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveAttribute('aria-busy', 'true')
+    // The skeleton ARIA pattern: 8 cards, each role="status" + aria-busy="true",
+    // to match the 8 HealthMetricsGrid cards and prevent layout shift on resolve.
+    const skeletons = screen.getAllByRole('status')
+    expect(skeletons).toHaveLength(8)
+    expect(skeletons[0]).toHaveAttribute('aria-busy', 'true')
 
     // axe (e) — loading state
     expect(await axe(container)).toHaveNoViolations()

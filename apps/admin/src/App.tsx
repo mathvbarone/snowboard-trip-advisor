@@ -5,10 +5,10 @@ import { Dashboard } from './views/Dashboard'
 import { Shell } from './views/Shell'
 
 export default function App(): JSX.Element {
-  // useURLState() drives future route dispatch. PR 4.3 adds 'resorts' to
-  // RouteState, at which point this becomes a switch on `route.route`.
-  // Phase 1 (PR 4.2): only 'dashboard' exists; always render Dashboard.
-  useURLState()
+  const route = useURLState()
+  // PR 4.3: switch on route.route — when ROUTE_VALUES extends with 'resorts',
+  // add: {route.route === 'dashboard' ? <Dashboard /> : <ResortsTable />}
+  void route // silence no-unused-vars until PR 4.3 (single-value enum)
   return (
     <Shell>
       <Dashboard />

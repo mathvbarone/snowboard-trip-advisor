@@ -11,6 +11,7 @@ beforeEach((): void => {
 afterEach((): void => {
   __resetForTests()
   window.history.replaceState({}, '', '/')
+  vi.restoreAllMocks()
 })
 
 describe('useURLState (PR 4.2)', (): void => {

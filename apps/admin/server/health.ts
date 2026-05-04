@@ -113,13 +113,18 @@ async function readWorkspaceFilesOrEmpty(
         const text = await readFile(join(dir, name), 'utf-8')
         out.push({ name, raw: JSON.parse(text) as unknown })
       } catch (err) {
-        // Other errors (JSON.parse failure on truncated content) → push undefined → fails safeParse → corrupt count.
+        // ENOENT = file disappeared between readdir and readFile (TOCTOU transient race) — drop silently.
         if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
           /* v8 ignore next -- ENOENT here means the file disappeared between readdir and readFile
              (TOCTOU transient race). Triggering it in a unit test would require injecting
              a filesystem deletion mid-loop, which is not portable across OS schedulers. */
           continue
         }
+        // All other errors (JSON.parse failures on truncated/invalid content,
+        // EACCES, EIO, etc.) are treated as "corrupt by design" — pushed as
+        // raw: undefined → fails WorkspaceFile.safeParse → corruptCount++.
+        // This is intentional: any file we cannot read or parse is operationally
+        // equivalent to a corrupt workspace file from the analyst's perspective.
         out.push({ name, raw: undefined })
       }
     }
