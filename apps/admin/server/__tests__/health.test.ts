@@ -11,8 +11,14 @@ import { healthHandler } from '../health'
 // Shared fixture builder helpers
 // ---------------------------------------------------------------------------
 
-const FRESH_OBSERVED_AT = '2026-04-28T08:00:00Z' // well within 14-day TTL
-const STALE_OBSERVED_AT = '2026-01-01T00:00:00Z' // >14 days before today (2026-05-03)
+// Relative timestamps — keeps staleness assertions independent of wall-clock
+// date. The healthHandler compares (now - observed_at) against a 14-day TTL,
+// so hard-coded ISO literals eventually flip from "fresh" to "stale" in CI.
+// 1 day ago = guaranteed fresh (<14-day threshold).
+// 30 days ago = guaranteed stale (>14-day threshold).
+const DAY_MS = 24 * 60 * 60 * 1000
+const FRESH_OBSERVED_AT = new Date(Date.now() - DAY_MS).toISOString()
+const STALE_OBSERVED_AT = new Date(Date.now() - 30 * DAY_MS).toISOString()
 const HASH_1 = '0000000000000000000000000000000000000000000000000000000000000001'
 const SOURCE_URL = 'https://example.com/'
 const ATTRIBUTION = { en: 'Test attribution.' }

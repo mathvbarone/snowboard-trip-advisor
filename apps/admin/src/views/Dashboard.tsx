@@ -130,7 +130,19 @@ export function Dashboard(): JSX.Element {
   if (value === null) {
     return <DashboardSkeleton />
   }
-  if (value.resorts_total === 0) {
+  // True cold-start requires ALL health signals to be zero: no resorts, no
+  // corrupt workspace files, and no integration errors. Per spec §10.9, a
+  // workspace with corrupt files or active integration errors is NOT empty —
+  // those signals need to be surfaced via HealthMetricsGrid, not hidden behind
+  // the friendly "No resorts yet" card. pending_integration_errors is
+  // hardcoded to 0 in Phase 1 (no adapters), but the gate is defensive for
+  // Epic 5 adapters that may surface errors even before any resort is ingested.
+  const isTrueColdStart =
+    value.resorts_total === 0 &&
+    value.resorts_with_corrupt_workspace === 0 &&
+    value.pending_integration_errors === 0
+
+  if (isTrueColdStart) {
     return <ColdStartEmptyState />
   }
   return <HealthMetricsGrid health={value} />

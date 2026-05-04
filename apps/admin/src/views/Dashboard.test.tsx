@@ -173,6 +173,65 @@ describe('Dashboard (PR 4.2 §1.4)', (): void => {
   })
 
   // ---------------------------------------------------------------------------
+  // (c2) Cold-start gate: resorts_total === 0 but corrupt workspace → HealthMetricsGrid
+  // Pins the §10.9 gate: a workspace with corrupt files is NOT a true cold-start.
+  // The corrupt-workspace count must be visible; the cold-start card must NOT show.
+  // ---------------------------------------------------------------------------
+  it('renders HealthMetricsGrid (not cold-start) when resorts_total === 0 and corrupt workspace exists', async (): Promise<void> => {
+    server.use(
+      http.get('/api/health', (): Response =>
+        HttpResponse.json({
+          resorts_total: 0,
+          resorts_with_stale_fields: 0,
+          resorts_with_failed_fields: 0,
+          resorts_with_missing_provenance: 0,
+          resorts_with_corrupt_workspace: 1,
+          pending_integration_errors: 0,
+          last_published_at: null,
+          archive_size_bytes: 0,
+        }),
+      ),
+    )
+
+    render(<Dashboard />)
+
+    await waitFor((): void => {
+      expect(screen.getByText(/corrupt workspace/i)).toBeInTheDocument()
+    })
+
+    // The grid is shown — all 8 labels visible.
+    expect(screen.getByText(/corrupt workspace/i)).toBeInTheDocument()
+    // Cold-start card must NOT appear.
+    expect(screen.queryByText(/no resorts yet/i)).not.toBeInTheDocument()
+  })
+
+  it('renders HealthMetricsGrid (not cold-start) when resorts_total === 0 and integration errors exist', async (): Promise<void> => {
+    server.use(
+      http.get('/api/health', (): Response =>
+        HttpResponse.json({
+          resorts_total: 0,
+          resorts_with_stale_fields: 0,
+          resorts_with_failed_fields: 0,
+          resorts_with_missing_provenance: 0,
+          resorts_with_corrupt_workspace: 0,
+          pending_integration_errors: 1,
+          last_published_at: null,
+          archive_size_bytes: 0,
+        }),
+      ),
+    )
+
+    render(<Dashboard />)
+
+    await waitFor((): void => {
+      expect(screen.getByText(/pending integration errors/i)).toBeInTheDocument()
+    })
+
+    expect(screen.getByText(/pending integration errors/i)).toBeInTheDocument()
+    expect(screen.queryByText(/no resorts yet/i)).not.toBeInTheDocument()
+  })
+
+  // ---------------------------------------------------------------------------
   // (d) Error state — renders error message when fetch fails
   // ---------------------------------------------------------------------------
   it('renders an error message when the health fetch fails', async (): Promise<void> => {
