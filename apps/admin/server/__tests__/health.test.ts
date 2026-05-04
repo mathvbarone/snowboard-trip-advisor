@@ -96,6 +96,12 @@ function liveFieldSources(observed_at: string): Record<string, ReturnType<typeof
 /**
  * Build a WorkspaceFile literal and serialize it to JSON for writing to disk.
  * Includes a live_signal with live field_sources to cover all METRIC_FIELDS paths.
+ *
+ * When `liveSignalFieldSources` is non-null, the live_signal is built with ALL
+ * five live metric values populated (snow_depth_cm, lifts_open, lift_pass_day,
+ * lodging_sample) so that populatedLivePaths() returns all 5 paths. This means
+ * stale-field assertions are valid after the round-5 fix that gates staleness on
+ * populated paths only.
  */
 function makeWorkspaceFileJson(
   slug: string,
@@ -109,6 +115,12 @@ function makeWorkspaceFileJson(
           resort_slug: slug,
           observed_at: FRESH_OBSERVED_AT,
           fetched_at: FRESH_OBSERVED_AT,
+          // Populate all live metric values so populatedLivePaths() returns all 5
+          // paths and staleness checks are meaningful (round-5 fix requirement).
+          snow_depth_cm: 40,
+          lifts_open: { count: 10, total: 15 },
+          lift_pass_day: { amount: 55, currency: 'EUR' },
+          lodging_sample: { median_eur: { amount: 100, currency: 'EUR' }, sample_size: 3 },
           field_sources: liveSignalFieldSources,
         }
       : null
@@ -419,6 +431,12 @@ describe('healthHandler (PR 4.2)', (): void => {
           resort_slug: 'ischgl',
           observed_at: STALE_OBSERVED_AT,
           fetched_at: STALE_OBSERVED_AT,
+          // Round-5 fix requirement: populate live values so populatedLivePaths()
+          // returns the 5 live paths → stale field_sources are checked.
+          snow_depth_cm: 60,
+          lifts_open: { count: 12, total: 18 },
+          lift_pass_day: { amount: 70, currency: 'EUR' },
+          lodging_sample: { median_eur: { amount: 150, currency: 'EUR' }, sample_size: 4 },
           field_sources: liveFieldSources(STALE_OBSERVED_AT),  // live paths stale → triggers count
         },
       ],
@@ -545,6 +563,12 @@ describe('healthHandler (PR 4.2)', (): void => {
           resort_slug: 'livigno',
           observed_at: STALE_OBSERVED_AT,
           fetched_at: STALE_OBSERVED_AT,
+          // Round-5 fix requirement: populate live values so populatedLivePaths()
+          // returns the 5 live paths → stale field_sources are checked.
+          snow_depth_cm: 25,
+          lifts_open: { count: 6, total: 10 },
+          lift_pass_day: { amount: 65, currency: 'EUR' },
+          lodging_sample: { median_eur: { amount: 130, currency: 'EUR' }, sample_size: 5 },
           field_sources: liveFieldSources(STALE_OBSERVED_AT),  // live paths stale — triggers count
         },
       ],
@@ -648,6 +672,96 @@ describe('healthHandler (PR 4.2)', (): void => {
     const result = await healthHandler({ query: {} }, { workspaceRoot })
 
     // Only the resort with stale live paths contributes to the stale count.
+    expect(result.resorts_with_stale_fields).toBe(1)
+    expect(result.resorts_total).toBe(2)
+    expect(result.resorts_with_corrupt_workspace).toBe(0)
+  })
+
+  // ---------------------------------------------------------------------------
+  // Round-5 Codex fix: stale field_sources without populated live values → NOT stale
+  // ---------------------------------------------------------------------------
+
+  it('round-5 fix: stale live field_sources but no populated live values → resorts_with_stale_fields === 0', async (): Promise<void> => {
+    // Pins the fix: a resort with stale field_sources entries for live paths but no
+    // actual live measurement values (state: 'never_fetched') must NOT be counted
+    // as stale. populatedLivePaths(live) returns [] when no values are set, so the
+    // stale check never fires.
+    // Before the fix (LIVE_METRIC_FIELDS iteration), this would count as stale
+    // because field_sources['snow_depth_cm'] exists with a stale observed_at.
+    await mkdir(join(workspaceRoot, 'data', 'admin-workspace'), { recursive: true })
+
+    const resort = makeResort('never-fetched', durableFieldSources(FRESH_OBSERVED_AT))
+    // Build a workspace file with a live_signal that has stale field_sources entries
+    // but NO populated live values (snow_depth_cm undefined, lifts_open undefined, etc.).
+    const wfJson = JSON.stringify({
+      schema_version: 1,
+      slug: 'never-fetched',
+      resort,
+      live_signal: {
+        schema_version: 1,
+        resort_slug: 'never-fetched',
+        observed_at: STALE_OBSERVED_AT,
+        fetched_at: STALE_OBSERVED_AT,
+        // No snow_depth_cm, lifts_open, lift_pass_day, or lodging_sample values.
+        // populatedLivePaths() returns [] → staleness loop skipped entirely.
+        field_sources: {
+          'snow_depth_cm': makeFieldSource(STALE_OBSERVED_AT),  // stale, but value absent
+          'lifts_open.count': makeFieldSource(STALE_OBSERVED_AT),
+        },
+      },
+      modified_at: FRESH_OBSERVED_AT,
+    })
+    await writeFile(
+      join(workspaceRoot, 'data', 'admin-workspace', 'never-fetched.json'),
+      wfJson,
+    )
+
+    const result = await healthHandler({ query: {} }, { workspaceRoot })
+
+    // No live values populated → never_fetched, not stale → count must be 0.
+    expect(result.resorts_with_stale_fields).toBe(0)
+    expect(result.resorts_total).toBe(1)
+    expect(result.resorts_with_corrupt_workspace).toBe(0)
+  })
+
+  it('round-5 fix: mixed — populated+stale resort + unpopulated+stale resort → resorts_with_stale_fields === 1', async (): Promise<void> => {
+    // Two workspace resorts:
+    //   A: snow_depth_cm populated + field_sources stale → counts (live path is populated AND stale).
+    //   B: no live values + field_sources stale → does NOT count (never_fetched, not stale).
+    // Only A should contribute to the stale count.
+    await mkdir(join(workspaceRoot, 'data', 'admin-workspace'), { recursive: true })
+
+    // Resort A: populated live values + stale field_sources → stale.
+    const resortA = makeResort('populated-stale', durableFieldSources(FRESH_OBSERVED_AT))
+    await writeFile(
+      join(workspaceRoot, 'data', 'admin-workspace', 'populated-stale.json'),
+      makeWorkspaceFileJson('populated-stale', resortA, liveFieldSources(STALE_OBSERVED_AT)),
+    )
+
+    // Resort B: stale field_sources but NO live values → never_fetched, not stale.
+    const resortB = makeResort('no-values-stale-sources', durableFieldSources(FRESH_OBSERVED_AT))
+    const wfJsonB = JSON.stringify({
+      schema_version: 1,
+      slug: 'no-values-stale-sources',
+      resort: resortB,
+      live_signal: {
+        schema_version: 1,
+        resort_slug: 'no-values-stale-sources',
+        observed_at: STALE_OBSERVED_AT,
+        fetched_at: STALE_OBSERVED_AT,
+        // No populated live values → populatedLivePaths returns [].
+        field_sources: { 'snow_depth_cm': makeFieldSource(STALE_OBSERVED_AT) },
+      },
+      modified_at: FRESH_OBSERVED_AT,
+    })
+    await writeFile(
+      join(workspaceRoot, 'data', 'admin-workspace', 'no-values-stale-sources.json'),
+      wfJsonB,
+    )
+
+    const result = await healthHandler({ query: {} }, { workspaceRoot })
+
+    // Only the resort with populated live values AND stale field_sources counts.
     expect(result.resorts_with_stale_fields).toBe(1)
     expect(result.resorts_total).toBe(2)
     expect(result.resorts_with_corrupt_workspace).toBe(0)
