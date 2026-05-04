@@ -322,4 +322,159 @@ describe('healthHandler (PR 4.2)', (): void => {
     expect(result.resorts_with_corrupt_workspace).toBe(0)
     expect(result.resorts_with_missing_provenance).toBe(0)
   })
+
+  // ---------------------------------------------------------------------------
+  // P1 fix: published-only resorts must be included in per-field aggregates
+  // ---------------------------------------------------------------------------
+
+  it('P1: published-only resort with stale field_sources → resorts_with_stale_fields === 1', async (): Promise<void> => {
+    // Empty workspace dir — no workspace files at all.
+    await mkdir(join(workspaceRoot, 'data', 'admin-workspace'), { recursive: true })
+    await mkdir(join(workspaceRoot, 'data', 'published'), { recursive: true })
+
+    // Published doc has one resort with stale durable field_sources.
+    // A matching live_signal is provided with fresh field_sources, so stale
+    // detection depends on the durable paths (Option C: combined sources).
+    const staleResort = makeResort('ischgl', {
+      ...durableFieldSources(STALE_OBSERVED_AT),  // durable paths stale
+    })
+    const publishedDoc = {
+      schema_version: 1,
+      published_at: '2026-04-26T08:00:00Z',
+      resorts: [staleResort],
+      live_signals: [
+        {
+          schema_version: 1,
+          resort_slug: 'ischgl',
+          observed_at: FRESH_OBSERVED_AT,
+          fetched_at: FRESH_OBSERVED_AT,
+          field_sources: liveFieldSources(FRESH_OBSERVED_AT),  // live paths fresh
+        },
+      ],
+      manifest: { resort_count: 1, generated_by: 'test', validator_version: '0.0.0' },
+    }
+    await writeFile(
+      join(workspaceRoot, 'data', 'published', 'current.v1.json'),
+      JSON.stringify(publishedDoc),
+    )
+
+    const result = await healthHandler({ query: {} }, { workspaceRoot })
+
+    // The published-only resort has stale durable paths — should be counted.
+    expect(result.resorts_with_stale_fields).toBe(1)
+    expect(result.resorts_total).toBe(1)
+    expect(result.resorts_with_corrupt_workspace).toBe(0)
+    // All METRIC_FIELDS paths present in combined sources (durable + live) → no missing provenance.
+    expect(result.resorts_with_missing_provenance).toBe(0)
+  })
+
+  it('P1: published-only resort with missing field_sources entry → resorts_with_missing_provenance === 1', async (): Promise<void> => {
+    // Option C semantics: missing provenance is checked against combined sources
+    // (resort.field_sources + live_signal.field_sources). If no live_signal
+    // is present for the published-only resort, live paths are absent → counts as missing.
+    await mkdir(join(workspaceRoot, 'data', 'admin-workspace'), { recursive: true })
+    await mkdir(join(workspaceRoot, 'data', 'published'), { recursive: true })
+
+    // Resort with durable field_sources complete; NO live_signal in published doc.
+    // → combined sources missing all 5 live paths → hasMissingProvenance = true.
+    const publishedResort = makeResort('saalbach', durableFieldSources(FRESH_OBSERVED_AT))
+    const publishedDoc = {
+      schema_version: 1,
+      published_at: '2026-04-26T08:00:00Z',
+      resorts: [publishedResort],
+      live_signals: [],  // no live_signal → live paths absent in combined sources
+      manifest: { resort_count: 1, generated_by: 'test', validator_version: '0.0.0' },
+    }
+    await writeFile(
+      join(workspaceRoot, 'data', 'published', 'current.v1.json'),
+      JSON.stringify(publishedDoc),
+    )
+
+    const result = await healthHandler({ query: {} }, { workspaceRoot })
+
+    // Missing live-path provenance surfaces correctly for published-only resorts.
+    expect(result.resorts_with_missing_provenance).toBe(1)
+    expect(result.resorts_total).toBe(1)
+    expect(result.resorts_with_stale_fields).toBe(0)  // durable paths are fresh
+    expect(result.resorts_with_corrupt_workspace).toBe(0)
+  })
+
+  it('P1: mixed — 1 workspace stale + 1 published-only stale → resorts_with_stale_fields === 2', async (): Promise<void> => {
+    await mkdir(join(workspaceRoot, 'data', 'admin-workspace'), { recursive: true })
+    await mkdir(join(workspaceRoot, 'data', 'published'), { recursive: true })
+
+    // Workspace: one stale resort (live paths stale).
+    const workspaceResort = makeResort('kotelnica', durableFieldSources(FRESH_OBSERVED_AT))
+    await writeFile(
+      join(workspaceRoot, 'data', 'admin-workspace', 'kotelnica.json'),
+      makeWorkspaceFileJson('kotelnica', workspaceResort, liveFieldSources(STALE_OBSERVED_AT)),
+    )
+
+    // Published: workspace resort is also in the published doc (workspace takes
+    // precedence — it must NOT be double-counted) + one published-only stale resort.
+    const publishedWorkspaceResort = makeResort('kotelnica', durableFieldSources(FRESH_OBSERVED_AT))
+    const publishedOnlyResort = makeResort('livigno', durableFieldSources(STALE_OBSERVED_AT))
+    const publishedDoc = {
+      schema_version: 1,
+      published_at: '2026-04-26T08:00:00Z',
+      resorts: [publishedWorkspaceResort, publishedOnlyResort],
+      live_signals: [
+        {
+          schema_version: 1,
+          resort_slug: 'livigno',
+          observed_at: FRESH_OBSERVED_AT,
+          fetched_at: FRESH_OBSERVED_AT,
+          field_sources: liveFieldSources(FRESH_OBSERVED_AT),  // live paths fresh; durable stale
+        },
+      ],
+      manifest: { resort_count: 2, generated_by: 'test', validator_version: '0.0.0' },
+    }
+    await writeFile(
+      join(workspaceRoot, 'data', 'published', 'current.v1.json'),
+      JSON.stringify(publishedDoc),
+    )
+
+    const result = await healthHandler({ query: {} }, { workspaceRoot })
+
+    // Both the workspace resort (stale live paths) and the published-only resort
+    // (stale durable paths) contribute to the stale count.
+    expect(result.resorts_with_stale_fields).toBe(2)
+    // kotelnica (workspace) + livigno (published-only) = 2 total
+    expect(result.resorts_total).toBe(2)
+    expect(result.resorts_with_corrupt_workspace).toBe(0)
+  })
+
+  // ---------------------------------------------------------------------------
+  // P2 fix: malformed published JSON must degrade gracefully (not 500)
+  // ---------------------------------------------------------------------------
+
+  it('P2: malformed published JSON (parse failure) → last_published_at: null, archive_size_bytes: 0, resorts_total === workspace count', async (): Promise<void> => {
+    // Distinct from the existing "corrupt published doc" test which writes valid
+    // JSON with an invalid schema shape. This test writes syntactically invalid
+    // JSON → JSON.parse throws SyntaxError → must be treated as absent.
+    await mkdir(join(workspaceRoot, 'data', 'admin-workspace'), { recursive: true })
+    await mkdir(join(workspaceRoot, 'data', 'published'), { recursive: true })
+
+    const resort = makeResort('kotelnica', durableFieldSources(FRESH_OBSERVED_AT))
+    await writeFile(
+      join(workspaceRoot, 'data', 'admin-workspace', 'kotelnica.json'),
+      makeWorkspaceFileJson('kotelnica', resort, liveFieldSources(FRESH_OBSERVED_AT)),
+    )
+
+    // Syntactically invalid JSON — JSON.parse throws SyntaxError.
+    await writeFile(
+      join(workspaceRoot, 'data', 'published', 'current.v1.json'),
+      '{not_valid_json',
+    )
+
+    const result = await healthHandler({ query: {} }, { workspaceRoot })
+
+    // Malformed JSON ≡ absent: no published contribution.
+    expect(result.last_published_at).toBeNull()
+    expect(result.archive_size_bytes).toBe(0)
+    // Only workspace resort counted; no published-only resorts.
+    expect(result.resorts_total).toBe(1)
+    expect(result.resorts_with_corrupt_workspace).toBe(0)
+    expect(result.resorts_with_stale_fields).toBe(0)
+  })
 })

@@ -7,6 +7,7 @@ import {
   PublishedDataset,
   WorkspaceFile,
 } from '@snowboard-trip-advisor/schema'
+import type { ResortLiveSignal } from '@snowboard-trip-advisor/schema'
 import type { HealthQuery, HealthResponse } from '@snowboard-trip-advisor/schema/api'
 
 import type { HandlerDeps } from './listResorts'
@@ -72,6 +73,48 @@ export async function healthHandler(
     })
     if (hasStaleField) {
       staleCount++
+    }
+  }
+
+  // P1 fix (Codex fold): include published-only resorts in per-field aggregates.
+  // Option C: look up live_signals by resort slug so we can mirror the workspace
+  // loop's combined-field_sources approach exactly — same logic, same semantics.
+  if (publishedDoc) {
+    // Build a slug → live_signal index from the published doc for O(1) lookup.
+    const liveSignalBySlug = new Map<string, ResortLiveSignal>(
+      publishedDoc.live_signals.map((ls): [string, ResortLiveSignal] => [ls.resort_slug, ls]),
+    )
+
+    for (const r of publishedDoc.resorts) {
+      // Workspace takes precedence — already counted above.
+      if (workspaceSlugs.has(r.slug)) { continue }
+
+      // Mirror the workspace loop: combine resort.field_sources (durable paths)
+      // with the matching live_signal.field_sources (live paths) if present.
+      const liveSources = liveSignalBySlug.get(r.slug)?.field_sources ?? {}
+      const combinedSources = { ...r.field_sources, ...liveSources }
+
+      // Missing provenance: any METRIC_FIELDS path absent from combined sources.
+      const hasMissingProvenance = METRIC_FIELDS.some(
+        (p): boolean => !(p in combinedSources),
+      )
+      if (hasMissingProvenance) {
+        missingProvenanceCount++
+      }
+
+      // Stale fields: any METRIC_FIELDS path in combined sources whose
+      // observed_at is older than FRESHNESS_TTL_DAYS.default days.
+      const hasStaleField = METRIC_FIELDS.some((p): boolean => {
+        const fs = combinedSources[p]
+        if (fs === undefined) {
+          return false
+        }
+        const ageDays = (now - new Date(fs.observed_at).getTime()) / (24 * 60 * 60 * 1000)
+        return ageDays > FRESHNESS_TTL_DAYS.default
+      })
+      if (hasStaleField) {
+        staleCount++
+      }
     }
   }
 
@@ -142,14 +185,21 @@ async function readWorkspaceFilesOrEmpty(
 async function readPublishedDocOrNull(path: string): Promise<PublishedDataset | null> {
   try {
     const text = await readFile(path, 'utf-8')
-    const parsed = PublishedDataset.safeParse(JSON.parse(text) as unknown)
+    const data = JSON.parse(text) as unknown  // may throw SyntaxError on malformed JSON
+    const parsed = PublishedDataset.safeParse(data)
     return parsed.success ? parsed.data : null
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
       return null
     }
-    /* v8 ignore next -- non-ENOENT readFile errors (EACCES, etc.) are defensive rethrows;
-       testing them would require injecting OS-level permission failures in unit tests. */
+    // P2 fix (Codex fold): malformed JSON (SyntaxError from JSON.parse) is
+    // operationally equivalent to the file being absent per spec §10.9 — degrade
+    // gracefully: last_published_at: null, archive_size_bytes: 0.
+    if (err instanceof SyntaxError) {
+      return null
+    }
+    /* v8 ignore next -- non-ENOENT, non-SyntaxError errors (EACCES, etc.) are defensive
+       rethrows; testing them would require injecting OS-level permission failures. */
     throw err
   }
 }
