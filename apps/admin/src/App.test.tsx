@@ -15,20 +15,29 @@ describe('App (PR 4.1b §2.4 — Shell composition)', (): void => {
 
   it('renders Dashboard content inside <main> (default route = dashboard)', (): void => {
     // MSW default handler returns resorts_total: 0 → ColdStartEmptyState.
-    // The main landmark must contain Dashboard-rendered output (not the old placeholder).
+    // The main landmark must CONTAIN Dashboard-rendered output, not just exist.
+    // Dashboard's first paint is the loading skeleton (`aria-label="Loading
+    // dashboard"`); the post-resolve state is the cold-start empty state
+    // (`aria-label="No resorts yet"`). Either is valid evidence that App
+    // mounted Dashboard inside Shell rather than the removed placeholder.
     render(<App />)
     const main = screen.getByRole('main')
-    // Either loading skeleton or the cold-start empty state — both are
-    // Dashboard-rendered subtrees (not the removed DashboardPlaceholder).
-    expect(main).toBeInTheDocument()
+    const loading = screen.queryByLabelText(/loading dashboard/i)
+    const coldStart = screen.queryByLabelText(/no resorts yet/i)
+    expect(loading ?? coldStart).not.toBeNull()
+    expect(main).toContainElement(loading ?? coldStart)
   })
 
   it('renders Dashboard (cold-start empty state) when URL has ?route=dashboard', (): void => {
     window.history.replaceState({}, '', '/?route=dashboard')
     render(<App />)
-    // MSW cannedHealth: resorts_total = 0 → ColdStartEmptyState aria-label.
-    // Loading may not have resolved yet; the <main> landmark is present either way.
-    expect(screen.getByRole('main')).toBeInTheDocument()
+    // Same disambiguation as the default-route test: assert the Dashboard
+    // subtree is present inside <main>, not just that the landmark exists.
+    const main = screen.getByRole('main')
+    const loading = screen.queryByLabelText(/loading dashboard/i)
+    const coldStart = screen.queryByLabelText(/no resorts yet/i)
+    expect(loading ?? coldStart).not.toBeNull()
+    expect(main).toContainElement(loading ?? coldStart)
     window.history.replaceState({}, '', '/')
   })
 
