@@ -1,6 +1,6 @@
 # Epic 4 — Tier 2 (Navigation) Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use [`superpowers:subagent-driven-development`](../../../.claude/plugins/cache/claude-plugins-official/superpowers/) (recommended) or [`superpowers:executing-plans`](../../../.claude/plugins/cache/claude-plugins-official/superpowers/) to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal.** Wire the Dashboard view + Resorts table to real `/api/health` and `/api/resorts` handlers, with URL-state routing and the §10.9 cold-start empty states.
 
@@ -22,7 +22,7 @@
 
 **Architecture.** Two sequential atomic PRs, each with a single concern. PR 4.2 ships the Dashboard view + the real `GET /api/health` handler + the URL-state foundation (`apps/admin/src/lib/urlState.ts` initial route schema). PR 4.3 ships the Resorts table + the real `GET /api/resorts` handler + extends `urlState.ts` with the resorts-route filter params. The Tier 2 → Tier 3 gate (spec §7.4) is the boundary at which navigation is verified before editor work begins.
 
-**Tech stack.** TypeScript (strict, explicit return types repo-wide per `eslint.config.js:68`), React 19 (`use()` for Suspense in `useResortDetail` only — not useHealth / useResortList; see §0.5), Vitest + jest-axe (component a11y), MSW (canned + bridge tiers per spec §6.3), Zod v4 (request/response validation), workspace-relative file IO via Node `fs/promises`.
+**Tech stack.** TypeScript (strict, explicit return types repo-wide per `eslint.config.js:69`), React 19 (`use()` for Suspense in `useResortDetail` only — not useHealth / useResortList; see §0.5), Vitest + jest-axe (component a11y), MSW (canned + bridge tiers per spec §6.3), Zod v4 (request/response validation), workspace-relative file IO via Node `fs/promises`.
 
 ---
 
@@ -42,7 +42,7 @@ Branch names per spec §7.8 / §7.9: `epic-4/pr-4.2-dashboard`, `epic-4/pr-4.3-r
 - **DCO.** Every commit carries `Signed-off-by:` (`git commit -s` or the `prepare-commit-msg` hook auto-appends it; do not pass `--no-verify`).
 - **Pre-commit `npm run qa`** runs automatically. Hook failures are **fixed**, never bypassed.
 - **One commit per task** unless a task spans test + impl + commit naturally — then one commit per task is still the rule. If you discover a refactor mid-task, finish the task as planned and open a separate cleanup commit (or PR) for the refactor.
-- **Code snippets are illustrative.** Every code block in this plan is **a sketch**, not copy-paste-ready. The implementer is responsible for adding (a) explicit return-type annotations on every function (`@typescript-eslint/explicit-function-return-type` is `'error'` repo-wide — verified at `eslint.config.js:68`); (b) explicit `void` / `Promise<void>` returns on test bodies; (c) `?? defaultValue` instead of non-null assertions (`@typescript-eslint/no-non-null-assertion` is `'error'` per `eslint.config.js:74`); (d) consuming the existing design-system primitives (`<Button>`, `<Input>`, `<Sidebar>`, `<Table>`, etc.) instead of raw HTML elements in any `apps/**` file (`eslint.config.js:235-261` bans raw `<button>`, `<input>`, `<a>`, `<dialog>`, `<select>`, `<textarea>` in `apps/**`). Snippets that show raw `<button>` are illustrating SHAPE; the actual code consumes `<Button>` from `@snowboard-trip-advisor/design-system`.
+- **Code snippets are illustrative.** Every code block in this plan is **a sketch**, not copy-paste-ready. The implementer is responsible for adding (a) explicit return-type annotations on every function (`@typescript-eslint/explicit-function-return-type` is `'error'` repo-wide — verified at `eslint.config.js:69`); (b) explicit `void` / `Promise<void>` returns on test bodies; (c) `?? defaultValue` instead of non-null assertions (`@typescript-eslint/no-non-null-assertion` is `'error'` per `eslint.config.js:75`); (d) consuming the existing design-system primitives (`<Button>`, `<Input>`, `<Sidebar>`, `<Table>`, etc.) instead of raw HTML elements in any `apps/**` file (`eslint.config.js:236-262` bans raw `<button>`, `<input>`, `<a>`, `<dialog>`, `<select>`, `<textarea>` in `apps/**`). Snippets that show raw `<button>` are illustrating SHAPE; the actual code consumes `<Button>` from `@snowboard-trip-advisor/design-system`.
 
 ### 0.3 Per-PR discipline (after the last task lands)
 
@@ -66,7 +66,7 @@ If the implementer's diff incidentally touches `packages/schema/**`, `packages/s
 
 Spec §6.1 only mandates Suspense + React-19 `use()` for `useResortDetail` (Tier 3 PR 4.4a) — the line is *"useResortDetail(slug) — wraps apiClient.getResort(slug). Suspense-friendly via React 19 use() (same pattern as Epic 3's useDataset; same rejected-promise pinning per ADR-0010)."* The lines for `useHealth()` and `useResortList()` say only "wraps apiClient.X(...)", with no Suspense mandate.
 
-**Tier 2 picks `T | null + error` for both Tier-2 hooks.** Rationale, per [`ai-clean-code-adherence`](../../../.claude/skills/ai-clean-code-adherence/SKILL.md) §4 + the rubric's *"Three-state union → T | null"* row:
+**Tier 2 picks `T | null + error` for both Tier-2 hooks.** Rationale, per `ai-clean-code-adherence` §4 + the rubric's *"Three-state union → T | null"* row:
 
 - `useResortList` is URL-query-parameterized (filter / page change refetches). A module-level cached-promise pattern keyed by query-string adds invalidation complexity that the simpler `useState + useEffect` pattern avoids. Epic 3's `useDataset` is single-key (the dataset URL); admin's resort list is multi-key.
 - `useHealth` is read by Dashboard once per page-load + `<PublishDialog>` (Tier 4 PR 4.5b). Two consumers; refetch is a user action (page reload). The Suspense boundary doesn't pull weight here.
@@ -124,7 +124,7 @@ git commit -s -m "feat(admin): add useURLState hook + URL-state routing in App +
 
 ### 1.0 File inventory + per-file dependency declaration
 
-Per [`ai-clean-code-adherence`](../../../.claude/skills/ai-clean-code-adherence/SKILL.md) §5: every file declares its dependencies at the top of this plan, so the implementer doesn't have to re-derive them.
+Per `ai-clean-code-adherence` §5: every file declares its dependencies at the top of this plan, so the implementer doesn't have to re-derive them.
 
 **Implementation files (5):**
 
@@ -1096,7 +1096,7 @@ export async function listResortsHandler(
 // `no-console: 'error'` rule applies to `apps/admin/server/**` — see §1.2).
 ```
 
-**Note on shared read helpers.** The plan deliberately duplicates `readWorkspaceFilesOrEmpty` + `readPublishedDocOrNull` between `health.ts` (PR 4.2 §1.2) and `listResorts.ts` (PR 4.3 §2.1) per [`ai-clean-code-adherence`](../../../.claude/skills/ai-clean-code-adherence/SKILL.md) §3 (Restrained DRY): "duplicate freely until the duplication has burned you twice." PR 4.4a (resortDetail + workspace.ts read helpers) is the third caller — that's when we extract. Do NOT extract pre-emptively in PR 4.3.
+**Note on shared read helpers.** The plan deliberately duplicates `readWorkspaceFilesOrEmpty` + `readPublishedDocOrNull` between `health.ts` (PR 4.2 §1.2) and `listResorts.ts` (PR 4.3 §2.1) per `ai-clean-code-adherence` §3 (Restrained DRY): "duplicate freely until the duplication has burned you twice." PR 4.4a (resortDetail + workspace.ts read helpers) is the third caller — that's when we extract. Do NOT extract pre-emptively in PR 4.3.
 
 - [ ] **Step 4: Run tests to verify they pass.** Coverage 100%.
 
