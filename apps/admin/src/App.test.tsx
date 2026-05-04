@@ -31,4 +31,18 @@ describe('App (PR 4.1b §2.4 — Shell composition)', (): void => {
     expect(screen.getByRole('main')).toBeInTheDocument()
     window.history.replaceState({}, '', '/')
   })
+
+  it('renders ResortsTable when URL has ?route=resorts', (): void => {
+    window.history.replaceState({}, '', '/?route=resorts')
+    render(<App />)
+    // The resorts branch must mount ResortsTable (not Dashboard). The Dashboard
+    // skeleton's "Loading dashboard" aria-label being absent disambiguates the
+    // two — Dashboard would surface either that loading state or its
+    // health-metrics section. ResortsTable's own subtree carries the
+    // "Loading resorts" or "Resorts list" aria-label depending on resolve order.
+    expect(screen.getByRole('main')).toBeInTheDocument()
+    expect(screen.queryByLabelText(/loading dashboard/i)).toBeNull()
+    expect(screen.queryByLabelText(/health metrics/i)).toBeNull()
+    window.history.replaceState({}, '', '/')
+  })
 })
