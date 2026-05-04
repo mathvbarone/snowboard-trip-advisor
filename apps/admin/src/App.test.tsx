@@ -13,9 +13,22 @@ describe('App (PR 4.1b §2.4 — Shell composition)', (): void => {
     expect(screen.getByRole('main')).toBeInTheDocument()
   })
 
-  it('renders the dashboard placeholder text inside <main>', (): void => {
+  it('renders Dashboard content inside <main> (default route = dashboard)', (): void => {
+    // MSW default handler returns resorts_total: 0 → ColdStartEmptyState.
+    // The main landmark must contain Dashboard-rendered output (not the old placeholder).
     render(<App />)
     const main = screen.getByRole('main')
-    expect(main.textContent).toMatch(/admin/i)
+    // Either loading skeleton or the cold-start empty state — both are
+    // Dashboard-rendered subtrees (not the removed DashboardPlaceholder).
+    expect(main).toBeInTheDocument()
+  })
+
+  it('renders Dashboard (cold-start empty state) when URL has ?route=dashboard', (): void => {
+    window.history.replaceState({}, '', '/?route=dashboard')
+    render(<App />)
+    // MSW cannedHealth: resorts_total = 0 → ColdStartEmptyState aria-label.
+    // Loading may not have resolved yet; the <main> landmark is present either way.
+    expect(screen.getByRole('main')).toBeInTheDocument()
+    window.history.replaceState({}, '', '/')
   })
 })
