@@ -24,13 +24,16 @@ describe('dispatch (PR 4.1b §2.1, spec §10.1 + §7.6)', (): void => {
     await rm(workspaceRoot, { recursive: true, force: true })
   })
 
-  it('routes GET /api/resorts to listResortsHandler (501 stub in 4.1b)', async (): Promise<void> => {
+  it('routes GET /api/resorts to listResortsHandler (real handler — PR 4.3)', async (): Promise<void> => {
     const r = await dispatch(
       { method: 'GET', pathname: '/api/resorts', search: '', body: undefined },
       { workspaceRoot },
     )
-    expect(r?.status).toBe(501)
-    expect(r?.body).toMatchObject({ error: { code: 'not-implemented' } })
+    // Cold-start: empty tmpdir → handler returns the empty-list shape.
+    // Per-handler behavior is exercised in listResorts.test.ts; this test
+    // pins the dispatch wiring (route → handler → 200 envelope).
+    expect(r?.status).toBe(200)
+    expect(r?.body).toEqual({ items: [], page: { offset: 0, limit: 50, total: 0 } })
   })
 
   it('routes GET /api/resorts/:slug to resortDetailHandler with parsed slug', async (): Promise<void> => {
@@ -266,9 +269,9 @@ describe('dispatch (PR 4.1b §2.1, spec §10.1 + §7.6)', (): void => {
       // The crucial property: parseQueryString uses Object.create(null) for
       // its destination, so `result['__proto__'] = ...` sets an own property
       // (no prototype to pollute). Zod's z.object().parse(...) strips
-      // unknown keys; the request flows through to the stub handler which
-      // throws 'not-implemented' → 501. The status is incidental — the
-      // assertion is that Object.prototype is unchanged.
+      // unknown keys; the request flows through to the real listResorts
+      // handler. The response status is incidental — the assertion is
+      // that Object.prototype is unchanged.
       const before = Object.prototype.hasOwnProperty.call(Object.prototype, 'polluted')
       try {
         await dispatch(
@@ -504,8 +507,8 @@ describe('dispatch deps shape (compile-time pin)', (): void => {
   })
 })
 
-// File-level note: a workspace fixture (writeFile to root/data/admin-workspace/foo.json)
-// is not exercised in these dispatch tests — handlers are stubs and return 501 without
-// reading the workspace. The lazy-mkdir test confirms the dir exists; per-handler reads
-// land in PRs 4.2+ alongside their integration tests.
+// File-level note: per-handler workspace-fixture exercise lives in each
+// handler's own __tests__ file (health.test.ts, listResorts.test.ts, ...).
+// These dispatch tests cover wiring (route matching, query parsing,
+// envelope shapes, prototype-pollution defense) — not handler semantics.
 void writeFile
