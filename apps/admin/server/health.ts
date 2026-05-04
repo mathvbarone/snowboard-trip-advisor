@@ -3,7 +3,6 @@ import { join } from 'node:path'
 
 import {
   FRESHNESS_TTL_DAYS,
-  METRIC_FIELDS,
   PublishedDataset,
   WorkspaceFile,
 } from '@snowboard-trip-advisor/schema'
@@ -28,6 +27,35 @@ const LIVE_METRIC_FIELDS = [
   'lift_pass_day',
   'lodging_sample.median_eur',
 ] as const
+
+// File-local: the 7 durable resort attribute paths that always require a
+// field_sources entry unconditionally — durable values are required (non-optional)
+// in the Resort schema, so field_sources is always expected for these.
+// Mirrors validatePublishedDataset.ts semantics (§4.3.1).
+const DURABLE_METRIC_FIELDS = [
+  'altitude_m.min',
+  'altitude_m.max',
+  'slopes_km',
+  'lift_count',
+  'skiable_terrain_ha',
+  'season.start_month',
+  'season.end_month',
+] as const
+
+// Enumerate the live field_sources paths that are actually required for a given
+// live_signal. Mirrors validatePublishedDataset.ts:141-175 semantics: live
+// field_sources are only required when the corresponding value is populated.
+// A null live_signal → no live paths required.
+function populatedLivePaths(live: ResortLiveSignal | null): readonly string[] {
+  if (live === null) { return [] }
+  const paths: string[] = []
+  if (live.snow_depth_cm !== undefined) { paths.push('snow_depth_cm') }
+  if (live.lifts_open?.count !== undefined) { paths.push('lifts_open.count') }
+  if (live.lifts_open?.total !== undefined) { paths.push('lifts_open.total') }
+  if (live.lift_pass_day !== undefined) { paths.push('lift_pass_day') }
+  if (live.lodging_sample?.median_eur !== undefined) { paths.push('lodging_sample.median_eur') }
+  return paths
+}
 
 export interface HealthInput {
   readonly query: HealthQuery
@@ -64,15 +92,17 @@ export async function healthHandler(
     const wf = parseResult.data
     workspaceSlugs.add(wf.slug)
 
-    // Combined field_sources: resort (durable paths) + live_signal (live paths).
-    // METRIC_FIELDS spans both groups; provenance for a path may live in either.
-    const liveSources = wf.live_signal?.field_sources ?? {}
-    const combinedSources = { ...wf.resort.field_sources, ...liveSources }
-
-    // Missing provenance: any METRIC_FIELDS path absent from the combined sources.
-    const hasMissingProvenance = METRIC_FIELDS.some(
-      (p): boolean => !(p in combinedSources),
+    // Missing provenance: mirrors validatePublishedDataset.ts semantics.
+    // Durable paths are always required; live paths only when the value is populated.
+    const hasMissingDurableProvenance = DURABLE_METRIC_FIELDS.some(
+      (p): boolean => !(p in wf.resort.field_sources),
     )
+    const livePathsRequired = populatedLivePaths(wf.live_signal)
+    const liveSources = wf.live_signal?.field_sources ?? {}
+    const hasMissingLiveProvenance = livePathsRequired.some(
+      (p): boolean => !(p in liveSources),
+    )
+    const hasMissingProvenance = hasMissingDurableProvenance || hasMissingLiveProvenance
     if (hasMissingProvenance) {
       missingProvenanceCount++
     }
@@ -81,6 +111,7 @@ export async function healthHandler(
     // Durable resort attributes (slopes_km, season.*, etc.) return state: 'fresh'
     // unconditionally per loadResortDatasetFromObject.ts:83-99 — editorial review
     // is the Phase-2 stale-detection signal for those, not observed_at age.
+    const combinedSources = { ...wf.resort.field_sources, ...liveSources }
     const hasStaleField = LIVE_METRIC_FIELDS.some((p): boolean => {
       const fs = combinedSources[p]
       if (fs === undefined) {
@@ -107,15 +138,18 @@ export async function healthHandler(
       // Workspace takes precedence — already counted above.
       if (workspaceSlugs.has(r.slug)) { continue }
 
-      // Mirror the workspace loop: combine resort.field_sources (durable paths)
-      // with the matching live_signal.field_sources (live paths) if present.
-      const liveSources = liveSignalBySlug.get(r.slug)?.field_sources ?? {}
-      const combinedSources = { ...r.field_sources, ...liveSources }
-
-      // Missing provenance: any METRIC_FIELDS path absent from combined sources.
-      const hasMissingProvenance = METRIC_FIELDS.some(
-        (p): boolean => !(p in combinedSources),
+      // Mirror the workspace loop with the same durable/live split semantics.
+      // Durable paths always required; live paths only when the value is populated.
+      const liveSignal = liveSignalBySlug.get(r.slug) ?? null
+      const hasMissingDurableProvenance = DURABLE_METRIC_FIELDS.some(
+        (p): boolean => !(p in r.field_sources),
       )
+      const livePathsRequired = populatedLivePaths(liveSignal)
+      const liveSources = liveSignal?.field_sources ?? {}
+      const hasMissingLiveProvenance = livePathsRequired.some(
+        (p): boolean => !(p in liveSources),
+      )
+      const hasMissingProvenance = hasMissingDurableProvenance || hasMissingLiveProvenance
       if (hasMissingProvenance) {
         missingProvenanceCount++
       }
@@ -124,6 +158,7 @@ export async function healthHandler(
       // Durable resort attributes (slopes_km, season.*, etc.) return state: 'fresh'
       // unconditionally per loadResortDatasetFromObject.ts:83-99 — editorial review
       // is the Phase-2 stale-detection signal for those, not observed_at age.
+      const combinedSources = { ...r.field_sources, ...liveSources }
       const hasStaleField = LIVE_METRIC_FIELDS.some((p): boolean => {
         const fs = combinedSources[p]
         if (fs === undefined) {

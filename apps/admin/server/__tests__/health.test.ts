@@ -163,22 +163,17 @@ describe('healthHandler (PR 4.2)', (): void => {
     expect(result.pending_integration_errors).toBe(0)
   })
 
-  it('missing-provenance: workspace file lacks field_sources entry → resorts_with_missing_provenance === 1', async (): Promise<void> => {
+  it('missing-provenance: workspace file lacks durable field_sources entry → resorts_with_missing_provenance === 1', async (): Promise<void> => {
     await mkdir(join(workspaceRoot, 'data', 'admin-workspace'), { recursive: true })
 
-    // Fixture: resort.field_sources omits slopes_km; live_signal is null
-    // (so live_signal.field_sources is also empty). Combined missing paths:
-    // slopes_km (durable) + snow_depth_cm + lifts_open.count + lifts_open.total
-    // + lift_pass_day + lodging_sample.median_eur (5 live) = 6 missing total.
-    // resorts_with_missing_provenance counts RESORTS with ≥1 missing path,
-    // not paths — so the assertion is === 1 (one resort with missing
-    // provenance), not === 6.
-    // Also exercises the wf.live_signal?.field_sources ?? {} null-branch on
-    // health.ts: live_signal is null → combined sources = resort.field_sources only.
+    // Fixture: resort.field_sources omits slopes_km (durable path); live_signal is null
+    // (no live values populated → no live paths required per round-4 fix).
+    // Only the durable-path miss matters → hasMissingDurableProvenance = true.
+    // Exercises the DURABLE_METRIC_FIELDS check and the null live_signal branch.
     const incompleteFieldSources: Record<string, ReturnType<typeof makeFieldSource>> = {
       'altitude_m.min': makeFieldSource(FRESH_OBSERVED_AT),
       'altitude_m.max': makeFieldSource(FRESH_OBSERVED_AT),
-      // 'slopes_km' intentionally omitted → triggers missing-provenance
+      // 'slopes_km' intentionally omitted → triggers durable missing-provenance
       'lift_count': makeFieldSource(FRESH_OBSERVED_AT),
       'skiable_terrain_ha': makeFieldSource(FRESH_OBSERVED_AT),
       'season.start_month': makeFieldSource(FRESH_OBSERVED_AT),
@@ -188,7 +183,7 @@ describe('healthHandler (PR 4.2)', (): void => {
     const resort = makeResort('spindl', incompleteFieldSources)
     await writeFile(
       join(workspaceRoot, 'data', 'admin-workspace', 'spindl.json'),
-      // null live_signal → combined = resort.field_sources only; missing slopes_km + all live paths
+      // null live_signal → no live values populated → no live paths required
       makeWorkspaceFileJson('spindl', resort, null),
     )
 
@@ -198,6 +193,75 @@ describe('healthHandler (PR 4.2)', (): void => {
     expect(result.resorts_with_corrupt_workspace).toBe(0)
     expect(result.resorts_total).toBe(1)
     expect(result.last_published_at).toBeNull()
+  })
+
+  it('round-4 fix: null live_signal + complete durable field_sources → resorts_with_missing_provenance === 0', async (): Promise<void> => {
+    // Pins the fix: a null live_signal means no live values are populated,
+    // so no live field_sources are required. Only durable paths matter.
+    // Before the fix, all 5 live paths would be flagged as missing → count=1.
+    // After the fix, null live_signal → 0 live paths required → count=0.
+    await mkdir(join(workspaceRoot, 'data', 'admin-workspace'), { recursive: true })
+
+    const resort = makeResort('complete-durable', durableFieldSources(FRESH_OBSERVED_AT))
+    await writeFile(
+      join(workspaceRoot, 'data', 'admin-workspace', 'complete-durable.json'),
+      // null live_signal → no live values → no live field_sources required
+      makeWorkspaceFileJson('complete-durable', resort, null),
+    )
+
+    const result = await healthHandler({ query: {} }, { workspaceRoot })
+
+    // All durable paths present; no live values populated → no missing provenance.
+    expect(result.resorts_with_missing_provenance).toBe(0)
+    expect(result.resorts_with_corrupt_workspace).toBe(0)
+    expect(result.resorts_total).toBe(1)
+  })
+
+  it('round-4 fix: populated live_signal value without matching field_sources entry → resorts_with_missing_provenance === 1', async (): Promise<void> => {
+    // Pins the conditional-live-path requirement: when a live value is set,
+    // its field_sources entry is required. Here all 5 live values are populated
+    // (exercises all branches of populatedLivePaths) but lift_pass_day is absent
+    // from field_sources → hasMissingLiveProvenance.
+    await mkdir(join(workspaceRoot, 'data', 'admin-workspace'), { recursive: true })
+
+    const resort = makeResort('missing-live-source', durableFieldSources(FRESH_OBSERVED_AT))
+    // Build a live_signal with ALL live values set to exercise all populatedLivePaths
+    // branches, but lift_pass_day missing from field_sources.
+    const liveSignalWithMissingSource = {
+      schema_version: 1,
+      resort_slug: 'missing-live-source',
+      observed_at: FRESH_OBSERVED_AT,
+      fetched_at: FRESH_OBSERVED_AT,
+      snow_depth_cm: 50,                     // populates 'snow_depth_cm' path
+      lifts_open: { count: 8, total: 12 },   // populates 'lifts_open.count' and 'lifts_open.total'
+      lift_pass_day: { amount: 60, currency: 'EUR' },  // populates 'lift_pass_day' — field_sources entry ABSENT below
+      lodging_sample: { median_eur: { amount: 120, currency: 'EUR' }, sample_size: 5 }, // populates 'lodging_sample.median_eur'
+      field_sources: {
+        'snow_depth_cm': makeFieldSource(FRESH_OBSERVED_AT),
+        'lifts_open.count': makeFieldSource(FRESH_OBSERVED_AT),
+        'lifts_open.total': makeFieldSource(FRESH_OBSERVED_AT),
+        // 'lift_pass_day' intentionally absent → triggers hasMissingLiveProvenance
+        'lodging_sample.median_eur': makeFieldSource(FRESH_OBSERVED_AT),
+      },
+    }
+    const wfJson = JSON.stringify({
+      schema_version: 1,
+      slug: 'missing-live-source',
+      resort,
+      live_signal: liveSignalWithMissingSource,
+      modified_at: FRESH_OBSERVED_AT,
+    })
+    await writeFile(
+      join(workspaceRoot, 'data', 'admin-workspace', 'missing-live-source.json'),
+      wfJson,
+    )
+
+    const result = await healthHandler({ query: {} }, { workspaceRoot })
+
+    // lift_pass_day is populated but missing from field_sources → counted.
+    expect(result.resorts_with_missing_provenance).toBe(1)
+    expect(result.resorts_with_corrupt_workspace).toBe(0)
+    expect(result.resorts_total).toBe(1)
   })
 
   it('corrupt-workspace (P0-4): truncated/invalid JSON file → resorts_with_corrupt_workspace === 1, healthy slugs still aggregate', async (): Promise<void> => {
@@ -375,21 +439,30 @@ describe('healthHandler (PR 4.2)', (): void => {
     expect(result.resorts_with_missing_provenance).toBe(0)
   })
 
-  it('P1: published-only resort with missing field_sources entry → resorts_with_missing_provenance === 1', async (): Promise<void> => {
-    // Option C semantics: missing provenance is checked against combined sources
-    // (resort.field_sources + live_signal.field_sources). If no live_signal
-    // is present for the published-only resort, live paths are absent → counts as missing.
+  it('P1: published-only resort with missing durable field_sources entry → resorts_with_missing_provenance === 1', async (): Promise<void> => {
+    // After the round-4 fix, missing provenance for published-only resorts requires
+    // a durable-path miss (live paths are only required when values are populated).
+    // Resort omits slopes_km from field_sources; no live_signal → no live paths required.
+    // → hasMissingDurableProvenance fires → count === 1.
     await mkdir(join(workspaceRoot, 'data', 'admin-workspace'), { recursive: true })
     await mkdir(join(workspaceRoot, 'data', 'published'), { recursive: true })
 
-    // Resort with durable field_sources complete; NO live_signal in published doc.
-    // → combined sources missing all 5 live paths → hasMissingProvenance = true.
-    const publishedResort = makeResort('saalbach', durableFieldSources(FRESH_OBSERVED_AT))
+    // Resort with slopes_km OMITTED from durable field_sources.
+    const incompleteFieldSources: Record<string, ReturnType<typeof makeFieldSource>> = {
+      'altitude_m.min': makeFieldSource(FRESH_OBSERVED_AT),
+      'altitude_m.max': makeFieldSource(FRESH_OBSERVED_AT),
+      // 'slopes_km' intentionally omitted → triggers durable missing-provenance
+      'lift_count': makeFieldSource(FRESH_OBSERVED_AT),
+      'skiable_terrain_ha': makeFieldSource(FRESH_OBSERVED_AT),
+      'season.start_month': makeFieldSource(FRESH_OBSERVED_AT),
+      'season.end_month': makeFieldSource(FRESH_OBSERVED_AT),
+    }
+    const publishedResort = makeResort('saalbach', incompleteFieldSources)
     const publishedDoc = {
       schema_version: 1,
       published_at: '2026-04-26T08:00:00Z',
       resorts: [publishedResort],
-      live_signals: [],  // no live_signal → live paths absent in combined sources
+      live_signals: [],  // no live_signal → no live values → no live paths required
       manifest: { resort_count: 1, generated_by: 'test', validator_version: '0.0.0' },
     }
     await writeFile(
@@ -399,10 +472,51 @@ describe('healthHandler (PR 4.2)', (): void => {
 
     const result = await healthHandler({ query: {} }, { workspaceRoot })
 
-    // Missing live-path provenance surfaces correctly for published-only resorts.
+    // Missing durable-path provenance surfaces correctly for published-only resorts.
     expect(result.resorts_with_missing_provenance).toBe(1)
     expect(result.resorts_total).toBe(1)
-    expect(result.resorts_with_stale_fields).toBe(0)  // durable paths are fresh
+    expect(result.resorts_with_stale_fields).toBe(0)
+    expect(result.resorts_with_corrupt_workspace).toBe(0)
+  })
+
+  it('round-4 fix: published-only resort with populated live value but missing live field_sources → resorts_with_missing_provenance === 1', async (): Promise<void> => {
+    // Pins the conditional-live-path requirement for the published-only loop.
+    // A published resort with complete durable field_sources and a live_signal
+    // that has snow_depth_cm populated but NO field_sources entry for it
+    // → hasMissingLiveProvenance fires in the published-only branch → count=1.
+    await mkdir(join(workspaceRoot, 'data', 'admin-workspace'), { recursive: true })
+    await mkdir(join(workspaceRoot, 'data', 'published'), { recursive: true })
+
+    const publishedResort = makeResort('davos', durableFieldSources(FRESH_OBSERVED_AT))
+    const publishedDoc = {
+      schema_version: 1,
+      published_at: '2026-04-26T08:00:00Z',
+      resorts: [publishedResort],
+      live_signals: [
+        {
+          schema_version: 1,
+          resort_slug: 'davos',
+          observed_at: FRESH_OBSERVED_AT,
+          fetched_at: FRESH_OBSERVED_AT,
+          snow_depth_cm: 80,  // value populated → field_sources entry required
+          field_sources: {
+            // snow_depth_cm intentionally absent → triggers hasMissingLiveProvenance
+          },
+        },
+      ],
+      manifest: { resort_count: 1, generated_by: 'test', validator_version: '0.0.0' },
+    }
+    await writeFile(
+      join(workspaceRoot, 'data', 'published', 'current.v1.json'),
+      JSON.stringify(publishedDoc),
+    )
+
+    const result = await healthHandler({ query: {} }, { workspaceRoot })
+
+    // Live path populated but field_sources entry absent → counted.
+    expect(result.resorts_with_missing_provenance).toBe(1)
+    expect(result.resorts_total).toBe(1)
+    expect(result.resorts_with_stale_fields).toBe(0)  // snow_depth_cm has no field_sources → not checked for staleness
     expect(result.resorts_with_corrupt_workspace).toBe(0)
   })
 
