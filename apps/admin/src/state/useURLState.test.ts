@@ -1,3 +1,4 @@
+import { ISOCountryCode, ResortSlug } from '@snowboard-trip-advisor/schema'
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -72,5 +73,31 @@ describe('useURLState (PR 4.2)', (): void => {
     window.history.replaceState({}, '', '/')
     const { result: r2 } = renderHook(() => useURLState())
     expect(r2.current).toEqual({ route: 'dashboard' })
+  })
+
+  it('setRoute pushes serializeURL output to the URL bar (resorts + country)', (): void => {
+    const { result } = renderHook(() => useURLState())
+    act((): void => {
+      setRoute({ route: 'resorts', country: ISOCountryCode.parse('PL') })
+    })
+    // The URL bar must reflect the search so deep links + reload preserve state.
+    expect(window.location.search).toBe('?route=resorts&country=PL')
+    // Subscribers re-derive against the new URL via the cache invalidation.
+    expect(result.current).toEqual({
+      route: 'resorts',
+      country: ISOCountryCode.parse('PL'),
+    })
+  })
+
+  it('setRoute pushes editor route + slug to the URL bar', (): void => {
+    const { result } = renderHook(() => useURLState())
+    act((): void => {
+      setRoute({ route: 'editor', slug: ResortSlug.parse('kotelnica-bialczanska') })
+    })
+    expect(window.location.search).toBe('?route=editor&slug=kotelnica-bialczanska')
+    expect(result.current).toEqual({
+      route: 'editor',
+      slug: ResortSlug.parse('kotelnica-bialczanska'),
+    })
   })
 })
