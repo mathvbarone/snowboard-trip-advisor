@@ -109,6 +109,10 @@ export async function listResortsHandler(
   // (workspace first, then published) — deterministic for tests + UI.
   const all = Array.from(summariesBySlug.values())
   const filtered = applyFilter(all, input.query.filter)
+  // Defaults: when query.page is undefined we fall back here. When it's
+  // present, Zod's .default(0) / .default(50) on the schema fields ensures
+  // offset / limit are populated, so the ?? right-hand operand is unreached
+  // at runtime — kept for the page-absent branch only.
   const offset = input.query.page?.offset ?? 0
   const limit = input.query.page?.limit ?? 50
   const items = filtered.slice(offset, offset + limit)
@@ -210,7 +214,11 @@ async function readWorkspaceFilesOrEmpty(
     return out
   } catch (err) {
     /* v8 ignore next 3 -- non-ENOENT readdir errors (EACCES, etc.) are defensive rethrows;
-       testing them would require injecting OS-level permission failures in unit tests. */
+       testing them would require injecting OS-level permission failures in unit tests. The
+       inverted predicate (vs health.ts's `=== 'ENOENT' return; throw`) is intentional: it
+       lets a single positional `v8 ignore next 3` cover both the predicate's false-branch
+       and the rethrow, keeping the file at 100% branch coverage. PR 4.4a's extraction can
+       reconcile the two styles into one canonical helper. */
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
       throw err
     }
