@@ -1,4 +1,4 @@
-import type { JSX, ReactNode } from 'react'
+import type { JSX, KeyboardEvent, ReactNode } from 'react'
 
 import './Table.css'
 
@@ -45,6 +45,18 @@ export interface TableProps {
    */
   rowHeaderLabel?: string
   'aria-describedby'?: string
+  /**
+   * When set, each <tr> in <tbody> becomes clickable: clicking the row
+   * (mouse) or pressing Enter / Space while the row is focused (keyboard)
+   * calls `onRowSelect(row.key)`. The row gets `role="button"`,
+   * `tabIndex={0}`, and `data-clickable="true"` (which Table.css targets
+   * for cursor + focus-visible affordance).
+   *
+   * When undefined (default), no click affordance is added — the matrix
+   * view's existing <tr> shape is preserved exactly. This is the
+   * backwards-compat contract pinned by Table.test.tsx.
+   */
+  onRowSelect?: (rowKey: string) => void
 }
 
 export function Table({
@@ -53,6 +65,7 @@ export function Table({
   rows,
   rowHeaderLabel = 'Row',
   'aria-describedby': ariaDescribedBy,
+  onRowSelect,
 }: TableProps): JSX.Element {
   // Raw <table> is allowed in design-system (the apps/** ESLint ban does
   // not apply here); this is the canonical wrapper that apps/** consume.
@@ -81,33 +94,64 @@ export function Table({
         </tr>
       </thead>
       <tbody>
-        {rows.map((row): JSX.Element => (
-          <tr key={row.key}>
-            <th
-              scope="row"
-              data-highlighted={row.highlighted === true ? 'true' : undefined}
-            >
-              {row.header}
-            </th>
-            {row.cells.map((cell, idx): JSX.Element => {
-              const colHighlighted = columns[idx]?.highlighted === true
-              const rowHighlighted = row.highlighted === true
-              const highlighted = colHighlighted || rowHighlighted
-              return (
-                <td
-                  // Cells are positional; the column index is the only stable
-                  // identity inside a row. Pairing it with the row key keeps
-                  // the React key globally unique without inventing a synthetic
-                  // id on the consumer side.
-                  key={`${row.key}:${String(idx)}`}
-                  data-highlighted={highlighted ? 'true' : undefined}
-                >
-                  {cell}
-                </td>
-              )
-            })}
-          </tr>
-        ))}
+        {rows.map((row): JSX.Element => {
+          // Conditional spread (not `role={undefined}` etc) is required by
+          // `exactOptionalPropertyTypes: true`. When `onRowSelect` is omitted
+          // the spread evaluates to `{}` and the rendered <tr> is byte-
+          // identical to the pre-PR-4.3 shape — backwards-compat contract
+          // pinned by Table.test.tsx. The local type annotation is
+          // intentionally inline-shaped (not React's HTMLAttributes) so
+          // the `data-clickable` attribute typechecks — React only allows
+          // arbitrary `data-*` props at the JSX call-site, not on the
+          // HTMLAttributes interface.
+          const clickableProps =
+            onRowSelect !== undefined
+              ? {
+                  role: 'button' as const,
+                  tabIndex: 0,
+                  'data-clickable': 'true',
+                  onClick: (): void => {
+                    onRowSelect(row.key)
+                  },
+                  onKeyDown: (event: KeyboardEvent<HTMLTableRowElement>): void => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      // Space scrolls the page by default on focused
+                      // non-form elements; preventDefault keeps the row's
+                      // button-as-row contract clean.
+                      event.preventDefault()
+                      onRowSelect(row.key)
+                    }
+                  },
+                }
+              : {}
+          return (
+            <tr key={row.key} {...clickableProps}>
+              <th
+                scope="row"
+                data-highlighted={row.highlighted === true ? 'true' : undefined}
+              >
+                {row.header}
+              </th>
+              {row.cells.map((cell, idx): JSX.Element => {
+                const colHighlighted = columns[idx]?.highlighted === true
+                const rowHighlighted = row.highlighted === true
+                const highlighted = colHighlighted || rowHighlighted
+                return (
+                  <td
+                    // Cells are positional; the column index is the only stable
+                    // identity inside a row. Pairing it with the row key keeps
+                    // the React key globally unique without inventing a synthetic
+                    // id on the consumer side.
+                    key={`${row.key}:${String(idx)}`}
+                    data-highlighted={highlighted ? 'true' : undefined}
+                  >
+                    {cell}
+                  </td>
+                )
+              })}
+            </tr>
+          )
+        })}
       </tbody>
     </table>
   )

@@ -21,4 +21,20 @@ describe('Table.css', (): void => {
   it('pins the sticky head cells to top: 0', (): void => {
     expect(source).toContain('top: 0')
   })
+
+  // Clickable-row affordance (PR 4.3) — the Table primitive opts into
+  // whole-row click navigation via `onRowSelect`, which marks each
+  // <tbody> tr with `data-clickable="true"`. JSDOM cannot compute
+  // pseudo-class styles either (`:focus-visible`), so this layer pins
+  // text-presence; full visual verification lands with Epic 6 Playwright.
+
+  it('declares cursor: pointer for clickable tbody rows', (): void => {
+    expect(source).toContain('tbody tr[data-clickable="true"]')
+    expect(source).toContain('cursor: pointer')
+  })
+
+  it('declares a focus-visible outline rule for clickable tbody rows', (): void => {
+    expect(source).toContain('tbody tr[data-clickable="true"]:focus-visible')
+    expect(source).toContain('outline:')
+  })
 })

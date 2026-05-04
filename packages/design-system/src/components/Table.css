@@ -11,3 +11,23 @@
   position: sticky;
   top: 0;
 }
+
+/* Clickable-row affordance (PR 4.3). Opt-in via the Table primitive's
+ * `onRowSelect` prop, which sets `data-clickable="true"` on each <tbody>
+ * <tr>. Styling concern is a CSS hook so the JSX semantics stay clean.
+ *
+ * Focus ring uses `--color-accent` because tokens.ts does not (yet) ship
+ * a dedicated `--color-focus-ring`; introducing a new token here would
+ * trigger the AGENTS.md L252 `visual:approve` label. The accent colour is
+ * the conventional focus-indicator choice and lands the same affordance
+ * the dedicated token would. Promote to a real focus-ring token when the
+ * next design pass adds one.
+ */
+.sta-table tbody tr[data-clickable="true"] {
+  cursor: pointer;
+}
+
+.sta-table tbody tr[data-clickable="true"]:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}

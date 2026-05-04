@@ -1,6 +1,7 @@
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { axe } from 'jest-axe'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { Table, type TableProps } from './Table'
 
@@ -244,5 +245,148 @@ describe('Table', (): void => {
       />,
     )
     expect(await axe(container)).toHaveNoViolations()
+  })
+
+  // ─── onRowSelect: clickable-row affordance (PR 4.3) ────────────────────
+  // Whole-row click navigation is what the ResortsTable view (Task 2.4)
+  // depends on. The contract: when `onRowSelect` is omitted the matrix
+  // view's existing <tr> shape is preserved exactly (no role, no
+  // tabIndex, no data-clickable); when it IS provided each <tbody> row
+  // becomes a button-as-row (keyboard + mouse activation, axe-clean).
+
+  describe('onRowSelect (clickable rows)', (): void => {
+    it('does NOT add role/tabIndex/data-clickable to tbody rows when onRowSelect is undefined', (): void => {
+      const { container } = render(
+        <Table caption="Resort comparison" columns={COLUMNS} rows={ROWS} />,
+      )
+      const bodyRows = container.querySelectorAll('tbody tr')
+      expect(bodyRows).toHaveLength(2)
+      for (const row of bodyRows) {
+        expect(row).not.toHaveAttribute('role')
+        expect(row).not.toHaveAttribute('tabindex')
+        expect(row).not.toHaveAttribute('data-clickable')
+      }
+    })
+
+    it('marks every tbody row as a button-as-row when onRowSelect is provided', (): void => {
+      const { container } = render(
+        <Table
+          caption="Resort comparison"
+          columns={COLUMNS}
+          rows={ROWS}
+          onRowSelect={(): void => undefined}
+        />,
+      )
+      const bodyRows = container.querySelectorAll('tbody tr')
+      expect(bodyRows).toHaveLength(2)
+      for (const row of bodyRows) {
+        expect(row).toHaveAttribute('role', 'button')
+        expect(row).toHaveAttribute('tabindex', '0')
+        expect(row).toHaveAttribute('data-clickable', 'true')
+      }
+    })
+
+    it('calls onRowSelect with row.key when the row is clicked', async (): Promise<void> => {
+      const onRowSelect = vi.fn()
+      const user = userEvent.setup()
+      const { container } = render(
+        <Table
+          caption="Resort comparison"
+          columns={COLUMNS}
+          rows={ROWS}
+          onRowSelect={onRowSelect}
+        />,
+      )
+      const bodyRows = container.querySelectorAll('tbody tr')
+      const firstRow = bodyRows[0]
+      expect(firstRow).not.toBeUndefined()
+      await user.click(firstRow as HTMLElement)
+      expect(onRowSelect).toHaveBeenCalledTimes(1)
+      expect(onRowSelect).toHaveBeenCalledWith('altitude_m')
+    })
+
+    it('calls onRowSelect with row.key when Enter is pressed on the focused row', async (): Promise<void> => {
+      const onRowSelect = vi.fn()
+      const user = userEvent.setup()
+      const { container } = render(
+        <Table
+          caption="Resort comparison"
+          columns={COLUMNS}
+          rows={ROWS}
+          onRowSelect={onRowSelect}
+        />,
+      )
+      const secondRow = container.querySelectorAll('tbody tr')[1] as HTMLElement
+      secondRow.focus()
+      await user.keyboard('{Enter}')
+      expect(onRowSelect).toHaveBeenCalledTimes(1)
+      expect(onRowSelect).toHaveBeenCalledWith('snow_depth_cm')
+    })
+
+    it('calls onRowSelect with row.key when Space is pressed on the focused row', (): void => {
+      const onRowSelect = vi.fn()
+      const { container } = render(
+        <Table
+          caption="Resort comparison"
+          columns={COLUMNS}
+          rows={ROWS}
+          onRowSelect={onRowSelect}
+        />,
+      )
+      const firstRow = container.querySelectorAll('tbody tr')[0] as HTMLElement
+      // fireEvent (not user.keyboard) is intentional here: userEvent's
+      // {' '} key on a non-button element doesn't synthesise the same
+      // keydown sequence we explicitly handle, and we want to pin the
+      // raw keydown contract directly.
+      fireEvent.keyDown(firstRow, { key: ' ' })
+      expect(onRowSelect).toHaveBeenCalledTimes(1)
+      expect(onRowSelect).toHaveBeenCalledWith('altitude_m')
+    })
+
+    it('preventDefault on Space keypress (avoids page-scroll side-effect)', (): void => {
+      const onRowSelect = vi.fn()
+      const { container } = render(
+        <Table
+          caption="Resort comparison"
+          columns={COLUMNS}
+          rows={ROWS}
+          onRowSelect={onRowSelect}
+        />,
+      )
+      const firstRow = container.querySelectorAll('tbody tr')[0] as HTMLElement
+      // fireEvent returns false when the event was cancelled
+      // (preventDefault was called); true otherwise. Pin the cancelled
+      // path so a regression that drops preventDefault is caught.
+      const wasNotCancelled = fireEvent.keyDown(firstRow, { key: ' ' })
+      expect(wasNotCancelled).toBe(false)
+    })
+
+    it('does not call onRowSelect on unrelated keys (e.g. Tab, ArrowDown)', (): void => {
+      const onRowSelect = vi.fn()
+      const { container } = render(
+        <Table
+          caption="Resort comparison"
+          columns={COLUMNS}
+          rows={ROWS}
+          onRowSelect={onRowSelect}
+        />,
+      )
+      const firstRow = container.querySelectorAll('tbody tr')[0] as HTMLElement
+      fireEvent.keyDown(firstRow, { key: 'Tab' })
+      fireEvent.keyDown(firstRow, { key: 'ArrowDown' })
+      expect(onRowSelect).not.toHaveBeenCalled()
+    })
+
+    it('is axe-clean with onRowSelect (clickable rows)', async (): Promise<void> => {
+      const { container } = render(
+        <Table
+          caption="Resort comparison"
+          columns={COLUMNS}
+          rows={ROWS}
+          onRowSelect={(): void => undefined}
+        />,
+      )
+      expect(await axe(container)).toHaveNoViolations()
+    })
   })
 })
