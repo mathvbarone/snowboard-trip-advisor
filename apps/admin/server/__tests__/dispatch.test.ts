@@ -116,12 +116,12 @@ describe('dispatch (PR 4.1b §2.1, spec §10.1 + §7.6)', (): void => {
     expect(r?.status).toBe(400)
   })
 
-  it('routes GET /api/health to healthHandler (501 stub)', async (): Promise<void> => {
+  it('routes GET /api/health to healthHandler (real impl since PR 4.2)', async (): Promise<void> => {
     const r = await dispatch(
       { method: 'GET', pathname: '/api/health', search: '', body: undefined },
       { workspaceRoot },
     )
-    expect(r?.status).toBe(501)
+    expect(r?.status).toBe(200)
   })
 
   it('routes GET /api/publishes to listPublishesHandler (501 stub)', async (): Promise<void> => {
