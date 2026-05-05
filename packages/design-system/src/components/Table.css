@@ -12,22 +12,40 @@
   top: 0;
 }
 
-/* Clickable-row affordance (PR 4.3). Opt-in via the Table primitive's
- * `onRowSelect` prop, which sets `data-clickable="true"` on each <tbody>
- * <tr>. Styling concern is a CSS hook so the JSX semantics stay clean.
+/* Clickable-row affordance (PR 4.3, post-Codex-P1 fix). Opt-in via the
+ * Table primitive's `onRowSelect` prop, which sets `data-clickable="true"`
+ * on each <tbody> <tr> and renders the row-header content inside a
+ * `<button class="sta-table__row-button">` for keyboard activation. The
+ * <tr> keeps its native row semantics (no role override); cursor:pointer
+ * + the button's native focus ring carry the visual affordance.
+ *
+ * The row-button is styled minimally — appearance:none + transparent
+ * background so the row reads as a labeled cell, not as a chrome button —
+ * and inherits the row-header's typography. The native focus ring stays
+ * for keyboard users; sighted mouse users get cursor:pointer on the row.
  *
  * Focus ring uses `--color-accent` because tokens.ts does not (yet) ship
  * a dedicated `--color-focus-ring`; introducing a new token here would
- * trigger the AGENTS.md L252 `visual:approve` label. The accent colour is
- * the conventional focus-indicator choice and lands the same affordance
- * the dedicated token would. Promote to a real focus-ring token when the
- * next design pass adds one.
+ * trigger the AGENTS.md L252 `visual:approve` label. Promote to a real
+ * focus-ring token when the next design pass adds one.
  */
 .sta-table tbody tr[data-clickable="true"] {
   cursor: pointer;
 }
 
-.sta-table tbody tr[data-clickable="true"]:focus-visible {
+.sta-table__row-button {
+  appearance: none;
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: inherit;
+  cursor: pointer;
+}
+
+.sta-table__row-button:focus-visible {
   outline: 2px solid var(--color-accent);
-  outline-offset: -2px;
+  outline-offset: 2px;
 }

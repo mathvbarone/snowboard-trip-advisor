@@ -1,4 +1,4 @@
-import type { JSX, KeyboardEvent, ReactNode } from 'react'
+import type { JSX, ReactNode } from 'react'
 
 import './Table.css'
 
@@ -46,11 +46,13 @@ export interface TableProps {
   rowHeaderLabel?: string
   'aria-describedby'?: string
   /**
-   * When set, each <tr> in <tbody> becomes clickable: clicking the row
-   * (mouse) or pressing Enter / Space while the row is focused (keyboard)
-   * calls `onRowSelect(row.key)`. The row gets `role="button"`,
-   * `tabIndex={0}`, and `data-clickable="true"` (which Table.css targets
-   * for cursor + focus-visible affordance).
+   * When set, each <tr> in <tbody> becomes interactive. The <tr> keeps its
+   * native row semantics (no role override) — `role="button"` on a <tr>
+   * conflicts with assistive-tech row/table navigation. Instead, the row's
+   * leftmost cell (<th scope="row">) wraps `row.header` in a <button> that
+   * is the keyboard activation target (Tab → Enter/Space). Clicking the
+   * button or anywhere else on the row triggers `onRowSelect(row.key)`;
+   * `data-clickable="true"` on the <tr> drives cursor + hover affordance.
    *
    * When undefined (default), no click affordance is added — the matrix
    * view's existing <tr> shape is preserved exactly. This is the
@@ -95,7 +97,7 @@ export function Table({
       </thead>
       <tbody>
         {rows.map((row): JSX.Element => {
-          // Conditional spread (not `role={undefined}` etc) is required by
+          // Conditional spread (not `onClick={undefined}` etc) is required by
           // `exactOptionalPropertyTypes: true`. When `onRowSelect` is omitted
           // the spread evaluates to `{}` and the rendered <tr> is byte-
           // identical to the pre-PR-4.3 shape — backwards-compat contract
@@ -103,34 +105,46 @@ export function Table({
           // intentionally inline-shaped (not React's HTMLAttributes) so
           // the `data-clickable` attribute typechecks — React only allows
           // arbitrary `data-*` props at the JSX call-site, not on the
-          // HTMLAttributes interface.
-          const clickableProps =
+          // HTMLAttributes interface. NOTE: <tr> keeps its native row
+          // semantics (no role / tabIndex override) — the keyboard-activation
+          // target is the row-header <button> below. The <tr onClick> is a
+          // mouse convenience: clicking anywhere on the row triggers the
+          // same handler the button does.
+          const rowClickableProps =
             onRowSelect !== undefined
               ? {
-                  role: 'button' as const,
-                  tabIndex: 0,
                   'data-clickable': 'true',
                   onClick: (): void => {
                     onRowSelect(row.key)
                   },
-                  onKeyDown: (event: KeyboardEvent<HTMLTableRowElement>): void => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      // Space scrolls the page by default on focused
-                      // non-form elements; preventDefault keeps the row's
-                      // button-as-row contract clean.
-                      event.preventDefault()
-                      onRowSelect(row.key)
-                    }
-                  },
                 }
               : {}
+          // The row-header button is the canonical keyboard target. <button>
+          // ships its own role + Enter/Space activation + focus ring, so we
+          // don't reinvent any of that. stopPropagation keeps the click from
+          // bubbling to <tr onClick> and double-firing onRowSelect.
+          const rowHeaderContent =
+            onRowSelect !== undefined ? (
+              <button
+                type="button"
+                className="sta-table__row-button"
+                onClick={(event): void => {
+                  event.stopPropagation()
+                  onRowSelect(row.key)
+                }}
+              >
+                {row.header}
+              </button>
+            ) : (
+              row.header
+            )
           return (
-            <tr key={row.key} {...clickableProps}>
+            <tr key={row.key} {...rowClickableProps}>
               <th
                 scope="row"
                 data-highlighted={row.highlighted === true ? 'true' : undefined}
               >
-                {row.header}
+                {rowHeaderContent}
               </th>
               {row.cells.map((cell, idx): JSX.Element => {
                 const colHighlighted = columns[idx]?.highlighted === true

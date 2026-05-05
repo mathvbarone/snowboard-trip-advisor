@@ -33,8 +33,19 @@ describe('Table.css', (): void => {
     expect(source).toContain('cursor: pointer')
   })
 
-  it('declares a focus-visible outline rule for clickable tbody rows', (): void => {
-    expect(source).toContain('tbody tr[data-clickable="true"]:focus-visible')
+  it('declares a focus-visible outline rule for the row-header button', (): void => {
+    // Codex round-3 P1 fix: focus moved from <tr>[data-clickable] to the
+    // in-cell <button class="sta-table__row-button"> so <tr> keeps its
+    // native row semantics.
+    expect(source).toContain('.sta-table__row-button:focus-visible')
     expect(source).toContain('outline:')
+  })
+
+  it('declares the row-header button reset rules (appearance/background/border)', (): void => {
+    // The button is styled minimally so the row-header still reads as a
+    // labeled cell, not as a chrome button.
+    expect(source).toContain('.sta-table__row-button')
+    expect(source).toContain('appearance: none')
+    expect(source).toContain('background: transparent')
   })
 })
