@@ -16,13 +16,14 @@ import { __resetForTests } from '../state/useHealth'
 import { Dashboard } from './Dashboard'
 
 // Mirror the hook's beforeEach/afterEach reset discipline from useHealth.test.ts
-// so in-flight promise state never bleeds between tests.
+// so in-flight promise state never bleeds between tests. server.resetHandlers()
+// is called by the global afterEach in apps/admin/src/test-setup.ts — no need
+// to duplicate it here.
 beforeEach((): void => {
   __resetForTests()
 })
 afterEach((): void => {
   __resetForTests()
-  server.resetHandlers()
 })
 
 describe('Dashboard (PR 4.2 §1.4)', (): void => {

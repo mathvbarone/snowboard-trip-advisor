@@ -9,9 +9,10 @@ import { parseURL, serializeURL, type RouteState } from '../lib/urlState'
 //   2. Same-tick `setRoute` calls — broadcast to subscribers via the
 //      module-scoped `subscribers` Set so React 19 Suspense does not tear.
 //
-// Admin does not ship the normalizeIfNeeded helper Epic 3 uses — the admin
-// URL surface is a single 'dashboard' literal with no shareable-state-
-// normalization invariant (PR 4.3 adds 'resorts', at which point revisit).
+// Admin does not ship the normalizeIfNeeded helper Epic 3 uses — the resorts
+// route's filters (country, hasFailures) are emitted as-is by serializeURL
+// without rewrites; an analyst pasting a URL with a stale or invalid filter
+// gets the silent drop-invalid pattern from parseURL on next read.
 
 const subscribers = new Set<() => void>()
 
@@ -60,12 +61,13 @@ export function useURLState(): RouteState {
 }
 
 export function setRoute(state: RouteState): void {
-  // Phase 1 (PR 4.2): serializeURL always returns '' because 'dashboard' is the
-  // only route and is the default (omitted from URL). The URL is always the bare
-  // pathname. PR 4.3 extends both serializeURL and this function when it adds
-  // the 'resorts' route (the two must change together in the same commit).
-  void serializeURL(state)
-  window.history.pushState({}, '', window.location.pathname)
+  // serializeURL produces the search string for non-default routes (or '' for
+  // the dashboard default, which is omitted from the URL). Push pathname +
+  // search so deep-link state actually round-trips through the URL bar —
+  // without appending the search the country / hasFailures filters set by the
+  // resorts view dropdown would never reach the URL bar or survive a reload.
+  const search = serializeURL(state)
+  window.history.pushState({}, '', `${window.location.pathname}${search}`)
   // Invalidate cache BEFORE notify() so subscribers' getSnapshot() calls
   // re-derive against the new URL, not the pre-write cached value.
   cachedSearch = null

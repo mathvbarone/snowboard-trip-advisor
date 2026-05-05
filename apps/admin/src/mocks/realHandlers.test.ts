@@ -50,10 +50,15 @@ describe('bridgeHandlers (PR 4.1b §2.6, spec §6.3 P0-3)', (): void => {
     })
   })
 
-  it('GET /api/resorts routes through dispatch to the listResorts stub (501)', async (): Promise<void> => {
+  it('GET /api/resorts routes through dispatch to the real listResorts handler (PR 4.3)', async (): Promise<void> => {
     // eslint-disable-next-line no-restricted-syntax, no-restricted-globals
     const res = await fetch('http://127.0.0.1/api/resorts')
-    expect(res.status).toBe(501)
+    // Cold-start: bridge tmpdir has no workspace files → handler returns empty list.
+    // Per-handler semantics are exercised in server/__tests__/listResorts.test.ts;
+    // this case pins the MSW bridge wiring (request → dispatch → 200 envelope).
+    expect(res.status).toBe(200)
+    const json: unknown = await res.json()
+    expect(json).toEqual({ items: [], page: { offset: 0, limit: 50, total: 0 } })
   })
 
   it('decodes request via Zod and returns 400 invalid-request on bad PUT body (empty)', async (): Promise<void> => {
