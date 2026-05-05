@@ -14,11 +14,15 @@ import { healthHandler } from '../health'
 // Relative timestamps — keeps staleness assertions independent of wall-clock
 // date. The healthHandler compares (now - observed_at) against a 14-day TTL,
 // so hard-coded ISO literals eventually flip from "fresh" to "stale" in CI.
-// 1 day ago = guaranteed fresh (<14-day threshold).
-// 30 days ago = guaranteed stale (>14-day threshold).
+// 1 day ago = guaranteed fresh (< default=14 threshold).
+// 20 days ago = firmly inside the (default=14, max_stale=30] stale window
+// (Codex round-5 fix added the upper bound, so 30 days ago is at the
+// boundary and microsecond drift would flip it to never_fetched).
+// 60 days ago = beyond max_stale → never_fetched-by-age (effectively missing).
 const DAY_MS = 24 * 60 * 60 * 1000
 const FRESH_OBSERVED_AT = new Date(Date.now() - DAY_MS).toISOString()
-const STALE_OBSERVED_AT = new Date(Date.now() - 30 * DAY_MS).toISOString()
+const STALE_OBSERVED_AT = new Date(Date.now() - 20 * DAY_MS).toISOString()
+const TOO_OLD_OBSERVED_AT = new Date(Date.now() - 60 * DAY_MS).toISOString()
 const HASH_1 = '0000000000000000000000000000000000000000000000000000000000000001'
 const SOURCE_URL = 'https://example.com/'
 const ATTRIBUTION = { en: 'Test attribution.' }
@@ -765,5 +769,68 @@ describe('healthHandler (PR 4.2)', (): void => {
     expect(result.resorts_with_stale_fields).toBe(1)
     expect(result.resorts_total).toBe(2)
     expect(result.resorts_with_corrupt_workspace).toBe(0)
+  })
+
+  // ---------------------------------------------------------------------------
+  // Codex round-5 P2 fix: max_stale upper bound on the staleness predicate
+  // (mirrors loadResortDatasetFromObject.liveField — older than max_stale is
+  // never_fetched, NOT stale). Pin both branches: too-old → not counted; in-
+  // window → counted.
+  // ---------------------------------------------------------------------------
+
+  it('Codex round-5 P2: workspace resort with observed_at older than max_stale → never_fetched, NOT counted as stale', async (): Promise<void> => {
+    await mkdir(join(workspaceRoot, 'data', 'admin-workspace'), { recursive: true })
+
+    const resort = makeResort('too-old', durableFieldSources(FRESH_OBSERVED_AT))
+    // Live signal with all 5 values populated but field_sources observed_at
+    // 60 days ago — beyond max_stale (30). Pre-fix this counted as stale
+    // (over-count). Post-fix: predicate also requires `<= max_stale`, so 60-
+    // day data is treated as never_fetched and the resort does NOT count.
+    await writeFile(
+      join(workspaceRoot, 'data', 'admin-workspace', 'too-old.json'),
+      makeWorkspaceFileJson('too-old', resort, liveFieldSources(TOO_OLD_OBSERVED_AT)),
+    )
+
+    const result = await healthHandler({ query: {} }, { workspaceRoot })
+
+    expect(result.resorts_with_stale_fields).toBe(0)
+    expect(result.resorts_total).toBe(1)
+  })
+
+  it('Codex round-5 P2: published-only resort with observed_at older than max_stale → never_fetched, NOT counted', async (): Promise<void> => {
+    // Mirror of the workspace test for the published-only branch (the second
+    // staleness loop — health.ts:146-156).
+    await mkdir(join(workspaceRoot, 'data', 'admin-workspace'), { recursive: true })
+    await mkdir(join(workspaceRoot, 'data', 'published'), { recursive: true })
+
+    const publishedResort = makeResort('too-old-pub', durableFieldSources(FRESH_OBSERVED_AT))
+    const publishedDoc = {
+      schema_version: 1,
+      published_at: '2026-04-26T08:00:00Z',
+      resorts: [publishedResort],
+      live_signals: [
+        {
+          schema_version: 1,
+          resort_slug: 'too-old-pub',
+          observed_at: TOO_OLD_OBSERVED_AT,
+          fetched_at: TOO_OLD_OBSERVED_AT,
+          snow_depth_cm: 50,
+          lifts_open: { count: 6, total: 10 },
+          lift_pass_day: { amount: 55, currency: 'EUR' },
+          lodging_sample: { median_eur: { amount: 100, currency: 'EUR' }, sample_size: 4 },
+          field_sources: liveFieldSources(TOO_OLD_OBSERVED_AT),
+        },
+      ],
+      manifest: { resort_count: 1, generated_by: 'test', validator_version: '0.0.0' },
+    }
+    await writeFile(
+      join(workspaceRoot, 'data', 'published', 'current.v1.json'),
+      JSON.stringify(publishedDoc),
+    )
+
+    const result = await healthHandler({ query: {} }, { workspaceRoot })
+
+    expect(result.resorts_with_stale_fields).toBe(0)
+    expect(result.resorts_total).toBe(1)
   })
 })

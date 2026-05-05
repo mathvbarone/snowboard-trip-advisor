@@ -98,13 +98,19 @@ export async function healthHandler(
     // unconditionally per loadResortDatasetFromObject.ts:83-99 — editorial review
     // is the Phase-2 stale-detection signal for those, not observed_at age.
     const combinedSources = { ...wf.resort.field_sources, ...liveSources }
+    // Codex round-5 P2 (folded across listResorts.ts AND health.ts): the
+    // canonical liveField semantics (loadResortDatasetFromObject.ts:115-118)
+    // treat ageDays > max_stale (30) as `never_fetched`, NOT stale. The
+    // "stale" window is strictly `default < ageDays <= max_stale`. The
+    // previous predicate (> default with no upper bound) over-counted very-
+    // old data as stale, disagreeing with the rest of the freshness model.
     const hasStaleField = populatedLivePaths(wf.live_signal).some((p): boolean => {
       const fs = combinedSources[p]
       if (fs === undefined) {
         return false
       }
       const ageDays = (now - new Date(fs.observed_at).getTime()) / (24 * 60 * 60 * 1000)
-      return ageDays > FRESHNESS_TTL_DAYS.default
+      return ageDays > FRESHNESS_TTL_DAYS.default && ageDays <= FRESHNESS_TTL_DAYS.max_stale
     })
     if (hasStaleField) {
       staleCount++
@@ -142,6 +148,8 @@ export async function healthHandler(
 
       // Stale fields: only populated live paths are subject to clock-based staleness.
       // Round-5 fix: gate on populatedLivePaths — same semantics as workspace loop above.
+      // Codex round-5 P2: same max_stale upper-bound as the workspace loop —
+      // stale window is strictly `default < ageDays <= max_stale`.
       const combinedSources = { ...r.field_sources, ...liveSources }
       const hasStaleField = populatedLivePaths(liveSignal).some((p): boolean => {
         const fs = combinedSources[p]
@@ -149,7 +157,7 @@ export async function healthHandler(
           return false
         }
         const ageDays = (now - new Date(fs.observed_at).getTime()) / (24 * 60 * 60 * 1000)
-        return ageDays > FRESHNESS_TTL_DAYS.default
+        return ageDays > FRESHNESS_TTL_DAYS.default && ageDays <= FRESHNESS_TTL_DAYS.max_stale
       })
       if (hasStaleField) {
         staleCount++

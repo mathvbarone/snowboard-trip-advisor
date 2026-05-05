@@ -140,6 +140,13 @@ export async function listResortsHandler(
 // unconditionally per loadResortDatasetFromObject.ts:83-99. A stale
 // field_sources entry whose live value is absent (state: 'never_fetched')
 // is NOT counted — gated by populatedLivePaths.
+//
+// Codex round-5 P2: the canonical liveField semantics
+// (loadResortDatasetFromObject.ts:115-118) treat ageDays > max_stale (30)
+// as `never_fetched`, NOT stale. The "stale" window is strictly
+// `default < ageDays <= max_stale`. The previous implementation (>
+// default with no upper bound) over-counted very-old data as stale,
+// disagreeing with the rest of the freshness model.
 function countStaleFields(
   resort: Resort,
   live: ResortLiveSignal | null,
@@ -152,7 +159,9 @@ function countStaleFields(
     const fs = combinedSources[path]
     if (fs === undefined) { continue }
     const ageDays = (now - new Date(fs.observed_at).getTime()) / (24 * 60 * 60 * 1000)
-    if (ageDays > FRESHNESS_TTL_DAYS.default) { count++ }
+    if (ageDays > FRESHNESS_TTL_DAYS.default && ageDays <= FRESHNESS_TTL_DAYS.max_stale) {
+      count++
+    }
   }
   return count
 }

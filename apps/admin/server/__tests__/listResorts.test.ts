@@ -19,7 +19,13 @@ import { listResortsHandler } from '../listResorts'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const FRESH_OBSERVED_AT = new Date(Date.now() - DAY_MS).toISOString()
-const STALE_OBSERVED_AT = new Date(Date.now() - 30 * DAY_MS).toISOString()
+// 20 days is firmly inside the (default=14, max_stale=30] stale window —
+// Codex round-5 fix added the upper bound, so 30 days sits exactly at the
+// boundary and microsecond drift would flip it to never_fetched.
+const STALE_OBSERVED_AT = new Date(Date.now() - 20 * DAY_MS).toISOString()
+// Beyond max_stale → canonical liveField returns 'never_fetched', not stale.
+// Pin the no-over-count branch the round-5 finding called out.
+const TOO_OLD_OBSERVED_AT = new Date(Date.now() - 60 * DAY_MS).toISOString()
 const HASH_1 = '0000000000000000000000000000000000000000000000000000000000000001'
 const SOURCE_URL = 'https://example.com/'
 const ATTRIBUTION = { en: 'Test attribution.' }
@@ -569,6 +575,45 @@ describe('listResortsHandler (PR 4.3)', (): void => {
     expect(result.items).toHaveLength(1)
     // populatedLivePaths returns ['lodging_sample.median_eur'] but no field_sources
     // entry → fs === undefined → continue → count = 0.
+    expect(result.items[0]?.stale_field_count).toBe(0)
+  })
+
+  it('stale_field_count: observed_at older than max_stale → never_fetched, NOT counted (Codex round-5 P2)', async (): Promise<void> => {
+    // Pins the canonical liveField semantics
+    // (loadResortDatasetFromObject.ts:115 — `ageDays > max_stale → never_fetched`).
+    // Before the fix, countStaleFields used `ageDays > default` with no upper
+    // bound and over-counted >30-day data as stale, disagreeing with the rest
+    // of the freshness model. After the fix, the predicate is
+    // `default < ageDays <= max_stale` — too-old data falls out into
+    // never_fetched and stale_field_count stays 0.
+    await mkdir(join(workspaceRoot, 'data', 'admin-workspace'), { recursive: true })
+
+    const resort = makeResort('aspen', durableFieldSources(FRESH_OBSERVED_AT), 'draft', 'AT')
+    const wfJson = JSON.stringify({
+      schema_version: 1,
+      slug: 'aspen',
+      resort,
+      live_signal: {
+        schema_version: 1,
+        resort_slug: 'aspen',
+        observed_at: TOO_OLD_OBSERVED_AT,
+        fetched_at: TOO_OLD_OBSERVED_AT,
+        // snow_depth_cm populated → populatedLivePaths includes it → loop visits it.
+        // But the field_sources observed_at is 60 days ago > max_stale=30 →
+        // canonical model says never_fetched → MUST NOT increment count.
+        snow_depth_cm: 80,
+        field_sources: {
+          'snow_depth_cm': makeFieldSource(TOO_OLD_OBSERVED_AT),
+        },
+      },
+      modified_at: FRESH_OBSERVED_AT,
+    })
+    await writeFile(join(workspaceRoot, 'data', 'admin-workspace', 'aspen.json'), wfJson)
+
+    const result = await listResortsHandler({ query: {} }, { workspaceRoot })
+
+    expect(result.items).toHaveLength(1)
+    // Pre-fix: stale_field_count would be 1 (over-count). Post-fix: 0.
     expect(result.items[0]?.stale_field_count).toBe(0)
   })
 
