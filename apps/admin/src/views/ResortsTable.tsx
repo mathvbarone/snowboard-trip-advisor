@@ -105,18 +105,10 @@ function ColdStartEmptyState(): JSX.Element {
   )
 }
 
-function FilteredEmptyState(): JSX.Element {
-  return (
-    <section aria-label="No resorts match the filter">
-      <Card>
-        <EmptyStateLayout
-          heading="No resorts match the filter"
-          body="Try clearing the country filter to see the full resort list."
-        />
-      </Card>
-    </section>
-  )
-}
+// (FilteredEmptyState was a separate sub-component before the Codex round-2
+// fold; the filter-active empty state is now rendered inline inside
+// ResortsTableContent so the country Select stays mounted — see the
+// `value.items.length === 0` branch in Content's return.)
 
 // ---------------------------------------------------------------------------
 // Content sub-component — country filter + sortable Table
@@ -125,18 +117,30 @@ function FilteredEmptyState(): JSX.Element {
 interface ResortsTableContentProps {
   readonly value: ListResortsResponse
   readonly country: ISOCountryCode | undefined
+  readonly hasFailures: boolean | undefined
 }
 
-function ResortsTableContent({ value, country }: ResortsTableContentProps): JSX.Element {
+function ResortsTableContent({ value, country, hasFailures }: ResortsTableContentProps): JSX.Element {
   const [sort, setSort] = useState<SortState>(DEFAULT_SORT)
 
-  // Derive country options from the loaded items' unique country codes.
-  // Always prepend "All countries" (value: '') so the user can clear the
-  // filter without typing anything. Sorted alphabetically for a stable UX.
+  // Derive country options from the loaded items' unique country codes, then
+  // union the URL country (if set). The union matters in the filtered-empty
+  // case: with country=PL and zero PL resorts on disk, items[] is empty and
+  // the dropdown derived from items would only have "All countries", so the
+  // Select would have no option matching its `value="PL"`. Including the URL
+  // country keeps the active filter visible in the dropdown so the user can
+  // still see (and change) what they filtered by.
   const countryOptions = useMemo((): ReadonlyArray<{ value: string; label: string }> => {
-    const unique = Array.from(new Set(value.items.map((it): string => it.country))).sort()
-    return [{ value: '', label: 'All countries' }, ...unique.map((c): { value: string; label: string } => ({ value: c, label: c }))]
-  }, [value.items])
+    const unique = new Set(value.items.map((it): string => it.country))
+    if (country !== undefined) {
+      unique.add(country)
+    }
+    const sorted = Array.from(unique).sort()
+    return [
+      { value: '', label: 'All countries' },
+      ...sorted.map((c): { value: string; label: string } => ({ value: c, label: c })),
+    ]
+  }, [value.items, country])
 
   // Apply local sort. Filter is applied server-side via the query, so the
   // items array is already filtered by the time it arrives.
@@ -210,19 +214,22 @@ function ResortsTableContent({ value, country }: ResortsTableContentProps): JSX.
   }))
 
   function onCountryChange(next: string): void {
+    // Preserve hasFailures when the country filter changes so a deep link
+    // like ?route=resorts&country=PL&hasFailures=true keeps the failures
+    // filter through dropdown interactions. Both filters are URL-state, both
+    // round-trip together.
+    const base = { route: 'resorts' as const }
+    const carryFailures = hasFailures !== undefined ? { hasFailures } : {}
     if (next === '') {
-      // Clearing the filter: emit the resorts route without country.
-      // PR 4.3 does not surface a hasFailures toggle UI, so the route
-      // emitted here is intentionally country-only — PR 4.4+ extends this
-      // when the failure-only filter chip lands.
-      setRoute({ route: 'resorts' })
+      setRoute({ ...base, ...carryFailures })
       return
     }
     // ISOCountryCode.parse validates + brands the option value. The Select
     // is constrained to country codes drawn from already-branded resort
-    // items, so .parse will succeed; the brand-cast ESLint rule (BRAND_CAST)
-    // forbids `as ISOCountryCode`, so .parse is the only path.
-    setRoute({ route: 'resorts', country: ISOCountryCode.parse(next) })
+    // items (or the URL country), so .parse will succeed; the brand-cast
+    // ESLint rule (BRAND_CAST) forbids `as ISOCountryCode`, so .parse is the
+    // only path.
+    setRoute({ ...base, country: ISOCountryCode.parse(next), ...carryFailures })
   }
 
   return (
@@ -233,21 +240,34 @@ function ResortsTableContent({ value, country }: ResortsTableContentProps): JSX.
         options={countryOptions}
         onChange={onCountryChange}
       />
-      <Table
-        caption="Resorts list"
-        rowHeaderLabel="Resort"
-        columns={columns}
-        rows={rows}
-        onRowSelect={(rowKey): void => {
-          // row.key is the resort.slug — already a branded ResortSlug at the
-          // ListResortsResponse.parse boundary upstream. The Table primitive
-          // exposes it as a plain string, so re-validate via .parse to
-          // restore the brand. ResortSlug.parse never throws here because
-          // the regex matches by construction; the brand-cast ESLint rule
-          // (BRAND_CAST) forbids `as ResortSlug`, so .parse is the only path.
-          setRoute({ route: 'editor', slug: ResortSlug.parse(rowKey) })
-        }}
-      />
+      {value.items.length === 0 ? (
+        // Filtered-empty: the parent (ResortsTable) only routes here when a
+        // filter is active and the response is empty. Inline the empty-state
+        // message below the Select so the filter control stays available and
+        // the user can clear or change the filter without navigating away.
+        <Card>
+          <EmptyStateLayout
+            heading="No resorts match the filter"
+            body="Try clearing the country filter to see the full resort list."
+          />
+        </Card>
+      ) : (
+        <Table
+          caption="Resorts list"
+          rowHeaderLabel="Resort"
+          columns={columns}
+          rows={rows}
+          onRowSelect={(rowKey): void => {
+            // row.key is the resort.slug — already a branded ResortSlug at the
+            // ListResortsResponse.parse boundary upstream. The Table primitive
+            // exposes it as a plain string, so re-validate via .parse to
+            // restore the brand. ResortSlug.parse never throws here because
+            // the regex matches by construction; the brand-cast ESLint rule
+            // (BRAND_CAST) forbids `as ResortSlug`, so .parse is the only path.
+            setRoute({ route: 'editor', slug: ResortSlug.parse(rowKey) })
+          }}
+        />
+      )}
     </section>
   )
 }
@@ -265,13 +285,21 @@ export function ResortsTable(): JSX.Element {
   // honest if PR 4.5+ wires it in unexpected places.
   const route = useURLState()
   const country = route.route === 'resorts' ? route.country : undefined
+  const hasFailures = route.route === 'resorts' ? route.hasFailures : undefined
 
   // Conditional spread satisfies exactOptionalPropertyTypes — the Zod schema
-  // declares `filter` and its nested `country` as optional, so an explicit
-  // `undefined` is a type error. PR 4.3 only surfaces the country filter;
-  // hasFailures has no UI control yet (PR 4.4+ adds the failure-only chip).
+  // declares `filter` and its nested fields as optional, so an explicit
+  // `undefined` is a type error. PR 4.3 has no UI control for hasFailures
+  // (PR 4.4+ adds the failure-only chip), but the query MUST forward it when
+  // present so deep links like ?route=resorts&hasFailures=true reach the
+  // server filter — otherwise parseURL accepts the param and the view
+  // silently drops it, breaking the URL contract.
+  const filter = {
+    ...(country !== undefined ? { country } : {}),
+    ...(hasFailures !== undefined ? { hasFailures } : {}),
+  }
   const query: ListResortsQuery = {
-    ...(country !== undefined ? { filter: { country } } : {}),
+    ...(Object.keys(filter).length > 0 ? { filter } : {}),
     page: { offset: 0, limit: 50 },
   }
 
@@ -283,11 +311,23 @@ export function ResortsTable(): JSX.Element {
   if (value === null) {
     return <ResortsTableSkeleton />
   }
-  if (value.items.length === 0) {
-    if (country !== undefined) {
-      return <FilteredEmptyState />
-    }
+  // Cold-start (no filter active, no resorts on disk): show the §10.9 manual-
+  // creation pointer without filter controls — there's nothing to filter, and
+  // the dropdown derived from the empty items[] would only offer "All countries".
+  const filterActive = country !== undefined || hasFailures !== undefined
+  if (value.items.length === 0 && !filterActive) {
     return <ColdStartEmptyState />
   }
-  return <ResortsTableContent value={value} country={country} />
+  // Filter-active OR populated: render Content. Content owns the filter Select
+  // and inlines the filtered-empty messaging so the user always has an in-view
+  // control to clear the filter — an early FilteredEmptyState return here
+  // would unmount the dropdown and trap the user with no way to recover except
+  // editing the URL bar by hand.
+  return (
+    <ResortsTableContent
+      value={value}
+      country={country}
+      hasFailures={hasFailures}
+    />
+  )
 }

@@ -46,6 +46,13 @@ export function useResortList(query: ListResortsQuery): UseResortListResult {
 
   useEffect((): (() => void) => {
     let cancelled = false
+    // Reset to loading state on key change so stale rows from the previous
+    // query don't render between the new fetch starting and resolving — the
+    // resorts view's filter dropdown otherwise shows mismatched country rows
+    // while the new request is in flight. Initial mount: value/error are
+    // already null, so React 19's setState bailout makes this a no-op.
+    setValue(null)
+    setError(null)
     let p = inFlight.get(key)
     if (p === undefined) {
       p = apiClient.listResorts(query).finally((): void => {

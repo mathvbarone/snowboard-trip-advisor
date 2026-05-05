@@ -105,9 +105,13 @@ export async function listResortsHandler(
     }
   }
 
-  // Apply filter then page. Iteration order over Map preserves insertion order
-  // (workspace first, then published) — deterministic for tests + UI.
-  const all = Array.from(summariesBySlug.values())
+  // Apply filter then page. Map iteration preserves insertion order
+  // (workspace first, then published), but workspace order itself is `readdir()`
+  // order — not guaranteed across runs (filesystem-dependent). Sort by slug
+  // before slicing so paginated requests return stable, non-shifting subsets.
+  const all = Array.from(summariesBySlug.values()).sort(
+    (a, b): number => a.slug.localeCompare(b.slug),
+  )
   const filtered = applyFilter(all, input.query.filter)
   // Defaults: when query.page is undefined we fall back here. When it's
   // present, Zod's .default(0) / .default(50) on the schema fields ensures

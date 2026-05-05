@@ -203,6 +203,74 @@ describe('ResortsTable (PR 4.3 §2.4)', (): void => {
     // §10.9 pointer is NOT shown in the filtered-empty variant — that text
     // belongs to the cold-start path.
     expect(screen.queryByText(/§10\.9/)).not.toBeInTheDocument()
+
+    // Codex round-2 fold: the country Select MUST stay mounted in the
+    // filtered-empty branch so the user can clear or change the filter from
+    // within the view (without editing the URL bar by hand). Pin both:
+    // (1) the Select is present, and (2) it carries the URL country PL even
+    // though items[] is empty (the dropdown options union the URL country
+    // with the loaded items' countries).
+    const select = screen.getByLabelText(/country/i)
+    expect(select).toBeInTheDocument()
+    expect((select as HTMLSelectElement).value).toBe('PL')
+    expect(within(select).getByRole('option', { name: 'PL' })).toBeInTheDocument()
+  })
+
+  // (c3) hasFailures filter from the URL is forwarded into the useResortList
+  // query (Codex round-2 fold). Without this wiring, deep links like
+  // ?route=resorts&hasFailures=true would be parsed but silently ignored.
+  it('forwards hasFailures from the URL into the listResorts query', async (): Promise<void> => {
+    window.history.replaceState({}, '', '/?route=resorts&hasFailures=true')
+    // Object holder so the closure-side mutation isn't lost to TS flow
+    // narrowing (a `let captured: string | null = null` would be typed as
+    // `null` outside the closure, tripping no-unnecessary-condition).
+    const captured: { search: string | null } = { search: null }
+    server.use(
+      http.get('/api/resorts', ({ request }): Response => {
+        captured.search = new URL(request.url).search
+        return HttpResponse.json(FIXTURE_RESPONSE)
+      }),
+    )
+
+    render(<ResortsTable />)
+
+    await waitFor((): void => {
+      expect(captured.search).not.toBeNull()
+    })
+
+    // apiClient.serializeQuery JSON-stringifies values, so the wire form
+    // for filter is filter={"hasFailures":true} (URL-encoded).
+    const params = new URLSearchParams(captured.search ?? '')
+    const filterRaw = params.get('filter')
+    expect(filterRaw).not.toBeNull()
+    const parsed = JSON.parse(filterRaw ?? '{}') as { hasFailures?: boolean; country?: string }
+    expect(parsed.hasFailures).toBe(true)
+  })
+
+  // (c4) hasFailures is preserved when the country dropdown changes
+  // (Codex round-2 fold). A deep link with both filters must keep the
+  // hasFailures filter through dropdown interactions on country.
+  it('preserves hasFailures when the country dropdown changes', async (): Promise<void> => {
+    window.history.replaceState({}, '', '/?route=resorts&country=PL&hasFailures=true')
+    server.use(
+      http.get('/api/resorts', (): Response => HttpResponse.json(FIXTURE_RESPONSE)),
+    )
+
+    const setRouteSpy = vi.spyOn(urlStateModule, 'setRoute')
+
+    render(<ResortsTable />)
+
+    await waitFor((): void => {
+      expect(screen.getByRole('rowheader', { name: 'Aurora Peak' })).toBeInTheDocument()
+    })
+
+    const select = screen.getByLabelText(/country/i)
+    fireEvent.change(select, { target: { value: '' } })
+
+    expect(setRouteSpy).toHaveBeenCalledWith({
+      route: 'resorts',
+      hasFailures: true,
+    })
   })
 
   // ---------------------------------------------------------------------------
