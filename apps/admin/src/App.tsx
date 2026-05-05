@@ -7,15 +7,18 @@ import { Shell } from './views/Shell'
 
 export default function App(): JSX.Element {
   const route = useURLState()
-  // PR 4.4b will add an 'editor' render branch. Pre-4.4b, an editor route
-  // (which row-click in ResortsTable can produce) reaches App.tsx but has no
-  // matching branch — fall through to the Dashboard. This is the documented
-  // Phase 1 transition (URL contract precedes the view). The drop-invalid
-  // guard in parseURL ensures only valid editor states (parseable slug) reach
-  // here; a stale URL with an unknown slug rewrites to dashboard at parse time.
+  // PR 4.4b will add a dedicated editor render branch. Pre-4.4b, the editor
+  // route (produced by row-click in ResortsTable) keeps the user inside the
+  // resorts view rather than dropping them onto the Dashboard — Codex round-4
+  // P1: a Dashboard fallback on an editor URL is a context-loss jump that
+  // hides the selected resort and breaks the row-click navigation flow. The
+  // slug stays in the URL; PR 4.4b's editor branch will pick it up without a
+  // change to ResortsTable. The `inResortsContext` shape is the canonical
+  // Phase-1 grouping ("anywhere downstream of /resorts").
+  const inResortsContext = route.route === 'resorts' || route.route === 'editor'
   return (
     <Shell>
-      {route.route === 'resorts' ? <ResortsTable /> : <Dashboard />}
+      {inResortsContext ? <ResortsTable /> : <Dashboard />}
     </Shell>
   )
 }

@@ -232,6 +232,17 @@ function ResortsTableContent({ value, country, hasFailures }: ResortsTableConten
     setRoute({ ...base, country: ISOCountryCode.parse(next), ...carryFailures })
   }
 
+  // Clear-filters affordance: Codex round-4 P2 — the country dropdown
+  // preserves hasFailures on every change, but PR 4.3 ships no hasFailures
+  // UI control. A user landing on a `?route=resorts&hasFailures=true` deep
+  // link could clear country with the dropdown but had no in-view way to
+  // drop hasFailures. The button surfaces only when at least one filter is
+  // active and resets BOTH at once via setRoute({ route: 'resorts' }).
+  const filterActive = country !== undefined || hasFailures !== undefined
+  function onClearFilters(): void {
+    setRoute({ route: 'resorts' })
+  }
+
   return (
     <section aria-label="Resorts">
       <Select
@@ -240,6 +251,11 @@ function ResortsTableContent({ value, country, hasFailures }: ResortsTableConten
         options={countryOptions}
         onChange={onCountryChange}
       />
+      {filterActive ? (
+        <Button variant="ghost" onClick={onClearFilters}>
+          Clear filters
+        </Button>
+      ) : null}
       {value.items.length === 0 ? (
         // Filtered-empty: the parent (ResortsTable) only routes here when a
         // filter is active and the response is empty. Inline the empty-state

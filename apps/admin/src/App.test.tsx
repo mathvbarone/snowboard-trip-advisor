@@ -54,4 +54,18 @@ describe('App (PR 4.1b §2.4 — Shell composition)', (): void => {
     expect(screen.queryByLabelText(/health metrics/i)).toBeNull()
     window.history.replaceState({}, '', '/')
   })
+
+  it('keeps ResortsTable mounted on editor route until PR 4.4b adds the editor view (Codex round-4 P1)', (): void => {
+    // Before this fix the editor route fell through to Dashboard, which
+    // dropped the user out of the resorts flow on every row click. The
+    // Phase-1 stop-gap is to keep the resorts list visible: the slug stays
+    // in the URL for PR 4.4b's editor branch to pick up; the Dashboard's
+    // health-metrics section MUST NOT render on an editor route.
+    window.history.replaceState({}, '', '/?route=editor&slug=kotelnica-bialczanska')
+    render(<App />)
+    expect(screen.getByRole('main')).toBeInTheDocument()
+    expect(screen.queryByLabelText(/loading dashboard/i)).toBeNull()
+    expect(screen.queryByLabelText(/health metrics/i)).toBeNull()
+    window.history.replaceState({}, '', '/')
+  })
 })

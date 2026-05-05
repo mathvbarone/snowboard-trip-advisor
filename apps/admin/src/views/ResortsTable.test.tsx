@@ -273,6 +273,75 @@ describe('ResortsTable (PR 4.3 §2.4)', (): void => {
     })
   })
 
+  // (c5) Clear-filters button — Codex round-4 P2: with a hasFailures-only
+  // deep link there is no in-view control to drop the failures filter
+  // (country dropdown only carries it). The button surfaces only when at
+  // least one filter is active and resets BOTH at once.
+  it('does NOT render the Clear-filters button when no filter is active', async (): Promise<void> => {
+    server.use(
+      http.get('/api/resorts', (): Response => HttpResponse.json(FIXTURE_RESPONSE)),
+    )
+
+    render(<ResortsTable />)
+
+    await waitFor((): void => {
+      expect(screen.getByRole('rowheader', { name: 'Aurora Peak' })).toBeInTheDocument()
+    })
+
+    expect(screen.queryByRole('button', { name: /clear filters/i })).toBeNull()
+  })
+
+  it('renders the Clear-filters button when a country filter is active', async (): Promise<void> => {
+    window.history.replaceState({}, '', '/?route=resorts&country=PL')
+    server.use(
+      http.get('/api/resorts', (): Response => HttpResponse.json(FIXTURE_RESPONSE)),
+    )
+
+    render(<ResortsTable />)
+
+    await waitFor((): void => {
+      expect(screen.getByRole('rowheader', { name: 'Aurora Peak' })).toBeInTheDocument()
+    })
+
+    expect(screen.getByRole('button', { name: /clear filters/i })).toBeInTheDocument()
+  })
+
+  it('Clear-filters button drops both country AND hasFailures at once', async (): Promise<void> => {
+    window.history.replaceState({}, '', '/?route=resorts&country=PL&hasFailures=true')
+    server.use(
+      http.get('/api/resorts', (): Response => HttpResponse.json(FIXTURE_RESPONSE)),
+    )
+
+    const setRouteSpy = vi.spyOn(urlStateModule, 'setRoute')
+
+    render(<ResortsTable />)
+
+    await waitFor((): void => {
+      expect(screen.getByRole('button', { name: /clear filters/i })).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /clear filters/i }))
+
+    expect(setRouteSpy).toHaveBeenCalledWith({ route: 'resorts' })
+  })
+
+  it('Clear-filters button surfaces on a hasFailures-only deep link (no country)', async (): Promise<void> => {
+    window.history.replaceState({}, '', '/?route=resorts&hasFailures=true')
+    server.use(
+      http.get('/api/resorts', (): Response => HttpResponse.json(FIXTURE_RESPONSE)),
+    )
+
+    render(<ResortsTable />)
+
+    await waitFor((): void => {
+      expect(screen.getByRole('rowheader', { name: 'Aurora Peak' })).toBeInTheDocument()
+    })
+
+    // The country dropdown alone could not drop hasFailures (it preserves
+    // the flag); the Clear-filters button is the recovery path.
+    expect(screen.getByRole('button', { name: /clear filters/i })).toBeInTheDocument()
+  })
+
   // ---------------------------------------------------------------------------
   // (d) Sort — clicking the Name column header toggles the row order;
   // clicking the Failed-fields column header sorts by failed_field_count.
