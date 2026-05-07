@@ -52,7 +52,20 @@ interface MetricCardProps {
 }
 ```
 
-When `onClick` is provided, `MetricCard` renders a `<Button variant="ghost">` (existing design-system primitive) wrapping the `<dl>`. When `onClick` is undefined, the current `<Card><dl>...</dl></Card>` rendering stays unchanged. The `ariaLabel` lets the caller override the default name (the inner `<dt>` text might not be sufficient for an aria-name on the button — e.g., screen readers should hear "View resorts with failed fields", not just "Failed fields 1"). Default `ariaLabel` falls back to `label` if not supplied.
+When `onClick` is provided, `MetricCard` renders:
+
+```tsx
+<Card>
+  <Button variant="ghost" onClick={onClick} aria-label={ariaLabel ?? label}>
+    <span data-role="metric-label">{label}</span>
+    <span data-role="metric-value">{String(value)}</span>
+  </Button>
+</Card>
+```
+
+When `onClick` is omitted, the current `<Card><dl><dt>{label}</dt><dd>{value}</dd></dl></Card>` rendering stays unchanged. The `ariaLabel` lets the caller override the default name; for the failed-fields card the call site passes `"View resorts with failed fields"` so screen readers hear the action, not the bare label.
+
+**Why drop the `<dl>` for the clickable variant** (Codex P2 fold on the spec PR): HTML5's content model forbids flow content (including `<dl>`) inside `<button>`. The DS `Button` renders a native `<button>`, so wrapping a `<dl>` inside it would emit invalid markup that browsers and `axe` may interpret inconsistently. The inert variant keeps the `<dl>/<dt>/<dd>` description-list semantics that 7 of the 8 cards use; the clickable variant is primarily a navigation control whose accessible name comes from `aria-label`, so dt/dd semantics are not load-bearing for it.
 
 Why a `Button` from the design-system rather than a raw `<button>`: the project's UI rules forbid raw HTML elements where a design-system component exists ([AGENTS.md §"UI Code Rules"](../../../AGENTS.md)). The `Button` primitive is used elsewhere as a navigation trigger (e.g. column-sort headers in `ResortsTable.tsx`).
 
