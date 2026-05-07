@@ -178,7 +178,12 @@ The 2 environmental `test:hooks` failures observed during gate verification (cas
 
 ## 9. Subagent review trigger
 
-NO — `apps/admin/src/views/**` is not on the trigger path list in [AGENTS.md §"Subagent Review Discipline"](../../../AGENTS.md#subagent-review-discipline). Reviewer-discipline check passes by default for this PR.
+This spec describes two PRs — the spec PR (which adds this file) and the implementation PR (which modifies `apps/admin/src/views/Dashboard.tsx` + `Dashboard.test.tsx`). The trigger is **mechanical** per [AGENTS.md §"Subagent Review Discipline"](../../../AGENTS.md#subagent-review-discipline) and applies per-PR.
+
+- **Spec PR** (this file lands): YES — touches `docs/superpowers/specs/**`, an explicit trigger path. Independent subagent review was performed before opening the PR; the spec-document-reviewer (`general-purpose` subagent) verified the spec against the actual files referenced and approved with three advisory notes (no blockers); see the PR description for the recorded outcome.
+- **Implementation PR** (follow-up): NO — modifies only `apps/admin/src/views/**`, which is not on the trigger path list.
+
+Codex P2 fold on this PR: §9 originally read "NO" but referenced only the implementation PR's path; it did not record that the spec PR itself triggers. Now split per-PR with the spec-PR's review outcome recorded.
 
 ## 10. Rollback
 
