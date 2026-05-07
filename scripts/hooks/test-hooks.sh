@@ -284,20 +284,25 @@ export CLAUDE_PROJECT_DIR="$PROJECT_DIR"
 #                     `resolveWorktree` algorithm here — longest
 #                     porcelain prefix match against WT_CWD, with both
 #                     sides realpath-canonicalized (resolving symlinks)
-#                     and lowercased — so the assertion verifies hook
-#                     output against the algorithm rather than degenerating
-#                     into a tautology that just feeds porcelain back to
-#                     itself. The case-insensitive comparison is universal
-#                     (case-sensitive Linux paths are unaffected since
-#                     pwd and porcelain agree exactly there). Realpath
-#                     handles the case where the harness is launched
-#                     through a symlinked checkout (e.g. /tmp/linkrepo →
+#                     and lowercased on darwin only — so the assertion
+#                     verifies hook output against the algorithm rather
+#                     than degenerating into a tautology that just feeds
+#                     porcelain back to itself. The case-folding step
+#                     is darwin-gated: mirroring the hook's
+#                     `platform === 'darwin'` branch in normalizePath,
+#                     it tolerates HFS+/APFS case quirks on macOS
+#                     while preserving case-sensitive matching on
+#                     Linux, where Git can legally have sibling
+#                     worktrees that differ only in case (e.g.
+#                     `repo` and `Repo`). Realpath handles the case
+#                     where the harness is launched through a
+#                     symlinked checkout (e.g. /tmp/linkrepo →
 #                     /workspace/repo): without it `pwd` returns the
 #                     logical symlink path while porcelain reports the
-#                     real path, no porcelain block matches, WT_EXPECTED
-#                     stays empty, and the harness aborts before the
-#                     assertions run. The hook itself uses realpathSync
-#                     for the same reason in normalizePath.
+#                     real path, no porcelain block matches,
+#                     WT_EXPECTED stays empty, and the harness aborts
+#                     before the assertions run. The hook itself uses
+#                     realpathSync for the same reason in normalizePath.
 #
 # Earlier revisions used `git rev-parse --show-toplevel` for both roles.
 # That returns the FS-canonical case (which on macOS may differ from
@@ -313,8 +318,25 @@ canon_path() {
   ( cd -P "$1" 2>/dev/null && pwd -P ) || printf '%s' "$1"
 }
 
+# case_fold: lowercase on darwin only, identity elsewhere. Mirrors the
+# hook's `platform === 'darwin' ? resolved.toLowerCase() : resolved`
+# branch in normalizePath. Universally lowercasing on Linux would
+# wrongly conflate sibling worktrees that legally differ only in case
+# (e.g. `repo` and `Repo`), so the harness must respect the same OS
+# distinction the hook makes — otherwise harness and hook disagree on
+# which block is the longest-prefix match for a case-variant cwd, the
+# integration assertion fails, and `npm run qa`/pre-commit blocks.
+HARNESS_HOST_OS="$(uname -s)"
+case_fold() {
+  if [ "$HARNESS_HOST_OS" = "Darwin" ]; then
+    printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
+  else
+    printf '%s' "$1"
+  fi
+}
+
 WT_CWD="$PROJECT_DIR"
-WT_CWD_NORM="$(printf '%s' "$(canon_path "$WT_CWD")" | tr '[:upper:]' '[:lower:]')"
+WT_CWD_NORM="$(case_fold "$(canon_path "$WT_CWD")")"
 
 WT_EXPECTED=""
 WT_BEST_LEN=-1
@@ -322,7 +344,7 @@ while IFS= read -r line; do
   case "$line" in
     "worktree "*)
       path="${line#worktree }"
-      norm="$(printf '%s' "$(canon_path "$path")" | tr '[:upper:]' '[:lower:]')"
+      norm="$(case_fold "$(canon_path "$path")")"
       remainder="${WT_CWD_NORM#"${norm}/"}"
       if [ "$WT_CWD_NORM" = "$norm" ] || [ "$remainder" != "$WT_CWD_NORM" ]; then
         if [ "${#norm}" -gt "$WT_BEST_LEN" ]; then
