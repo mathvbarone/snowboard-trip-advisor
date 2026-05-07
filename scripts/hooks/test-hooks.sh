@@ -262,22 +262,79 @@ run_test_silent "post-pr-create: silent — malformed JSON"                     
 # the same git worktree list we just queried.
 PROJECT_DIR="$(pwd)"
 export CLAUDE_PROJECT_DIR="$PROJECT_DIR"
-SELF_WORKTREE="$(git -C "$PROJECT_DIR" rev-parse --show-toplevel)"
+
+# Two distinct values are needed:
+#
+#   WT_CWD          — the cwd to inject into the synthetic hook payload.
+#                     This must be the agent's actual `pwd`, in whatever
+#                     case the user's shell saw it. On a case-insensitive
+#                     filesystem (HFS+/APFS default on macOS) the user
+#                     can be in /Users/foo/Projects/... while git stored
+#                     /Users/foo/projects/... at `git worktree add` time.
+#                     The hook is supposed to handle that mismatch via
+#                     darwin-only lowercase normalization in
+#                     post-pr-create-reminder.mjs::normalizePath; this
+#                     test exercises that path by injecting the real pwd.
+#
+#   WT_EXPECTED     — the worktree path the hook is expected to emit in
+#                     its reminder for that cwd. The hook returns the
+#                     `bestBlock.path` from `git worktree list
+#                     --porcelain` verbatim (porcelain case preserved).
+#                     We INDEPENDENTLY re-implement the hook's
+#                     `resolveWorktree` algorithm here — longest
+#                     porcelain prefix match against WT_CWD,
+#                     case-insensitive — so the assertion verifies hook
+#                     output against the algorithm rather than degenerating
+#                     into a tautology that just feeds porcelain back to
+#                     itself. The case-insensitive comparison is universal
+#                     (case-sensitive Linux paths are unaffected since
+#                     pwd and porcelain agree exactly there). Symlink
+#                     edge cases are out of scope for this integration
+#                     check; they are covered separately by the
+#                     `resolveWorktree: symlink resolution via realpath`
+#                     unit test in post-pr-create-reminder.test.mjs.
+#
+# Earlier revisions used `git rev-parse --show-toplevel` for both roles.
+# That returns the FS-canonical case (which on macOS may differ from
+# porcelain), causing the substring assertion to fail on case-mismatch
+# checkouts. Hence this two-variable split.
+WT_CWD="$PROJECT_DIR"
+WT_EXPECTED="$(
+  cwd_lower="$(printf '%s' "$WT_CWD" | tr '[:upper:]' '[:lower:]')"
+  git -C "$PROJECT_DIR" worktree list --porcelain | awk -v cwd_lower="$cwd_lower" '
+    /^worktree / {
+      sub(/^worktree /, "")
+      wt = $0
+      wt_lower = tolower(wt)
+      if (cwd_lower == wt_lower || index(cwd_lower, wt_lower "/") == 1) {
+        if (length(wt_lower) > best_len) {
+          best = wt
+          best_len = length(wt_lower)
+        }
+      }
+    }
+    END { if (best != "") print best }
+  '
+)"
+if [ -z "$WT_EXPECTED" ]; then
+  echo "FAIL: harness could not resolve a worktree from porcelain for cwd=$WT_CWD" >&2
+  exit 1
+fi
 
 # Build a synthetic JSON payload with cwd set to the current worktree.
 # `printf` is the portable way to emit a string with a single embedded
 # variable; we construct the JSON inline below.
-WT_PAYLOAD_MATCH='{"cwd":"'"$SELF_WORKTREE"'","tool_input":{"command":"gh pr create"},"tool_response":{"stdout":"'"$PR_URL_OK"'"}}'
-WT_PAYLOAD_NESTED='{"cwd":"'"$SELF_WORKTREE/scripts/hooks"'","tool_input":{"command":"gh pr create"},"tool_response":{"stdout":"'"$PR_URL_OK"'"}}'
+WT_PAYLOAD_MATCH='{"cwd":"'"$WT_CWD"'","tool_input":{"command":"gh pr create"},"tool_response":{"stdout":"'"$PR_URL_OK"'"}}'
+WT_PAYLOAD_NESTED='{"cwd":"'"$WT_CWD/scripts/hooks"'","tool_input":{"command":"gh pr create"},"tool_response":{"stdout":"'"$PR_URL_OK"'"}}'
 WT_PAYLOAD_OUTSIDE='{"cwd":"/tmp/definitely-not-a-worktree","tool_input":{"command":"gh pr create"},"tool_response":{"stdout":"'"$PR_URL_OK"'"}}'
 WT_PAYLOAD_NO_CWD='{"tool_input":{"command":"gh pr create"},"tool_response":{"stdout":"'"$PR_URL_OK"'"}}'
 
 run_test_emits_contains \
   "post-pr-create: injects worktree path when cwd matches" \
-  "$HOOK" "$WT_PAYLOAD_MATCH" "worktree at $SELF_WORKTREE"
+  "$HOOK" "$WT_PAYLOAD_MATCH" "worktree at $WT_EXPECTED"
 run_test_emits_contains \
   "post-pr-create: injects worktree path when cwd is nested inside worktree" \
-  "$HOOK" "$WT_PAYLOAD_NESTED" "worktree at $SELF_WORKTREE"
+  "$HOOK" "$WT_PAYLOAD_NESTED" "worktree at $WT_EXPECTED"
 run_test_emits_excludes \
   "post-pr-create: falls back to v1 when cwd is outside any worktree" \
   "$HOOK" "$WT_PAYLOAD_OUTSIDE" "worktree at /"
@@ -290,7 +347,7 @@ run_test_emits_excludes \
 # for sub-second portability across BSD/GNU date. Take 3 samples and
 # assert on the min — a real >500ms regression still trips 3-of-3, but
 # busy CI runners no longer flake on a single noisy sample.
-SLO_INPUT='{"cwd":"'"$SELF_WORKTREE"'","tool_input":{"command":"gh pr create"},"tool_response":{"stdout":"'"$PR_URL_OK"'"}}'
+SLO_INPUT='{"cwd":"'"$WT_CWD"'","tool_input":{"command":"gh pr create"},"tool_response":{"stdout":"'"$PR_URL_OK"'"}}'
 MIN_MS=999999
 for SAMPLE in 1 2 3; do
   START_MS="$(perl -MTime::HiRes=time -e 'printf "%d\n", time()*1000')"
