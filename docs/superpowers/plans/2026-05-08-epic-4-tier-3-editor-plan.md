@@ -1416,12 +1416,14 @@ afterEach(() => { vi.unstubAllGlobals() })
   - **Above md, money/live path**: MANUAL on `lift_pass_day` renders the explanatory `<span>` (NOT an input).
   - **Below md** (`stubMatchMedia(false)`): MANUAL on `slopes_km` renders NEITHER the input NOR the interactive `<button>` ModeToggle — instead, the v4.4b inline render-only `<span role="switch" aria-disabled="true">` ModeToggle is shown. The input element is absent from the DOM. (Per **D11** + AGENTS.md "Admin App Rules".)
   - **Tab order assertion**: above md, the ModeToggle button has the default tab order (no `tabindex`). Below md, the render-only span has no `tabindex` (spans are not focusable by default), so the editor element is absent from the tab order.
+  - **Empty/transient input does NOT persist** per Codex round-11 P2-15 fold: above-md MANUAL on `slopes_km` with persisted value 150. Simulate user clearing the input (`fireEvent.change(input, { target: { value: '' } })`); fast-forward debounce; assert (a) `apiClient.upsertResort` was NOT called (empty string is transient), (b) the input element STILL displays the empty string (local state updated), (c) `draft.resort.slopes_km` STILL holds 150 (persisted state untouched). Then simulate typing `'7'`; fast-forward; assert PUT fires with `slopes_km: 7`. Without this guard, `Number('')` would coerce to 0 and PUT would persist 0 with manual provenance — workspace data corruption.
+  - **Invalid intermediate input does NOT persist** per same fold: simulate `value: '-'` (negative-sign-in-progress), `'1e'` (scientific notation in progress), `'.'` (decimal-only) — `Number(...)` is NaN for each → no PUT fires; local string updates so the user sees what they typed.
 - [ ] **Step 4:** The pre-existing 4.4b inline-span tests must each call `stubMatchMedia(false)` (or default to false in their `beforeEach`) so they exercise the below-md branch unambiguously after the responsive gate ships.
 - [ ] **Step 5:** Run failing.
 - [ ] **Step 6: Implement.** Replace the FieldRow body:
 
 ```tsx
-import { useSyncExternalStore } from 'react'
+import { useRef, useState, useSyncExternalStore, type ChangeEvent } from 'react'
 
 // 7 durable paths that can be MANUAL-edited via numeric inputs (per F1 fold).
 const MANUAL_EDITABLE_PATHS: ReadonlySet<MetricPath> = new Set([
@@ -1458,13 +1460,36 @@ function FieldRow({ path, state }: FieldRowProps): JSX.Element {
 
   // Resolve the displayed/edited value. For nested paths the draft.resort
   // shape mirrors Resort, so we walk segments to read the leaf.
-  const inputValue = readDraftLeaf(draft.resort, path) ?? valueFor(state)
+  const persistedValue = readDraftLeaf(draft.resort, path) ?? valueFor(state)
   const isManual = modeFor(path) === 'manual'
   const isMonth = path === 'season.start_month' || path === 'season.end_month'
 
+  // Per Codex round-11 P2-15 fold: maintain a LOCAL string state for the
+  // numeric input so empty/transient/invalid input strings don't get
+  // coerced to 0 and persisted with manual provenance. Without this, an
+  // analyst clearing the field before retyping would race the 500ms
+  // autosave: `Number('') === 0` would write a valid-looking 0 to the
+  // workspace before the new value arrives.
+  //
+  // The local string syncs from `persistedValue` on every render where
+  // the persisted value changes (post-PUT canonical update, navigation,
+  // remount). During typing, the local string is the source of truth for
+  // the input element; the persistedValue is updated only when the input
+  // parses cleanly.
+  const [localString, setLocalString] = useState((): string => String(persistedValue ?? ''))
+  const lastPersistedRef = useRef<unknown>(persistedValue)
+  if (lastPersistedRef.current !== persistedValue) {
+    // Persisted value changed externally (e.g., post-PUT canonical or
+    // navigation reload) — sync the local input string so the user sees
+    // the fresh canonical state. This must run during render to be
+    // useState-safe; using useEffect would cause one render of stale
+    // local string before the sync.
+    lastPersistedRef.current = persistedValue
+    setLocalString(String(persistedValue ?? ''))
+  }
+
   // ModeToggle: above md → interactive <button>; below md → render-only <span>
-  // per **D11** + AGENTS.md "Admin App Rules". The render-only span mirrors
-  // PR 4.4b's inline shape (role="switch", aria-disabled="true", aria-checked).
+  // per **D11** + AGENTS.md "Admin App Rules".
   const modeToggleEl = isAboveMd
     ? <ModeToggle path={path} mode={modeFor(path)} onToggle={(): void => toggleMode(path)} />
     : (
@@ -1472,6 +1497,20 @@ function FieldRow({ path, state }: FieldRowProps): JSX.Element {
         {modeFor(path) === 'manual' ? 'MANUAL' : 'AUTO'}
       </span>
     )
+
+  // Per Codex round-11 P2-15 fold: empty / NaN strings are local-only
+  // transient state — do NOT call setFieldValue (which would persist 0
+  // or NaN with manual provenance under the 500ms debounce). The local
+  // string still updates so the input element reflects what the user
+  // typed; only valid numbers propagate to the persisted draft.
+  const onInputChange = (e: ChangeEvent<HTMLInputElement>): void => {
+    const raw = e.target.value
+    setLocalString(raw)
+    if (raw === '') { return /* transient — wait for valid number */ }
+    const parsed = Number(raw)
+    if (Number.isNaN(parsed)) { return /* transient invalid intermediate (e.g., '-', '.', '1e') */ }
+    setFieldValue(path, parsed)
+  }
 
   // Input: above md AND MANUAL AND a durable numeric path → render <input>;
   // above md AND MANUAL AND non-durable → render explanatory copy;
@@ -1481,8 +1520,8 @@ function FieldRow({ path, state }: FieldRowProps): JSX.Element {
       ? (
         <input
           type="number"
-          value={inputValue as number}
-          onChange={(e): void => setFieldValue(path, Number(e.target.value))}
+          value={localString}
+          onChange={onInputChange}
           {...(isMonth ? { min: 1, max: 12 } : {})}
         />
       )
@@ -1491,7 +1530,7 @@ function FieldRow({ path, state }: FieldRowProps): JSX.Element {
   return (
     <div role="group" aria-label={labelForPath(path)}>
       <StatusPill variant={pillVariantFor(state)} />
-      <span>{formatMetricValue(path, isManual ? inputValue : valueFor(state))}</span>
+      <span>{formatMetricValue(path, isManual ? persistedValue : valueFor(state))}</span>
       <span>{sourceFor(state)}</span>
       {modeToggleEl}
       {inputElement}
@@ -1706,5 +1745,11 @@ One P2 finding on the v10 plan; folded:
 One P2 finding on the v11 plan; folded:
 
 - **P2-14 — `editor_modes` reject test cases didn't match the actual request pipeline.** v11's PR 4.4c Task 7 specified two reject cases: (a) `editor_modes: { ghost: 'manual' }` → `400 invalid-resort`, and (b) "PUT drops `field_sources.a` while keeping `editor_modes.a`" → reject. Both were wrong. (a): `ResortUpsertBody`'s schema (`packages/schema/api/resortUpsert.ts`) uses `z.partialRecord(z.enum(METRIC_FIELDS), ...)` — a non-`MetricPath` key like `'ghost'` fails Zod parse at the request layer and returns `400 invalid-request` (NOT `invalid-resort`); the handler never runs. (b): `ResortUpsertBody.resort` is `Partial<Resort>` and spec §4.3 deep-merges `field_sources` server-side; the PUT body cannot REPRESENT a removal — clients can ADD/UPDATE entries but not DELETE them. **Fold:** (a) replaced with a valid-MetricPath-not-in-field_sources case: `editor_modes: { snow_depth_cm: 'manual' }` against `kotelnica` (whose `resort.field_sources` covers only the 7 durable paths). The body parses cleanly through `ResortUpsertBody` (snow_depth_cm IS a `MetricPath`), but `WorkspaceFile.parse()`'s cross-key refinement post-merge rejects (snow_depth_cm in editor_modes but not in resort.field_sources). Handler throws `InvalidResortError`; dispatch maps to `400 invalid-resort`. (b) dropped — not representable through the public PUT API; the cross-key invariant against this state is already covered by `workspaceFile.test.ts` schema tests in PR 4.1a. PR 4.4c local-test `curl` step now verifies BOTH the request-layer (`ghost`) and handler-layer (`snow_depth_cm`) reject paths.
+
+### Codex round 11 (PR #90 review by `chatgpt-codex-connector`, 2026-05-08)
+
+One P2 finding on the v12 plan; folded:
+
+- **P2-15 — Empty/transient numeric input gets coerced to 0 and persisted.** v12's FieldRow `onChange` handler did `setFieldValue(path, Number(e.target.value))`. When the analyst clears a MANUAL field before retyping, `e.target.value` is `''`, `Number('')` is `0`, and the 500ms autosave persists `0` with manual provenance. For `slopes_km`, `altitude_m.*`, `skiable_terrain_ha`, `lift_count` — all of which validly accept `0` numerically per `Resort`'s Zod schema — the persisted `0` is silently saved and would corrupt the workspace (e.g., `slopes_km: 0` for a real resort). The same vulnerability exists for transient invalid intermediates like `'-'`, `'.'`, `'1e'` (each coerces to `NaN` which IS rejected by `z.number()` BUT the bridge integration test would still see the spurious PUT). **Fold:** FieldRow now keeps a **local string state** for the numeric input (`useState((): string => String(persistedValue ?? ''))`) — the input element is controlled by this string, not by the persisted draft. `onInputChange`: ALWAYS updates the local string (so the input element reflects what the user typed), but only calls `setFieldValue(path, parsed)` when `raw !== ''` AND `!Number.isNaN(parsed)`. Empty/invalid strings stay local-only — no PUT fires. The local string syncs back to `persistedValue` via a ref-tracked render-time check when the persisted value changes externally (post-PUT canonical update, navigation reload). PR 4.4d Task 6 test list adds two new cases: (1) "empty/transient input does NOT persist" — assert `apiClient.upsertResort` not called after clearing input; (2) "invalid intermediate input does NOT persist" — assert no PUT fires for `'-'`/`'.'`/`'1e'`.
 
 **End of plan.**
