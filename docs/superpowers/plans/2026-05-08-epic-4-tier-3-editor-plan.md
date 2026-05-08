@@ -661,7 +661,7 @@ import { Component, Suspense, startTransition, useState } from 'react'
 
 import type { ResortSlug } from '@snowboard-trip-advisor/schema'
 
-import { Tabs } from '@snowboard-trip-advisor/design-system'
+import { Button, Tabs } from '@snowboard-trip-advisor/design-system'
 
 import { ApiClientError } from '../lib/apiClient'
 import { invalidateResortDetail, useResortDetail } from '../state/useResortDetail'
@@ -730,11 +730,13 @@ class EditorErrorBoundary extends Component<BoundaryProps, BoundaryState> {
   public render(): ReactNode {
     if (this.state.error === null) { return this.props.children }
     const { error } = this.state
+    // Per Codex round-16 P2-21 fold: use DS Button (raw <button> JSX is
+    // banned in apps/admin/src/** by eslint.config.js:255 / RAW_HTML_ELS).
     if (error.envelope.error.code === 'not-found') {
       return (
         <div role="alert">
           <p>Resort not found.</p>
-          <button onClick={this.props.onBack}>Back to resorts</button>
+          <Button variant="ghost" onClick={this.props.onBack}>Back to resorts</Button>
         </div>
       )
     }
@@ -742,8 +744,8 @@ class EditorErrorBoundary extends Component<BoundaryProps, BoundaryState> {
       return (
         <div role="alert">
           <p>Workspace file <code>data/admin-workspace/{this.props.slug}.json</code> is corrupt. Inspect the file and either repair or <code>rm</code> it before retrying. See server logs for details.</p>
-          <button onClick={this.props.onBack}>Back to resorts</button>
-          <button onClick={this.props.onRetry}>Retry</button>
+          <Button variant="ghost" onClick={this.props.onBack}>Back to resorts</Button>
+          <Button variant="primary" onClick={this.props.onRetry}>Retry</Button>
         </div>
       )
     }
@@ -751,7 +753,7 @@ class EditorErrorBoundary extends Component<BoundaryProps, BoundaryState> {
     return (
       <div role="alert">
         <p>Error loading resort: {error.envelope.error.message}</p>
-        <button onClick={this.props.onRetry}>Retry</button>
+        <Button variant="primary" onClick={this.props.onRetry}>Retry</Button>
       </div>
     )
   }
@@ -975,7 +977,8 @@ if (code !== undefined) {
   - **Nested-path edit preserves sibling** per **D10** + Codex round-4 P2-6 fold: canonical state has `resort.altitude_m: { min: 1500, max: 2000 }`. `setFieldValue('altitude_m.min', 1600)` → assert `draft.resort.altitude_m === { min: 1600, max: 2000 }` (NOT `{ min: 1600 }`). The hydration-on-first-edit reads the sibling from `store.canonical`. Without this, the PUT body's shallow `Resort.altitude_m` merge on the server replaces the whole object with `{ min: 1600 }` and silently drops `max`. Same test for `season.start_month` (sibling = `season.end_month`) and `lifts_open.count` (sibling = `lifts_open.total`, on the live_signal side).
   - **Canonical sync on render**: when `useResortDetail(slug)` re-projects (e.g., post-PUT response), the `store.canonical` reference updates so subsequent `setFieldValue` calls hydrate from the freshest canonical state.
   - **Manual provenance written on value edit** per **D12** + Codex round-5 P1-1 fold: `setFieldValue('slopes_km', 150)` against canonical with `field_sources.slopes_km.source === 'opensnow'` → assert: (a) `draft.resort.slopes_km === 150`; (b) `draft.resort.field_sources.slopes_km.source === 'manual'`; (c) `draft.resort.field_sources.slopes_km.source_url === 'https://admin.local/manual'`; (d) `upstream_hash` matches `/^[a-f0-9]{64}$/`; (e) `observed_at` ≈ now. **And `field_sources` is sparse** per Codex round-6 P1-1 + round-7 P2-10 folds: assert `Object.keys(draft.resort.field_sources)` is **exactly `['slopes_km']`** (no canonical siblings copied). Server's deep-merge for `field_sources` (spec §4.3) preserves other entries automatically; including them in the PUT would risk overwriting concurrent server-side adapter updates.
-  - **Save → later edit clears prior draft** per **D13** + Codex round-7 P1-1 fold: setFieldValue('slopes_km', 150) → debounce → PUT succeeds → assert draft is reset to `{ editor_modes: {} }` (no stale resort/live_signal entries). Then setFieldValue('lift_count', 7) → debounce → next PUT body contains ONLY `{ resort: { lift_count: 7, field_sources: { lift_count: <manual> } } }` (NOT `slopes_km` again). Without the reset, the second PUT would re-send `slopes_km: 150` plus its now-stale manual-source entry, risking last-writer-wins clobber against any concurrent server-side update to `slopes_km`.
+  - **Save → later edit clears prior draft** per **D13** + Codex round-7 P1-1 fold: setFieldValue('slopes_km', 150) → debounce → PUT succeeds (rev unchanged path) → assert draft is reset to `{ editor_modes: {} }` and `lastSentDraft` is null. Then setFieldValue('lift_count', 7) → debounce → next PUT body contains ONLY `{ resort: { lift_count: 7, field_sources: { lift_count: <manual> } } }` (NOT `slopes_km` again). Without the reset, the second PUT would re-send `slopes_km: 150` plus its now-stale manual-source entry, risking last-writer-wins clobber against any concurrent server-side update to `slopes_km`.
+  - **Edit during round-trip → queued flush diffs against lastSentDraft** per Codex round-16 P2-22 fold: setFieldValue('slopes_km', 150) → debounce flush fires PUT for slopes_km (in-flight). BEFORE response, setFieldValue('lift_count', 7) — rev advances; draft now has both. PUT response arrives → rev-moved path: draft NOT reset, `lastSentDraft = { resort: { slopes_km: 150, field_sources: { slopes_km: <manual> } } }`, prepopulate cache. Queued flush fires → body = diff(currentDraft, lastSentDraft) = ONLY `{ resort: { lift_count: 7, field_sources: { lift_count: <manual> } } }`. **Assert: the second PUT body does NOT include `slopes_km` re-send.** Without the diff, the queued flush would re-send slopes_km's already-persisted state, risking concurrent-server-update clobber.
   - **`setMode` does NOT touch field_sources** per **D12**: `setMode('slopes_km', 'manual')` against canonical → assert `draft.resort?.field_sources` is undefined (or unchanged). Mode-flip-without-edit preserves old upstream provenance — only an actual value change triggers the source switch.
 - [ ] **Step 2:** Run. FAIL.
 
@@ -1024,6 +1027,14 @@ interface SlugStore {
   // (e.g., editing altitude_m.min reads canonical.resort.altitude_m to
   // preserve .max in the draft). Per **D10**.
   canonical: ResortDetailResponse | null
+  // Per Codex round-16 P2-22 fold: the draft snapshot from the last
+  // successful PUT. The next flush builds the PUT body as the diff between
+  // the current draft and lastSentDraft — ensuring fields already persisted
+  // by an earlier flush aren't re-sent (which would risk overwriting
+  // concurrent server-side updates with stale data). Reset to null when
+  // the draft is cleared (rev-unchanged success path), or set to the
+  // sent draft on rev-moved success so the queued flush diffs correctly.
+  lastSentDraft: DraftShape | null
   inFlightToken: symbol | null
   queued: boolean
   timer: ReturnType<typeof setTimeout> | null
@@ -1045,7 +1056,15 @@ function emptyState(): StoreState {
 function getOrCreateStore(slug: ResortSlug): SlugStore {
   let store = storesBySlug.get(slug)
   if (store === undefined) {
-    store = { state: emptyState(), canonical: null, inFlightToken: null, queued: false, timer: null, subscribers: new Set() }
+    store = {
+      state: emptyState(),
+      canonical: null,
+      lastSentDraft: null,
+      inFlightToken: null,
+      queued: false,
+      timer: null,
+      subscribers: new Set(),
+    }
     storesBySlug.set(slug, store)
   }
   return store
@@ -1141,14 +1160,16 @@ async function flush(slug: ResortSlug): Promise<void> {
   store.inFlightToken = token
   setStatusForDirty(store, 'saving')
   try {
-    const body = buildBodyFromDraft(inFlightDraft)
+    // Per Codex round-16 P2-22 fold: PUT body is the diff between the
+    // current draft and what was last successfully sent (`store.lastSentDraft`).
+    // First flush has lastSent = null → body is the entire draft. Subsequent
+    // flushes (after a previous success) only send PATHS that changed since.
+    const body = buildBodyFromDraft(inFlightDraft, store.lastSentDraft)
     const response = await apiClient.upsertResort(slug, body)
-    // Mark saved AND reset draft only if BOTH the token is still ours (no
-    // race) AND the rev did NOT advance during the round-trip (Codex
-    // round-1 P2-2 fold). Per Codex round-7 P1-1 fold: reset the draft so
-    // subsequent edits don't re-send already-persisted fields and risk
-    // clobbering concurrent server-side updates with stale data.
     if (store.inFlightToken === token && store.state.rev === inFlightRev) {
+      // Rev unchanged — clean success. Reset draft, mark statuses saved,
+      // prepopulate canonical, clear lastSentDraft (since the fresh draft
+      // has nothing pending).
       patchState(store, (s) => {
         const nextStatus = { ...s.status }
         for (const [path, status] of Object.entries(s.status)) {
@@ -1159,13 +1180,23 @@ async function flush(slug: ResortSlug): Promise<void> {
         return {
           rev: s.rev,
           status: nextStatus,
-          // Reset draft — what was sent is now persisted server-side.
           draft: { editor_modes: {} },
         }
       })
-      // Also push the response into useResortDetail's cache so the next
-      // render sees the freshly-persisted canonical state without
-      // re-fetching (avoids a Suspense flicker after every save).
+      store.lastSentDraft = null  // draft is empty; next edit starts fresh
+      prepopulateResortDetail(slug, response)
+    } else if (store.inFlightToken === token) {
+      // Rev moved — user edited during round-trip. KEEP the draft (newer
+      // edits live there) but record what was successfully sent so the
+      // queued flush diffs against this baseline and ONLY sends the new
+      // edits. Without this, the queued flush re-sends inFlightDraft's
+      // already-persisted fields — risking last-writer-wins clobber against
+      // concurrent server-side updates (Codex round-16 P2-22 fold).
+      store.lastSentDraft = inFlightDraft
+      // Also prepopulate the canonical cache with the response — the
+      // FieldRow value display reads from canonical for fields not in the
+      // draft, so post-success reads of just-sent paths reflect the
+      // server-persisted state.
       prepopulateResortDetail(slug, response)
     }
   } catch {
@@ -1181,15 +1212,79 @@ async function flush(slug: ResortSlug): Promise<void> {
   }
 }
 
-function buildBodyFromDraft(draft: DraftShape): ResortUpsertBody {
-  // Per **D10**: draft.resort + draft.live_signal already mirror the
-  // ResortUpsertBody shape (nested parents hydrated at edit time). Just emit
-  // the non-empty parts; server rejects empty body as invalid-request.
+// Per **D10** + Codex round-16 P2-22 fold: PUT body is the diff between
+// the current draft and `lastSent` (what was successfully sent in the
+// previous flush). When `lastSent` is null (first flush), the body is the
+// entire draft. Otherwise, only paths whose values differ from `lastSent`
+// are included — fields already persisted by an earlier flush are skipped,
+// preventing stale-data re-sends that would risk overwriting concurrent
+// server-side updates.
+//
+// Comparison strategy: shallow-compare each top-level key under
+// `draft.resort` / `draft.live_signal`. For nested objects (altitude_m,
+// season, lifts_open, etc.), compare via JSON.stringify (small objects;
+// runtime cost negligible). field_sources entries are compared by
+// upstream_hash (each manual edit writes a fresh random hash, so the hash
+// uniquely identifies the edit). editor_modes entries compare directly
+// (string === string).
+function buildBodyFromDraft(draft: DraftShape, lastSent: DraftShape | null): ResortUpsertBody {
+  if (lastSent === null) {
+    // First flush — emit the entire draft.
+    const body: ResortUpsertBody = {}
+    if (draft.resort !== undefined && Object.keys(draft.resort).length > 0) { body.resort = draft.resort }
+    if (draft.live_signal !== undefined && Object.keys(draft.live_signal).length > 0) { body.live_signal = draft.live_signal }
+    if (Object.keys(draft.editor_modes).length > 0) { body.editor_modes = draft.editor_modes }
+    return body
+  }
+  // Diff against lastSent. Each top-level key (resort.<key> /
+  // live_signal.<key> / editor_modes.<path>) is compared.
+  const diffedResort = diffSide(draft.resort, lastSent.resort)
+  const diffedLive = diffSide(draft.live_signal, lastSent.live_signal)
+  const diffedModes: Partial<Record<MetricPath, 'manual' | 'auto'>> = {}
+  for (const [path, mode] of Object.entries(draft.editor_modes)) {
+    if (lastSent.editor_modes[path as MetricPath] !== mode) {
+      diffedModes[path as MetricPath] = mode
+    }
+  }
   const body: ResortUpsertBody = {}
-  if (draft.resort !== undefined && Object.keys(draft.resort).length > 0) { body.resort = draft.resort }
-  if (draft.live_signal !== undefined && Object.keys(draft.live_signal).length > 0) { body.live_signal = draft.live_signal }
-  if (Object.keys(draft.editor_modes).length > 0) { body.editor_modes = draft.editor_modes }
+  if (diffedResort !== null) { body.resort = diffedResort }
+  if (diffedLive !== null) { body.live_signal = diffedLive }
+  if (Object.keys(diffedModes).length > 0) { body.editor_modes = diffedModes }
   return body
+}
+
+// Diff a side (resort or live_signal). Returns null when no fields differ
+// (so the caller can omit the side from the body). field_sources is
+// compared per-path by upstream_hash.
+function diffSide<T extends object>(current: Partial<T> | undefined, sent: Partial<T> | undefined): Partial<T> | null {
+  if (current === undefined) { return null }
+  const out: Partial<T> = {}
+  let hasChanges = false
+  for (const [key, currentValue] of Object.entries(current)) {
+    if (key === 'field_sources') {
+      const currentFs = currentValue as Record<string, FieldSource>
+      const sentFs = ((sent as Record<string, unknown> | undefined)?.field_sources ?? {}) as Record<string, FieldSource>
+      const diffedFs: Record<string, FieldSource> = {}
+      let fsChanged = false
+      for (const [path, fs] of Object.entries(currentFs)) {
+        if (sentFs[path]?.upstream_hash !== fs.upstream_hash) {
+          diffedFs[path] = fs
+          fsChanged = true
+        }
+      }
+      if (fsChanged) {
+        ;(out as Record<string, unknown>).field_sources = diffedFs
+        hasChanges = true
+      }
+    } else {
+      const sentValue = (sent as Record<string, unknown> | undefined)?.[key]
+      if (JSON.stringify(sentValue) !== JSON.stringify(currentValue)) {
+        ;(out as Record<string, unknown>)[key] = currentValue
+        hasChanges = true
+      }
+    }
+  }
+  return hasChanges ? out : null
 }
 
 // Per **D12** + Codex round-5 P1-1 fold: manual edits MUST write a manual
@@ -1797,5 +1892,12 @@ Two related P2 findings on the v16 plan; both real correctness issues blocking t
 
 - **P2-19 — Raw `<button>` JSX banned in apps/admin/src/**.** v16's `ModeToggle.tsx` impl used a raw `<button type="button" role="switch">`. But `eslint.config.js:19` defines `RAW_HTML_ELS = '^(button|input|a|dialog|select|textarea)$'` and the apps/** lint block at line 255 rejects any `JSXOpeningElement` matching that regex — `npm run lint` would block the PR before tests even run. AGENTS.md "UI Code Rules" says "No raw HTML element imports where a design-system component exists". **Fold:** `ModeToggle.tsx` now uses the DS `Button` component with `variant="ghost"` + `aria-pressed={mode === 'manual'}`. The DS `Button` already exposes `aria-pressed` for toggle-style usage (`packages/design-system/src/components/Button.tsx:15-19,34`); semantics shift from `role="switch"` to "toggle button" but functionally equivalent for the editor UX. No DS extension needed.
 - **P2-20 — Raw `<input>` JSX similarly banned, AND DS `Input` doesn't ship `type="number"`.** Same lint rule blocks `<input type="number">`. The DS `Input` component supports only `type: 'text' | 'date'` (`packages/design-system/src/components/Input.tsx:20`). Extending DS Input would add `packages/design-system/**` files to PR 4.4d, busting its 8-file budget. **Fold:** PR 4.4d uses DS `Input` with `type="text"` and adds JS-side numeric + month-range validation (extends the round-11 `Number.isNaN` guard with `parsed < 1 || parsed > 12 || !Number.isInteger(parsed)` for the month paths). Test queries change to `getByRole('textbox', { name: labelForPath(path) })`. Tradeoff: lose the browser's native `type="number"` spinner buttons + numeric keyboard on mobile — acceptable for Phase-1 admin (loopback dev-only on desktop). DS Input extension is a Phase-2 / 4.6a-polish concern, NOT a Tier-3 blocker.
+
+### Codex round 16 (PR #90 review by `chatgpt-codex-connector`, 2026-05-08)
+
+Two P2 findings on the v17 plan; both real correctness issues; both folded:
+
+- **P2-21 — `<EditorErrorBoundary>` Back/Retry buttons are raw `<button>`.** Same lint ban as round-15 (P2-19). v17 fixed `<ModeToggle>` but left the boundary's controls as raw HTML. **Fold:** EditorErrorBoundary now uses DS `Button` for both controls (`variant="ghost"` for Back; `variant="primary"` for Retry). Imports added to `ResortEditor.tsx`'s top-of-file: `import { Button, Tabs } from '@snowboard-trip-advisor/design-system'`.
+- **P2-22 — Queued flush after rev-moved success re-sends already-persisted fields.** v17's flush handled rev-unchanged success (reset draft + prepopulate) but skipped both branches when rev moved during the round-trip. The queued flush then fired with the FULL current draft — including paths the first PUT already persisted with manual provenance. Under server's last-writer-wins merge for `field_sources`, this risked overwriting concurrent server-side adapter updates to those paths between the two PUTs. **Fold:** added `lastSentDraft: DraftShape | null` to `SlugStore` + a diff-based PUT body. Each flush builds the body as the diff between the current draft and `store.lastSentDraft`. On rev-unchanged success: reset draft + clear `lastSentDraft` to null (next flush sends entire fresh draft). On rev-moved success: keep the draft (it has newer edits), set `store.lastSentDraft = inFlightDraft` so the queued flush diffs correctly — only paths whose values differ from `lastSentDraft` go in the next PUT body. PR 4.4d Task 2 adds an "edit during round-trip → queued flush diffs against lastSentDraft" test that fails without the diff (assert second PUT body excludes the first PUT's slopes_km).
 
 **End of plan.**
