@@ -1131,7 +1131,9 @@ export function setFieldValue(slug: ResortSlug, path: MetricPath, value: unknown
     // Patch the value (with sibling hydration per **D10**)
     const draftWithValue = patchDraftLeaf(s.draft, side, path, value, store.canonical)
     // Patch field_sources[path] with the new manual source per **D12**.
-    const draftWithFs = patchFieldSource(draftWithValue, side, path, fs, store.canonical)
+    // Per Codex round-6 P1-1 fold: NO canonical hydration — field_sources is
+    // deep-merged server-side, so a sparse PUT entry is correct.
+    const draftWithFs = patchFieldSource(draftWithValue, side, path, fs)
     return {
       rev: s.rev + 1,
       draft: draftWithFs,
@@ -1141,27 +1143,21 @@ export function setFieldValue(slug: ResortSlug, path: MetricPath, value: unknown
   scheduleFlush(slug)
 }
 
-// Patch field_sources[path] in draft.resort.field_sources OR
-// draft.live_signal.field_sources, hydrating the field_sources object from
-// canonical on first edit (similar to patchDraftLeaf for value siblings).
-function patchFieldSource(
-  draft: DraftShape,
-  side: Side,
-  path: MetricPath,
-  fs: FieldSource,
-  canonical: ResortDetailResponse | null,
-): DraftShape {
+// Per Codex round-6 P1-1 fold: do NOT hydrate field_sources from canonical.
+// Spec §4.3 specifies field_sources is **deep-merged** on the server (unlike
+// the shallow-merged top-level Resort fields), so the PUT body should send
+// ONLY the edited path's entry. Hydrating from canonical would copy every
+// upstream provenance entry into the PUT body, which is both wasteful AND
+// risks overwriting server-side updates that landed between our GET and PUT
+// (e.g., an adapter run that refreshed upstream provenance for a different
+// path).
+function patchFieldSource(draft: DraftShape, side: Side, path: MetricPath, fs: FieldSource): DraftShape {
   if (side === 'resort') {
-    const existing = draft.resort?.field_sources
-    const canonicalFs = canonical?.resort?.field_sources ?? {}
-    const hydrated = existing ?? { ...canonicalFs }
-    return { ...draft, resort: { ...(draft.resort ?? {}), field_sources: { ...hydrated, [path]: fs } } }
+    const existing = draft.resort?.field_sources ?? {}
+    return { ...draft, resort: { ...(draft.resort ?? {}), field_sources: { ...existing, [path]: fs } } }
   }
-  const existing = draft.live_signal?.field_sources
-  const canonicalLive = canonical?.live_signal
-  const canonicalFs = canonicalLive?.field_sources ?? {}
-  const hydrated = existing ?? { ...canonicalFs }
-  return { ...draft, live_signal: { ...(draft.live_signal ?? {}), field_sources: { ...hydrated, [path]: fs } } }
+  const existing = draft.live_signal?.field_sources ?? {}
+  return { ...draft, live_signal: { ...(draft.live_signal ?? {}), field_sources: { ...existing, [path]: fs } } }
 }
 
 export function setMode(slug: ResortSlug, path: MetricPath, mode: 'manual' | 'auto'): void {
@@ -1319,13 +1315,28 @@ export function ModeToggle({ path, mode, onToggle }: ModeToggleProps): JSX.Eleme
 
 **Files:** Modify `apps/admin/src/views/ResortEditor/FieldRow.tsx` AND `apps/admin/src/views/ResortEditor/FieldRow.test.tsx`.
 
-- [ ] **Step 1: Add failing tests** to `FieldRow.test.tsx`. Three new branches:
-  - **Above md (default jsdom width = 1024)**: MANUAL on `slopes_km` renders `<input type="number">` AND a `<ModeToggle>` button (`role="switch"`, NO `aria-disabled`). Clicking the button calls toggleMode. Typing in the input calls setFieldValue.
+- [ ] **Step 1: Add a `matchMedia` stub** at the top of `FieldRow.test.tsx` (per Codex round-6 P2-8 fold — jsdom does NOT implement `window.matchMedia`; without the stub, `useIsAboveMd()` throws `TypeError: window.matchMedia is not a function`):
+
+```ts
+function stubMatchMedia(matches: boolean): void {
+  vi.stubGlobal('matchMedia', vi.fn().mockImplementation((query: string) => ({
+    matches, media: query, onchange: null,
+    addEventListener: vi.fn(), removeEventListener: vi.fn(),
+    addListener: vi.fn(), removeListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  })))
+}
+afterEach(() => { vi.unstubAllGlobals() })
+```
+
+- [ ] **Step 2: Add failing tests** to `FieldRow.test.tsx`. Three new branches (each test calls `stubMatchMedia(true)` or `stubMatchMedia(false)` per its viewport intent):
+  - **Above md** (`stubMatchMedia(true)`): MANUAL on `slopes_km` renders `<input type="number">` AND a `<ModeToggle>` button (`role="switch"`, NO `aria-disabled`). Clicking the button calls toggleMode. Typing in the input calls setFieldValue.
   - **Above md, money/live path**: MANUAL on `lift_pass_day` renders the explanatory `<span>` (NOT an input).
-  - **Below md (mock `window.matchMedia('(min-width: 768px)') → matches: false`)**: MANUAL on `slopes_km` renders NEITHER the input NOR the interactive `<button>` ModeToggle — instead, the v4.4b inline render-only `<span role="switch" aria-disabled="true">` ModeToggle is shown. The input element is absent from the DOM. (Per **D11** + AGENTS.md "Admin App Rules".)
+  - **Below md** (`stubMatchMedia(false)`): MANUAL on `slopes_km` renders NEITHER the input NOR the interactive `<button>` ModeToggle — instead, the v4.4b inline render-only `<span role="switch" aria-disabled="true">` ModeToggle is shown. The input element is absent from the DOM. (Per **D11** + AGENTS.md "Admin App Rules".)
   - **Tab order assertion**: above md, the ModeToggle button has the default tab order (no `tabindex`). Below md, the render-only span has no `tabindex` (spans are not focusable by default), so the editor element is absent from the tab order.
-- [ ] **Step 2:** Run failing. The pre-existing 4.4b inline-span tests still pass (they apply only below md after this change, but we add `mockMatchMedia` to those tests so they exercise the below-md branch unambiguously).
-- [ ] **Step 3: Implement.** Replace the FieldRow body:
+- [ ] **Step 4:** The pre-existing 4.4b inline-span tests must each call `stubMatchMedia(false)` (or default to false in their `beforeEach`) so they exercise the below-md branch unambiguously after the responsive gate ships.
+- [ ] **Step 5:** Run failing.
+- [ ] **Step 6: Implement.** Replace the FieldRow body:
 
 ```tsx
 import { useSyncExternalStore } from 'react'
@@ -1417,13 +1428,13 @@ function readDraftLeaf(draftResort: Partial<Resort> | undefined, path: MetricPat
 
 (Executor fills in test-fixture imports + `mockMatchMedia` helper for the below-md test branch. The `useIsAboveMd` hook lives co-located in FieldRow.tsx for now; if a future PR needs it elsewhere, it extracts to `apps/admin/src/lib/`.)
 
-- [ ] **Step 4:** Run all FieldRow tests. PASS on all viewport branches.
+- [ ] **Step 7:** Run all FieldRow tests. PASS on all viewport branches.
 
 ### Task 7 — Bridge integration test
 
 **Files:** New `tests/integration/apps/admin/resort-editor-write.test.tsx`.
 
-- [ ] **Step 1: Setup.** `beforeEach` creates per-test workspace tmpdir (`mkdtemp`); seeds with the `kotelnica-bialczanska.json` fixture (`fs.copyFile` from `tests/fixtures/admin-workspace/`); calls `server.use(...bridgeHandlers(tmpdir))`. `afterEach` removes tmpdir AND calls `useResortDetail.__resetForTests()` + `useWorkspaceState.__resetForTests()`.
+- [ ] **Step 1: Setup.** `beforeEach` creates per-test workspace tmpdir (`mkdtemp`); seeds with the `kotelnica-bialczanska.json` fixture (`fs.copyFile` from `tests/fixtures/admin-workspace/`); calls `server.use(...bridgeHandlers(tmpdir))`. **Add a `matchMedia` stub** (per Codex round-6 P2-8 fold — jsdom does NOT implement `window.matchMedia`; without the stub, `<App />` mounting → `<FieldRow>` → `useIsAboveMd()` throws). Stub `matchMedia` via `vi.stubGlobal` in a `beforeEach` (default `matches: true` so the test exercises the above-md interactive path; below-md flows are covered by FieldRow.test.tsx). `afterEach` removes tmpdir AND calls `useResortDetail.__resetForTests()` + `useWorkspaceState.__resetForTests()` AND `vi.unstubAllGlobals()`.
 - [ ] **Step 2: Write test (top-level numeric path: `slopes_km`):**
   - Mount `<App />` with `?route=editor&slug=kotelnica-bialczanska`.
   - Wait for editor render (await `findByRole('tablist')` or similar).
@@ -1571,5 +1582,12 @@ Two P2 findings on the v5 plan; both real correctness issues; both folded:
 One P1 finding on the v6 plan; folded:
 
 - **P1-1 — Manual edits leave provenance pointing at the prior upstream.** v6's `setFieldValue` only patched the value (and the nested parent) — it did NOT update `resort.field_sources[path]`. Server's `resortUpsert` deep-merges `field_sources` (per spec §4.3), so absent a replacement the canonical entry survives. Result: PUT lands `resort.slopes_km === 150` AND `field_sources.slopes_km.source === 'opensnow'` (or whatever upstream existed). The published dataset would attribute a manual override to the prior upstream — a provenance lie. **Fold:** decisions log **D12** added: `setFieldValue` patches `draft.resort.field_sources[path]` alongside the value with a fresh manual `FieldSource` (`source: 'manual'`, `source_url: 'https://admin.local/manual'`, current ISO timestamps, `crypto.getRandomValues`-derived 64-char hex `upstream_hash`, `attribution_block: { en: 'Manual entry by analyst.' }`). The `manualFieldSource(path, value)` helper is co-located in `useWorkspaceState.ts`. `setMode` does NOT touch `field_sources` — mode-flip-without-edit preserves prior upstream provenance, which is the intended semantics. PR 4.4d Task 2 adds "manual provenance written on value edit" + "setMode does not touch field_sources" tests; PR 4.4d Task 7 bridge integration test asserts on-disk `resort.field_sources.slopes_km.source === 'manual'` post-PUT.
+
+### Codex round 6 (PR #90 review by `chatgpt-codex-connector`, 2026-05-08)
+
+Two findings on the v7 plan (one P1, one P2); both real correctness issues; both folded:
+
+- **P1-1 — `patchFieldSource` hydrated non-manual provenance into PUT body.** v7's helper did `existing ?? { ...canonicalFs }` — on first edit, it copied the entire canonical `field_sources` map (including `source: 'opensnow'`/etc. for paths the analyst never touched) and patched the edited path's manual entry on top. Result: PUT body sent ALL upstream entries plus the manual one. Server's deep-merge for field_sources (per spec §4.3) overwrites server-side entries with this stale copy — risking races against concurrent adapter runs that updated upstream provenance for unrelated paths. **Fold:** dropped canonical hydration. `patchFieldSource(draft, side, path, fs)` now just patches the single edited entry into `draft.{resort,live_signal}.field_sources` (existing draft entries preserved, but no canonical pull-in). Server's deep-merge handles non-edited entries correctly.
+- **P2-8 — `matchMedia` undefined in jsdom.** `useIsAboveMd()` calls `window.matchMedia(...)`, but jsdom doesn't implement matchMedia. Tests would throw `TypeError: window.matchMedia is not a function` on first render. **Fold:** PR 4.4d Task 6 Step 1 adds an inline `stubMatchMedia(matches)` helper (uses `vi.stubGlobal`) at the top of `FieldRow.test.tsx`; each test calls it with the appropriate viewport. `afterEach` calls `vi.unstubAllGlobals()`. PR 4.4d Task 7's bridge integration test setup adds the same stub (default `matches: true` for the above-md interactive path; below-md is covered by FieldRow.test.tsx). No `apps/admin/src/test-setup.ts` modification (file budget).
 
 **End of plan.**
