@@ -1381,6 +1381,81 @@ export function setMode(slug: ResortSlug, path: MetricPath, mode: 'manual' | 'au
   scheduleFlush(slug)
 }
 
+// Per Codex round-20 P2-28 fold: when an in-progress edit becomes
+// transient (cleared / invalid intermediate / out-of-range), remove the
+// previously-written draft entry for `path` (both the value AND the
+// field_sources manual provenance) so a pending debounced flush doesn't
+// PUT the stale valid value. The next flush will see the cleared draft
+// and either skip the PUT (empty diff) or send a smaller body.
+//
+// editor_modes[path] is INTENTIONALLY preserved — clearing the input
+// value doesn't revert the analyst's MANUAL flag; they still intend
+// MANUAL mode, just haven't typed a valid replacement yet.
+export function clearFieldValue(slug: ResortSlug, path: MetricPath): void {
+  const store = getOrCreateStore(slug)
+  const side = sideFor(path)
+  patchState(store, (s) => {
+    const draft = clearDraftLeaf(s.draft, side, path)
+    const status = { ...s.status }
+    if (status[path] === 'dirty' || status[path] === 'saving') {
+      delete status[path]  // back to "no local edit pending"
+    }
+    return { rev: s.rev + 1, draft, status }
+  })
+  scheduleFlush(slug)
+}
+
+// Companion to patchDraftLeaf — removes the path's value AND its
+// field_sources entry from the draft. If clearing leaves the side empty,
+// the side itself is dropped from the draft so buildBodyFromDraft's diff
+// emits a sparse body.
+function clearDraftLeaf(draft: DraftShape, side: Side, path: MetricPath): DraftShape {
+  const sideRoot = side === 'resort' ? draft.resort : draft.live_signal
+  if (sideRoot === undefined) { return draft }
+  const next: Record<string, unknown> = { ...sideRoot }
+  const segments = path.split('.')
+  if (segments.length === 1) {
+    delete next[segments[0]]
+  } else {
+    const [parent, leaf] = segments
+    const parentObj = next[parent]
+    if (parentObj !== undefined && typeof parentObj === 'object' && parentObj !== null) {
+      const nextParent = { ...(parentObj as Record<string, unknown>) }
+      delete nextParent[leaf]
+      // Preserve other siblings; only drop the parent if it became empty.
+      if (Object.keys(nextParent).length === 0) {
+        delete next[parent]
+      } else {
+        next[parent] = nextParent
+      }
+    }
+  }
+  // Also drop the field_sources entry for this path.
+  const fs = next.field_sources as Record<string, unknown> | undefined
+  if (fs !== undefined && path in fs) {
+    const nextFs = { ...fs }
+    delete nextFs[path]
+    if (Object.keys(nextFs).length === 0) {
+      delete next.field_sources
+    } else {
+      next.field_sources = nextFs
+    }
+  }
+  if (Object.keys(next).length === 0) {
+    // The whole side is empty — drop it from draft so buildBodyFromDraft
+    // doesn't emit `resort: {}` / `live_signal: {}` (which would be empty
+    // objects in the diff comparison).
+    if (side === 'resort') {
+      const { resort: _resort, ...rest } = draft
+      return rest
+    }
+    const { live_signal: _live, ...rest } = draft
+    return rest
+  }
+  if (side === 'resort') { return { ...draft, resort: next as Partial<Resort> } }
+  return { ...draft, live_signal: next as Partial<ResortLiveSignal> }
+}
+
 export function useWorkspaceState() {
   const route = useURLState()
   if (route.route !== 'editor') {
@@ -1412,6 +1487,11 @@ export function useWorkspaceState() {
     status: state.status,
     setFieldValue: (path: MetricPath, value: unknown): void => setFieldValue(slug, path, value),
     setMode: (path: MetricPath, mode: 'manual' | 'auto'): void => setMode(slug, path, mode),
+    // Per Codex round-20 P2-28 fold: consumers call this when an
+    // in-progress edit becomes transient (cleared / invalid) to drop
+    // any prior valid value from the draft so a pending debounce
+    // doesn't PUT stale data.
+    clearFieldValue: (path: MetricPath): void => clearFieldValue(slug, path),
   }
 }
 
@@ -1549,6 +1629,8 @@ afterEach(() => { vi.unstubAllGlobals() })
   - **Empty/whitespace-only input does NOT persist** per Codex round-11 P2-15 + round-17 P2-23 + round-17 P2-24 folds: above-md MANUAL on `slopes_km` with canonical (NOT draft) holding 150 from `field_states`. Simulate user clearing the input (`fireEvent.change(input, { target: { value: '' } })`); fast-forward debounce; assert (a) `apiClient.upsertResort` was NOT called, (b) the input element displays the empty string (local state updated), (c) **`draft.resort?.slopes_km` is still `undefined`** (the draft is sparse — no setFieldValue fired, so no entry was ever written). The canonical state is unchanged at 150. Repeat with whitespace-only input (`'   '`) — same assertions (Codex round-17 P2-23: trim BEFORE checking empty, since `Number(' ') === 0`). Then simulate typing `'7'`; fast-forward; assert PUT fires with `slopes_km: 7`. Without these guards, `Number('')` or `Number(' ')` would coerce to 0 and PUT would persist 0 with manual provenance — workspace data corruption.
   - **Invalid intermediate input does NOT persist** per same fold: simulate `value: '-'` (negative-sign-in-progress), `'1e'` (scientific notation in progress), `'.'` (decimal-only) — `Number(...)` is NaN for each → no PUT fires; local string updates so the user sees what they typed.
   - **Fractional `lift_count` does NOT persist** per Codex round-19 P2-26 fold: above-md MANUAL on `lift_count`. Type `'7.5'` → `Number('7.5') === 7.5` (NOT NaN) — but `Resort.lift_count` is `z.number().int()` (`packages/schema/src/resort.ts:14`). Without the integer guard, the PUT would fire and the server would reject as `400 invalid-resort`, leaving the field in `save-failed` despite valid local intent. Assertion: `apiClient.upsertResort` is NOT called for `'7.5'`; local string updates to `'7.5'`. Then type `'7'` → PUT fires with `lift_count: 7`. (`slopes_km`, `altitude_m.*`, `skiable_terrain_ha` are NOT `.int()` — fractional values pass through. Test only `lift_count` for the integer guard.)
+  - **Edit-then-clear cancels the pending PUT** per Codex round-20 P2-28 fold: above-md MANUAL on `lift_count`. Type `'7'` (valid) → setFieldValue fires; draft.resort.lift_count = 7 + draft.resort.field_sources.lift_count = manual; debounce timer set. BEFORE 500ms elapses, type `''` (clear) — `clearFieldValue('lift_count')` fires; draft.resort.lift_count is removed; draft.resort.field_sources.lift_count is removed; status reverts to no-edit-pending. Fast-forward debounce. **Assert: `apiClient.upsertResort` is NOT called** (the previously-pending value 7 was cleared; the next flush sees a sparse draft with no `lift_count`). Same flow for invalid intermediates (`'7'` → `'7e'` → cleared). Without `clearFieldValue`, the stale pending value would PUT despite the input being currently empty/invalid.
+  - **Edit-then-clear preserves editor_modes** per Codex round-20 P2-28 fold: same flow as above, but assert that `draft.editor_modes['lift_count']` (or whatever was set via prior toggleMode) is **NOT** removed by `clearFieldValue`. Only the value + manual field_sources entry are dropped; the analyst's MANUAL flag persists.
 - [ ] **Step 4:** The pre-existing 4.4b inline-span tests must each call `stubMatchMedia(false)` (or default to false in their `beforeEach`) so they exercise the below-md branch unambiguously after the responsive gate ships.
 - [ ] **Step 5:** Run failing.
 - [ ] **Step 6: Implement.** Replace the FieldRow body:
@@ -1587,7 +1669,7 @@ function useIsAboveMd(): boolean {
 }
 
 function FieldRow({ path, state }: FieldRowProps): JSX.Element {
-  const { draft, setFieldValue } = useWorkspaceState()
+  const { draft, setFieldValue, clearFieldValue } = useWorkspaceState()
   const { toggleMode, modeFor } = useModeToggle()
   const isAboveMd = useIsAboveMd()
 
@@ -1640,25 +1722,28 @@ function FieldRow({ path, state }: FieldRowProps): JSX.Element {
   // ship `type="number"`); JS-side validation enforces both numeric-ness AND
   // the 1–12 range for month paths (which type="number" min/max would have
   // covered natively if available).
+  // Per Codex round-20 P2-28 fold: each transient/invalid branch calls
+  // clearFieldValue so a previously-typed valid value doesn't get PUT by a
+  // pending debounce after the user clears or types an invalid intermediate.
+  // The clear preserves editor_modes[path] (the user's MANUAL flag); only
+  // the value + manual field_sources entry are dropped.
   const onLocalChange = (raw: string): void => {
     setLocalString(raw)
     // Per Codex round-17 P2-23 fold: whitespace-only strings ('   ') would
     // pass through Number() as 0 (Number(' ') === 0). Trim before checking
     // empty so spaces don't trigger spurious 0-persists.
-    if (raw.trim() === '') { return /* transient — wait for valid number */ }
+    if (raw.trim() === '') { clearFieldValue(path); return }
     const parsed = Number(raw)
-    if (Number.isNaN(parsed)) { return /* transient invalid intermediate (e.g., '-', '.', '1e') */ }
+    if (Number.isNaN(parsed)) { clearFieldValue(path); return }
     if (isMonth && (parsed < 1 || parsed > 12 || !Number.isInteger(parsed))) {
-      return /* out-of-range or non-integer month — local-only until valid */
+      clearFieldValue(path); return
     }
     // Per Codex round-19 P2-26 fold: lift_count is z.number().int() per
-    // packages/schema/src/resort.ts:14. Fractional values (e.g., 7.5) would
-    // be sent and rejected by the server with 400 invalid-resort, leaving
-    // the field in save-failed instead of staying as local invalid input.
-    // (slopes_km / altitude_m.* / skiable_terrain_ha are NOT .int() per the
-    // same file — fractional is OK there.)
+    // packages/schema/src/resort.ts:14. Fractional values would be sent and
+    // rejected by the server. (slopes_km / altitude_m.* / skiable_terrain_ha
+    // are NOT .int() — fractional is OK there.)
     if (path === 'lift_count' && !Number.isInteger(parsed)) {
-      return /* fractional lift_count — local-only until integer */
+      clearFieldValue(path); return
     }
     setFieldValue(path, parsed)
   }
@@ -1955,5 +2040,11 @@ Two findings on the v20 plan (one P2, one P3); both folded:
 
 - **P2-26 — Fractional `lift_count` would server-reject and leave `save-failed`.** v20's `onLocalChange` only validated integer/range for month paths (`isMonth` check). But `Resort.lift_count` is `z.number().int()` (`packages/schema/src/resort.ts:14`); typing `'7.5'` would parse to `7.5` (NOT NaN), pass through onLocalChange, and `setFieldValue(path, 7.5)` would fire the debounced PUT. Server rejects `lift_count: 7.5` with `400 invalid-resort`, leaving the field in `save-failed`. **Fold:** added a per-path integer guard for `lift_count` (`if (path === 'lift_count' && !Number.isInteger(parsed)) { return }`). `slopes_km`, `altitude_m.*`, `skiable_terrain_ha` stay un-guarded since their schema is `z.number()` (not `.int()`). PR 4.4d Task 6 test list adds a "fractional `lift_count` does not persist" case.
 - **P3-27 — Bridge integration test referenced `<input type="number">`.** v20's PR 4.4d Task 7 step said "Type `150` into the new MANUAL `<input type="number">`" — but round-15 P2-20 swapped to DS Input (`type="text"`). The test's selector would fail against the actual implementation. **Fold:** updated the bridge-test step to `getByRole('textbox', { name: labelForPath('slopes_km') })` — the correct query for DS Input's rendered `<label>` + `<input type="text">`.
+
+### Codex round 20 (PR #90 review by `chatgpt-codex-connector`, 2026-05-08)
+
+One P2 finding on the v21 plan; folded:
+
+- **P2-28 — Transient input branches don't clear pre-existing pending draft.** v21's `onLocalChange` had each transient/invalid branch (empty/whitespace/NaN/out-of-range/non-integer) update `localString` and `return` — but if the user had previously typed a valid value (which already wrote to draft + scheduled the 500ms debounce), the SUBSEQUENT clear/invalid input would only update the local string. Draft still held the prior valid value AND the debounce timer was still set; 500ms later the PUT would fire with the stale value despite the input currently being empty/invalid. **Fold:** added a module-level `clearFieldValue(slug, path)` function that removes both the value AND the field_sources manual entry from draft.resort/draft.live_signal (preserving `editor_modes[path]` since the MANUAL flag is independent of the value), bumps rev, and reschedules the flush (which then sees the cleared draft and either short-circuits via the round-18 P2-25 empty-diff branch OR sends a smaller body without the cleared path). Each transient branch in `onLocalChange` now calls `clearFieldValue(path)` before `return`. PR 4.4d Task 6 test list adds two new cases: (1) "edit-then-clear cancels the pending PUT" — assert `apiClient.upsertResort` is NOT called after type-then-clear sequence; (2) "edit-then-clear preserves editor_modes" — assert `draft.editor_modes[path]` is NOT removed by `clearFieldValue`.
 
 **End of plan.**
