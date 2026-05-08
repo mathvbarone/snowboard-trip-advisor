@@ -40,7 +40,9 @@ Per spec §7.4 this plan must close, on `main`, after PR 4.4d merges:
 | **D6** (test isolation) | Hook tests own their own `__resetForTests()` calls in local `afterEach` blocks. NO global `apps/admin/src/test-setup.ts` modification in PR 4.4a-2 (file-budget pressure; matches the existing `useResortList` pattern). The unwired `useResortList.__resetForTests` is pre-existing technical debt and explicitly out-of-scope for Tier 3. | Vitest gives each test file its own module instance; cross-file leakage is impossible. Local `afterEach` is sufficient and matches existing codebase pattern. |
 | **D7** (slug derivation in 4.4d) | `useWorkspaceState()` and `useModeToggle()` derive the `slug` internally by reading `useURLState()`. FieldRow calls the hooks WITHOUT passing slug (`useWorkspaceState()` is no-arg from the consumer's point of view). This avoids prop-drilling through `MetricPanel.tsx` and `ResortEditor.tsx` modifications in PR 4.4d. The hooks assert the route is `'editor'`; calling them outside the editor route is a programming error caught at the assertion. | Keeps PR 4.4d at 8 files. The URL-state coupling is a tradeoff — Phase-2 can refactor to context if FieldRow becomes reusable elsewhere. |
 | **D8** (dispatch.ts details pass-through) | PR 4.4c modifies `apps/admin/server/dispatch.ts` to read `(err as Error & { code, details }).details` and pass it to the error envelope. Currently dispatch only carries `code` + `message`. The `editor_modes` cross-key reject test in 4.4c requires the refinement message to surface in `details`. | Spec §4.10 envelope shape `{ error: { code, message, details? } }` requires details pass-through for the cross-key reject case. |
-| **D9** (seed fixtures location) | The `tests/fixtures/admin-workspace/{kotelnica-bialczanska,spindleruv-mlyn}.json` files MISSING from `main` (declared as PR 4.1a §10.8 deliverable but not actually shipped). Recovered as part of PR 4.4a-1 (already a small schema PR; fixtures + projection function are conceptually adjacent). PR 4.4a-1 file count: 4 files (still ≤8). | Without the fixtures, every server-side and bridge-tier test in Tier 3 has nothing to load. |
+| **D9** (seed fixtures location) | The `tests/fixtures/admin-workspace/{kotelnica-bialczanska,spindleruv-mlyn}.json` files MISSING from `main` (declared as PR 4.1a §10.8 deliverable but not actually shipped). Recovered as part of PR 4.4a-1 (already a small schema PR; fixtures + projection function are conceptually adjacent). PR 4.4a-1 file count: 5 files (still ≤8). | Without the fixtures, every server-side and bridge-tier test in Tier 3 has nothing to load. |
+| **D10** (nested-path draft hydration — Codex round-4 P2-6 fold) | `DraftShape.resort` mirrors the **`Partial<Resort>`** shape (NOT a flat `Partial<Record<MetricPath, unknown>>`). When the user edits a nested path like `altitude_m.min`, `setFieldValue` decomposes the path into segments (`['altitude_m', 'min']`), and on first edit of a nested parent, **hydrates the parent from `useResortDetail(slug).resort.<parent>`** before patching the leaf — this preserves the sibling (`altitude_m.max`) so the server's shallow-merge of `Resort.altitude_m` doesn't drop it. The `SlugStore` carries a `canonical: ResortDetailResponse \| null` field synced by `useWorkspaceState` on every render; module-level `setFieldValue` reads `store.canonical` to do the hydration. `buildBodyFromDraft` then trivially emits `{ resort: draft.resort, live_signal: draft.live_signal, editor_modes: draft.editor_modes }` — the nested shape is already correct. | Flat-keyed `field_values` with reconstruction-at-PUT-time loses sibling values when shallow-merged on the server. Hydration-on-edit is the simpler invariant. PR 4.4d Task 2 adds a "nested-path edit preserves sibling" test (e.g., editing `altitude_m.min` from canonical 1500/2000 → draft has `altitude_m: { min: 1600, max: 2000 }`); PR 4.4d Task 7 bridge integration test asserts the nested-path round-trip on disk. |
+| **D11** (responsive read-only gate baseline — Codex round-4 P2-7 fold) | PR 4.4d ships a **minimal** responsive gate: below the `md` breakpoint, the new MANUAL `<input>` is not rendered AND the new interactive `<ModeToggle>` button degrades to the render-only `<span aria-disabled="true">` form (re-using the v4.4b inline render-only ModeToggle structure). Implementation: a co-located `useIsAboveMd()` hook in `FieldRow.tsx` reads `window.matchMedia('(min-width: 768px)')` (project breakpoint) and returns a boolean reactive to changes via `useSyncExternalStore`. PR 4.6a polishes this (proper UX, ARIA messaging, simulated-viewport regression test per spec §7.16). | AGENTS.md "Admin App Rules" says edit controls MUST be removed from the tab order below `md` — this is a baseline rule, not polish. Without the minimal gate in 4.4d, the 4.4d → 4.6a interim window violates AGENTS.md (a non-mechanical-but-discipline rule). 4.4d Task 6 covers both viewports; ModeToggle.test.tsx is dropped from 4.4d (file budget) and FieldRow's responsive branch is tested via FieldRow.test.tsx mods. |
 
 ---
 
@@ -131,16 +133,16 @@ Per spec §7.4 this plan must close, on `main`, after PR 4.4d merges:
 
 | Order | File | Action |
 |---|---|---|
-| 1 | `apps/admin/src/state/useModeToggle.test.ts` | NEW — `validPaths` guard + silent-no-op ghost-path test |
-| 2 | `apps/admin/src/state/useWorkspaceState.test.ts` | NEW — debounce + in-flight token + concurrent-PUT queue + 4-state indicator + observable-spy cache-isolation test (per fold §5) |
-| 3 | `apps/admin/src/views/ResortEditor/ModeToggle.test.tsx` | NEW — interactive AUTO ↔ MANUAL (button-based, replaces 4.4b's inline span) |
-| 4 | `tests/integration/apps/admin/resort-editor-write.test.tsx` | NEW — bridge tier; on-disk file assertion; reload via `__resetForTests()` between unmount/remount (per fold §5) |
-| 5 | `apps/admin/src/state/useModeToggle.ts` | NEW — derives `slug` from `useURLState()` per **D7** |
-| 6 | `apps/admin/src/state/useWorkspaceState.ts` | NEW — derives `slug` from `useURLState()` per **D7** |
-| 7 | `apps/admin/src/views/ResortEditor/ModeToggle.tsx` | NEW — extracted as `<button role="switch">` |
-| 8 | `apps/admin/src/views/ResortEditor/FieldRow.tsx` | MODIFY — add MANUAL input affordance (numeric inputs for the 10 paths per **F1**; explanatory copy for the 2 money paths) + replace inline `<span>` with `<ModeToggle>` |
+| 1 | `apps/admin/src/state/useModeToggle.test.ts` | NEW — `validPaths` guard + silent-no-op + canonical-mode reload preservation per **D7** + Codex round-3 P1-1 |
+| 2 | `apps/admin/src/state/useWorkspaceState.test.ts` | NEW — debounce + singleton store + in-flight token + draft-revision counter + nested-path hydration per **D10** |
+| 3 | `apps/admin/src/views/ResortEditor/FieldRow.test.tsx` | MODIFY — extend with MANUAL input + `<ModeToggle>` button + responsive-gate branches per **D11**. (Inline render-only ModeToggle tests from 4.4b stay; add new branches alongside them.) |
+| 4 | `tests/integration/apps/admin/resort-editor-write.test.tsx` | NEW — bridge tier; on-disk file assertion; reload via `__resetForTests()` between unmount/remount; nested-path round-trip (e.g., `season.start_month`) per **D10** |
+| 5 | `apps/admin/src/state/useModeToggle.ts` | NEW — derives `slug` from `useURLState()` per **D7**; canonical-mode fallback per Codex round-3 P1-1 |
+| 6 | `apps/admin/src/state/useWorkspaceState.ts` | NEW — module-scoped per-slug singleton store per **E1+**; nested-path hydration per **D10** |
+| 7 | `apps/admin/src/views/ResortEditor/ModeToggle.tsx` | NEW — interactive `<button role="switch">` (above md); ModeToggle's responsive degradation handled in FieldRow per **D11** |
+| 8 | `apps/admin/src/views/ResortEditor/FieldRow.tsx` | MODIFY — add MANUAL `<input>` for the 7 durable numeric paths per **F1**; explanatory copy for live paths; responsive gate per **D11** |
 
-**Files: 8.** `ResortEditor.tsx` is NOT modified — slug is derived inside the hooks via `useURLState`, eliminating prop-drilling.
+**Files: 8.** `ResortEditor.tsx` is NOT modified — slug is derived inside the hooks via `useURLState`, eliminating prop-drilling. **`ModeToggle.test.tsx` is NOT in this PR's file list** (per **D11** file-budget constraint) — ModeToggle's behavior is covered through `FieldRow.test.tsx` (which mounts FieldRow with the `<ModeToggle>` child and exercises clicks/keyboard/aria) AND through `resort-editor-write.test.tsx` (full integration).
 
 ---
 
@@ -897,29 +899,37 @@ if (code !== undefined) {
   - **Save-failed retry-by-edit**: PUT rejects → indicator `save-failed` → next `setFieldValue` triggers fresh debounced flush → success → `saved`.
   - **Cache isolation (observable spy)** per pre-Codex fold §5: assert `apiClient.getResort` is NOT called during `useWorkspaceState` flush. Use `vi.spyOn(apiClient, 'getResort')`.
   - **`__resetForTests()` clears `storesBySlug`**: setFieldValue → reset → next mount sees fresh draft.
+  - **Nested-path edit preserves sibling** per **D10** + Codex round-4 P2-6 fold: canonical state has `resort.altitude_m: { min: 1500, max: 2000 }`. `setFieldValue('altitude_m.min', 1600)` → assert `draft.resort.altitude_m === { min: 1600, max: 2000 }` (NOT `{ min: 1600 }`). The hydration-on-first-edit reads the sibling from `store.canonical`. Without this, the PUT body's shallow `Resort.altitude_m` merge on the server replaces the whole object with `{ min: 1600 }` and silently drops `max`. Same test for `season.start_month` (sibling = `season.end_month`) and `lifts_open.count` (sibling = `lifts_open.total`, on the live_signal side).
+  - **Canonical sync on render**: when `useResortDetail(slug)` re-projects (e.g., post-PUT response), the `store.canonical` reference updates so subsequent `setFieldValue` calls hydrate from the freshest canonical state.
 - [ ] **Step 2:** Run. FAIL.
 
 ### Task 3 — Implement `useWorkspaceState`
 
 **Files:** New `apps/admin/src/state/useWorkspaceState.ts`.
 
-- [ ] **Step 1:** Implement the module-scoped per-slug singleton store with `useSyncExternalStore` subscription (per **E1+** + Codex round-2 P1-1 fold + Codex round-1 P2-2 fold). Pseudo-shape:
+- [ ] **Step 1:** Implement the module-scoped per-slug singleton store with `useSyncExternalStore` subscription (per **E1+** + Codex round-2 P1-1 fold + Codex round-1 P2-2 fold + Codex round-4 P2-6 fold). Pseudo-shape:
 
 ```ts
 import { useCallback } from 'react'
 import { useSyncExternalStore } from 'react'
 
-import type { MetricPath, ResortSlug } from '@snowboard-trip-advisor/schema'
-import type { ResortUpsertBody } from '@snowboard-trip-advisor/schema/api'
+import type { MetricPath, Resort, ResortLiveSignal, ResortSlug } from '@snowboard-trip-advisor/schema'
+import type { ResortDetailResponse, ResortUpsertBody } from '@snowboard-trip-advisor/schema/api'
 
 import { apiClient } from '../lib/apiClient'
+import { useResortDetail } from './useResortDetail'
 import { useURLState } from './useURLState'
 
 const DEBOUNCE_MS = 500
 type Status = 'saved' | 'dirty' | 'saving' | 'save-failed'
 
+// Per **D10** + Codex round-4 P2-6 fold: DraftShape mirrors the WorkspaceFile
+// payload shape directly. Nested edits write to the nested location after
+// hydrating the parent from canonical state. buildBodyFromDraft is then
+// trivial — it just emits the shape verbatim (server merges shallow per §4.3).
 type DraftShape = {
-  field_values: Partial<Record<MetricPath, unknown>>
+  resort?: Partial<Resort>
+  live_signal?: Partial<ResortLiveSignal>
   editor_modes: Partial<Record<MetricPath, 'manual' | 'auto'>>
 }
 
@@ -931,6 +941,12 @@ interface StoreState {
 
 interface SlugStore {
   state: StoreState
+  // Latest canonical state from useResortDetail(slug) — synced by the hook
+  // on every render. Module-level setFieldValue reads this to hydrate
+  // sibling values when the user first edits a nested-path leaf
+  // (e.g., editing altitude_m.min reads canonical.resort.altitude_m to
+  // preserve .max in the draft). Per **D10**.
+  canonical: ResortDetailResponse | null
   inFlightToken: symbol | null
   queued: boolean
   timer: ReturnType<typeof setTimeout> | null
@@ -946,16 +962,67 @@ interface SlugStore {
 const storesBySlug = new Map<ResortSlug, SlugStore>()
 
 function emptyState(): StoreState {
-  return { draft: { field_values: {}, editor_modes: {} }, status: {} as Record<MetricPath, Status>, rev: 0 }
+  return { draft: { editor_modes: {} }, status: {} as Record<MetricPath, Status>, rev: 0 }
 }
 
 function getOrCreateStore(slug: ResortSlug): SlugStore {
   let store = storesBySlug.get(slug)
   if (store === undefined) {
-    store = { state: emptyState(), inFlightToken: null, queued: false, timer: null, subscribers: new Set() }
+    store = { state: emptyState(), canonical: null, inFlightToken: null, queued: false, timer: null, subscribers: new Set() }
     storesBySlug.set(slug, store)
   }
   return store
+}
+
+// Per **D10**: walk the dotted MetricPath into draft.resort/draft.live_signal,
+// hydrating nested parents from canonical on first edit.
+type Side = 'resort' | 'live_signal'
+
+const LIVE_PATH_PREFIXES = new Set(['snow_depth_cm', 'lifts_open', 'lift_pass_day', 'lodging_sample'])
+
+function sideFor(path: MetricPath): Side {
+  const top = path.split('.')[0] ?? path
+  return LIVE_PATH_PREFIXES.has(top) ? 'live_signal' : 'resort'
+}
+
+function patchDraftLeaf(
+  draft: DraftShape,
+  side: Side,
+  path: MetricPath,
+  value: unknown,
+  canonical: ResortDetailResponse | null,
+): DraftShape {
+  const segments = path.split('.')
+  const sideRoot = side === 'resort'
+    ? (draft.resort ?? {}) as Record<string, unknown>
+    : (draft.live_signal ?? {}) as Record<string, unknown>
+  const nextSideRoot: Record<string, unknown> = { ...sideRoot }
+
+  if (segments.length === 1) {
+    nextSideRoot[segments[0]] = value
+  } else {
+    // Nested path — hydrate the parent from canonical on first edit.
+    const [parent, leaf] = segments
+    const existingParent = nextSideRoot[parent]
+    let parentObj: Record<string, unknown>
+    if (existingParent !== undefined && existingParent !== null && typeof existingParent === 'object') {
+      parentObj = { ...(existingParent as Record<string, unknown>) }
+    } else {
+      // Hydrate from canonical to preserve siblings.
+      const canonicalSide = canonical === null ? null : (side === 'resort' ? canonical.resort : canonical.live_signal)
+      const canonicalParent = canonicalSide === null || canonicalSide === undefined
+        ? {}
+        : ((canonicalSide as Record<string, unknown>)[parent] as Record<string, unknown> | undefined) ?? {}
+      parentObj = { ...canonicalParent }
+    }
+    parentObj[leaf] = value
+    nextSideRoot[parent] = parentObj
+  }
+
+  if (side === 'resort') {
+    return { ...draft, resort: nextSideRoot as Partial<Resort> }
+  }
+  return { ...draft, live_signal: nextSideRoot as Partial<ResortLiveSignal> }
 }
 
 function emit(store: SlugStore): void {
@@ -1018,19 +1085,22 @@ async function flush(slug: ResortSlug): Promise<void> {
 }
 
 function buildBodyFromDraft(draft: DraftShape): ResortUpsertBody {
-  // Filled in per spec §4.3 — wraps non-empty parts of draft into the
-  // ResortUpsertBody shape. Body must contain at least one of
-  // resort/live_signal/editor_modes (server rejects empty body as
-  // invalid-request).
-  // ... executor implements
-  return {} as ResortUpsertBody
+  // Per **D10**: draft.resort + draft.live_signal already mirror the
+  // ResortUpsertBody shape (nested parents hydrated at edit time). Just emit
+  // the non-empty parts; server rejects empty body as invalid-request.
+  const body: ResortUpsertBody = {}
+  if (draft.resort !== undefined && Object.keys(draft.resort).length > 0) { body.resort = draft.resort }
+  if (draft.live_signal !== undefined && Object.keys(draft.live_signal).length > 0) { body.live_signal = draft.live_signal }
+  if (Object.keys(draft.editor_modes).length > 0) { body.editor_modes = draft.editor_modes }
+  return body
 }
 
 export function setFieldValue(slug: ResortSlug, path: MetricPath, value: unknown): void {
   const store = getOrCreateStore(slug)
+  const side = sideFor(path)
   patchState(store, (s) => ({
     rev: s.rev + 1,
-    draft: { ...s.draft, field_values: { ...s.draft.field_values, [path]: value } },
+    draft: patchDraftLeaf(s.draft, side, path, value, store.canonical),
     status: { ...s.status, [path]: 'dirty' },
   }))
   scheduleFlush(slug)
@@ -1053,6 +1123,15 @@ export function useWorkspaceState() {
   }
   const slug = route.slug
   const store = getOrCreateStore(slug)
+
+  // Per **D10**: sync the store's `canonical` reference on every render so
+  // setFieldValue can hydrate nested-path parents from the freshest server
+  // state. useResortDetail returns a stable cached promise per-slug; the
+  // returned object reference only changes when invalidateResortDetail()
+  // fires + the cache re-fetches. Reference-equality assignment here is
+  // cheap; no useEffect needed.
+  const detail = useResortDetail(slug)
+  store.canonical = detail
 
   const subscribe = useCallback((cb: () => void): (() => void) => {
     store.subscribers.add(cb)
@@ -1143,16 +1222,11 @@ export function useModeToggle() {
 
 - [ ] **Step 2:** Run. PASS on all branches including the new "reload preserves MANUAL" test (Task 1).
 
-### Task 5 — Extract `<ModeToggle>` (button-based) + tests
+### Task 5 — Extract `<ModeToggle>` (button-based, impl only)
 
-**Files:** New `apps/admin/src/views/ResortEditor/ModeToggle.tsx` + `ModeToggle.test.tsx`.
+**Files:** New `apps/admin/src/views/ResortEditor/ModeToggle.tsx`. **No separate test file** per **D11** (file-budget). ModeToggle behavior is covered through FieldRow.test.tsx mods (Task 6) and the integration test (Task 7).
 
-- [ ] **Step 1: Write tests** asserting:
-  - `<button role="switch" aria-checked aria-label>` (NOT `aria-disabled` — interactive now).
-  - Click → `onToggle()` called.
-  - Keyboard: `Space`/`Enter` → `onToggle()` called.
-  - jest-axe passes.
-- [ ] **Step 2: Implement.**
+- [ ] **Step 1: Implement.**
 
 ```tsx
 import type { JSX } from 'react'
@@ -1181,34 +1255,71 @@ export function ModeToggle({ path, mode, onToggle }: ModeToggleProps): JSX.Eleme
 }
 ```
 
-- [ ] **Step 3:** Run. PASS.
+- [ ] **Step 2:** Verify the file typechecks via `npm run --workspace=apps/admin typecheck`. (Behavior tests fire in Task 6.)
 
-### Task 6 — Modify `FieldRow.tsx` for MANUAL input + ModeToggle wiring
+### Task 6 — Modify `FieldRow.{tsx,test.tsx}` for MANUAL input + ModeToggle wiring + responsive gate
 
-**Files:** Modify `apps/admin/src/views/ResortEditor/FieldRow.tsx`.
+**Files:** Modify `apps/admin/src/views/ResortEditor/FieldRow.tsx` AND `apps/admin/src/views/ResortEditor/FieldRow.test.tsx`.
 
-- [ ] **Step 1:** Replace the inline `<span role="switch">` ModeToggle with the new `<ModeToggle>` component. Add an editor-mode branch. **Per F1 fold (Codex round-1 P2-1):** `MANUAL_EDITABLE_PATHS` is the **7 durable numeric paths** only — live paths cannot be MANUAL because the `WorkspaceFile` cross-key invariant restricts `editor_modes` keys to `Object.keys(resort.field_sources)` (durable subset). `useModeToggle` enforces the same durable-only constraint internally (it derives `validPaths` from `useResortDetail`); FieldRow does NOT need a `resort` prop. `FieldRowProps` is unchanged from PR 4.4b's `{ path, state }` signature.
+- [ ] **Step 1: Add failing tests** to `FieldRow.test.tsx`. Three new branches:
+  - **Above md (default jsdom width = 1024)**: MANUAL on `slopes_km` renders `<input type="number">` AND a `<ModeToggle>` button (`role="switch"`, NO `aria-disabled`). Clicking the button calls toggleMode. Typing in the input calls setFieldValue.
+  - **Above md, money/live path**: MANUAL on `lift_pass_day` renders the explanatory `<span>` (NOT an input).
+  - **Below md (mock `window.matchMedia('(min-width: 768px)') → matches: false`)**: MANUAL on `slopes_km` renders NEITHER the input NOR the interactive `<button>` ModeToggle — instead, the v4.4b inline render-only `<span role="switch" aria-disabled="true">` ModeToggle is shown. The input element is absent from the DOM. (Per **D11** + AGENTS.md "Admin App Rules".)
+  - **Tab order assertion**: above md, the ModeToggle button has the default tab order (no `tabindex`). Below md, the render-only span has no `tabindex` (spans are not focusable by default), so the editor element is absent from the tab order.
+- [ ] **Step 2:** Run failing. The pre-existing 4.4b inline-span tests still pass (they apply only below md after this change, but we add `mockMatchMedia` to those tests so they exercise the below-md branch unambiguously).
+- [ ] **Step 3: Implement.** Replace the FieldRow body:
 
 ```tsx
-// 7 durable paths that can be MANUAL-edited via numeric inputs.
-// Live paths (snow_depth_cm, lifts_open.{count,total}, lift_pass_day,
-// lodging_sample.median_eur) are NOT in this set — see the explanatory-
-// copy branch below. Phase 2 widens the WorkspaceFile schema if live-path
-// MANUAL becomes needed.
+import { useSyncExternalStore } from 'react'
+
+// 7 durable paths that can be MANUAL-edited via numeric inputs (per F1 fold).
 const MANUAL_EDITABLE_PATHS: ReadonlySet<MetricPath> = new Set([
   'altitude_m.min', 'altitude_m.max', 'slopes_km', 'lift_count',
   'skiable_terrain_ha', 'season.start_month', 'season.end_month',
 ])
 
+const MD_QUERY = '(min-width: 768px)'  // project breakpoint per design-system tokens
+
+// Subscribes to viewport changes. matchMedia is reactive — `addEventListener('change', cb)` fires
+// when the viewport crosses the threshold. useSyncExternalStore handles the React side.
+function useIsAboveMd(): boolean {
+  const subscribe = (cb: () => void): (() => void) => {
+    const mql = window.matchMedia(MD_QUERY)
+    mql.addEventListener('change', cb)
+    return (): void => mql.removeEventListener('change', cb)
+  }
+  const getSnapshot = (): boolean => window.matchMedia(MD_QUERY).matches
+  // Server snapshot — for SSR. Phase 1 is loopback dev-only; jsdom is "client".
+  const getServerSnapshot = (): boolean => true
+  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
+}
+
 function FieldRow({ path, state }: FieldRowProps): JSX.Element {
   const { draft, setFieldValue } = useWorkspaceState()
-  const { toggleMode, modeFor } = useModeToggle()  // no args; reads slug + validPaths internally
+  const { toggleMode, modeFor } = useModeToggle()
+  const isAboveMd = useIsAboveMd()
 
-  const inputValue = draft.field_values[path] ?? valueFor(state)
+  // Resolve the displayed/edited value. For nested paths the draft.resort
+  // shape mirrors Resort, so we walk segments to read the leaf.
+  const inputValue = readDraftLeaf(draft.resort, path) ?? valueFor(state)
   const isManual = modeFor(path) === 'manual'
   const isMonth = path === 'season.start_month' || path === 'season.end_month'
 
-  const inputElement = !isManual ? null
+  // ModeToggle: above md → interactive <button>; below md → render-only <span>
+  // per **D11** + AGENTS.md "Admin App Rules". The render-only span mirrors
+  // PR 4.4b's inline shape (role="switch", aria-disabled="true", aria-checked).
+  const modeToggleEl = isAboveMd
+    ? <ModeToggle path={path} mode={modeFor(path)} onToggle={(): void => toggleMode(path)} />
+    : (
+      <span role="switch" aria-checked={modeFor(path) === 'manual'} aria-disabled="true" aria-label={`Mode for ${labelForPath(path)}`}>
+        {modeFor(path) === 'manual' ? 'MANUAL' : 'AUTO'}
+      </span>
+    )
+
+  // Input: above md AND MANUAL AND a durable numeric path → render <input>;
+  // above md AND MANUAL AND non-durable → render explanatory copy;
+  // below md → absent from DOM (per **D11**).
+  const inputElement = (!isAboveMd || !isManual) ? null
     : MANUAL_EDITABLE_PATHS.has(path)
       ? (
         <input
@@ -1218,9 +1329,6 @@ function FieldRow({ path, state }: FieldRowProps): JSX.Element {
           {...(isMonth ? { min: 1, max: 12 } : {})}
         />
       )
-      // Per F1 fold: live paths (3 numeric + 2 money) all render explanatory
-      // copy in MANUAL — the editor_modes schema invariant rejects PUTs that
-      // mode-flag a path not in resort.field_sources.
       : <span>MANUAL editing for {path} lands in PR 4.6a.</span>
 
   return (
@@ -1228,38 +1336,55 @@ function FieldRow({ path, state }: FieldRowProps): JSX.Element {
       <StatusPill variant={pillVariantFor(state)} />
       <span>{formatMetricValue(path, isManual ? inputValue : valueFor(state))}</span>
       <span>{sourceFor(state)}</span>
-      {/*
-        ModeToggle is rendered for ALL paths — clicking a live-path's toggle
-        is a silent no-op via useModeToggle's validPaths guard. This is
-        intentional: the toggle being VISIBLE on every row is the spec §6.1
-        surface; the no-op happens at the hook layer, not the render layer.
-      */}
-      <ModeToggle path={path} mode={modeFor(path)} onToggle={(): void => toggleMode(path)} />
+      {modeToggleEl}
       {inputElement}
     </div>
   )
 }
+
+// Walk a dotted path into draft.resort to read the leaf. Returns undefined
+// when the path's nested parent hasn't been hydrated yet.
+function readDraftLeaf(draftResort: Partial<Resort> | undefined, path: MetricPath): unknown {
+  if (draftResort === undefined) { return undefined }
+  const segments = path.split('.')
+  let cursor: unknown = draftResort
+  for (const seg of segments) {
+    if (cursor === null || typeof cursor !== 'object') { return undefined }
+    cursor = (cursor as Record<string, unknown>)[seg]
+    if (cursor === undefined) { return undefined }
+  }
+  return cursor
+}
 ```
 
-(Executor fills in the data-flow detail. **Per Codex round-1 P2-1 fold:** `useModeToggle` reads `useResortDetail(slug).resort.field_sources` for `validPaths` — derivation lives at the hook layer where the durable-only constraint cannot be bypassed.)
+(Executor fills in test-fixture imports + `mockMatchMedia` helper for the below-md test branch. The `useIsAboveMd` hook lives co-located in FieldRow.tsx for now; if a future PR needs it elsewhere, it extracts to `apps/admin/src/lib/`.)
 
-- [ ] **Step 2:** Run existing FieldRow tests. Tests asserting `<span role="switch" aria-disabled="true">` will FAIL (the inline span is replaced by `<button>`); update those tests to assert the new structure or rely on `ModeToggle.test.tsx` for the toggle's behavior.
+- [ ] **Step 4:** Run all FieldRow tests. PASS on all viewport branches.
 
 ### Task 7 — Bridge integration test
 
 **Files:** New `tests/integration/apps/admin/resort-editor-write.test.tsx`.
 
 - [ ] **Step 1: Setup.** `beforeEach` creates per-test workspace tmpdir (`mkdtemp`); seeds with the `kotelnica-bialczanska.json` fixture (`fs.copyFile` from `tests/fixtures/admin-workspace/`); calls `server.use(...bridgeHandlers(tmpdir))`. `afterEach` removes tmpdir AND calls `useResortDetail.__resetForTests()` + `useWorkspaceState.__resetForTests()`.
-- [ ] **Step 2: Write test:**
+- [ ] **Step 2: Write test (top-level numeric path: `slopes_km`):**
   - Mount `<App />` with `?route=editor&slug=kotelnica-bialczanska`.
   - Wait for editor render (await `findByRole('tablist')` or similar).
   - Click `<ModeToggle>` for `slopes_km` → MANUAL.
   - Type `150` into the new MANUAL `<input type="number">`.
   - Fast-forward debounce (500ms via `vi.advanceTimersByTime` or `vi.useFakeTimers`).
   - Wait for PUT response.
-  - **Filesystem assertion**: `await readFile(join(tmpdir, 'data/admin-workspace/kotelnica-bialczanska.json'), 'utf-8')` → parses to `WorkspaceFile`; `editor_modes.slopes_km === 'manual'`; field_sources reflects edit.
+  - **Filesystem assertion**: `await readFile(join(tmpdir, 'data/admin-workspace/kotelnica-bialczanska.json'), 'utf-8')` → parses to `WorkspaceFile`; `editor_modes.slopes_km === 'manual'`; `resort.slopes_km === 150`.
   - **Reload simulation** (per fold §5): unmount; **call `useResortDetail.__resetForTests()` AND `useWorkspaceState.__resetForTests()`** to clear module-level caches; spy on `apiClient.getResort` to verify the next mount triggers a fresh fetch (cache miss); re-mount `<App />`; assert editor renders with `slopes_km` MANUAL + value `150` (read from the server's freshly-loaded canonical state, not from a stale cached promise).
-- [ ] **Step 3:** Run. PASS.
+
+- [ ] **Step 3: Write test (nested-path: `season.start_month` — sibling preservation per D10 + Codex round-4 P2-6 fold):**
+  - Fresh per-test setup (new tmpdir; fixture restored to canonical: `season: { start_month: 12, end_month: 4 }`).
+  - Mount `<App />` with `?route=editor&slug=kotelnica-bialczanska`.
+  - Click `<ModeToggle>` for `season.start_month` → MANUAL.
+  - Type `11` into the MANUAL input.
+  - Fast-forward debounce; wait for PUT response.
+  - **Filesystem assertion (sibling preserved)**: `await readFile(...)` → parses; assert `resort.season === { start_month: 11, end_month: 4 }` — `end_month` survived the shallow-merge because the draft hydrated the parent on first edit. Without the **D10** hydration, `resort.season` would be `{ start_month: 11 }` and the schema parse would fail (or silently drop end_month).
+  - **`editor_modes.season.start_month === 'manual'`** persisted.
+- [ ] **Step 4:** Run. PASS on both round-trip variants.
 
 ### Task 8 — Coverage + qa + PR + Codex cycle
 
@@ -1375,5 +1500,12 @@ Two findings on the v4 plan (one P1, one P2); both real correctness issues; both
 
 - **P1-1 — `useModeToggle.modeFor` doesn't hydrate from canonical state on reload (gate-blocking).** v4's `modeFor(path) = draft.editor_modes[path] ?? 'auto'` assumed a fresh draft is the source of truth. But after the mandatory reload-after-save flow (Tier 3 → 4 gate criterion 2), the singleton store's draft is empty and the only mode signal is the server-persisted `WorkspaceFile.editor_modes` reflected in `useResortDetail(slug).field_states[path].state === 'manual'`. v4 would render every toggle as AUTO post-reload — the gate fails. **Fold:** `modeFor` now falls back to `detail.field_states[path].state === 'manual' ? 'manual' : 'auto'` when no draft override exists. `toggleMode` reads through the same `modeFor` so the first toggle after reload inverts the persisted state correctly. PR 4.4d Task 1 adds two new tests: "canonical-mode reload preservation" (server projection 'manual' + empty draft → modeFor returns 'manual') and "draft override wins over canonical". Edge case (analyst saved MANUAL with missing value → projection compresses to 'failed' → modeFor returns 'auto' post-reload) is documented as Phase-1 acceptable; analyst re-flips MANUAL after providing a value.
 - **P2-5 — Seed fixture `Money.currency` constraint violated.** v4's PR 4.4a-1 Task 1 wrote `lift_pass_day: { amount, currency: 'PLN' }` for the PL fixture and `currency: 'CZK'` for the CZ fixture. But `packages/schema/src/primitives.ts:5-9`'s `Money` schema has `currency: z.literal('EUR')` — non-EUR amounts MUST be encoded as `Money` with `currency: 'EUR'` (EUR-converted) plus `field_sources.<path>.fx: { source: 'ecb-reference-rate', native_amount, native_currency, rate, observed_at }` per ADR-0003. v4 fixtures would fail `WorkspaceFile.parse()` and block the entire Tier 3 chain. **Fold:** PR 4.4a-1 Task 1 corrected — `lift_pass_day.currency: 'EUR'` + `field_sources.lift_pass_day.fx.native_currency: 'PLN'` (or `'CZK'`) for the FX provenance.
+
+### Codex round 4 (PR #90 review by `chatgpt-codex-connector`, 2026-05-08)
+
+Two P2 findings on the v5 plan; both real correctness issues; both folded:
+
+- **P2-6 — Nested-path drafts drop sibling values on PUT.** v5's `DraftShape.field_values: Partial<Record<MetricPath, unknown>>` was flat-keyed by metric path. The server's `resortUpsert` does **shallow merge for top-level Resort fields** (per spec §4.3) — so PUT body `{ resort: { altitude_m: { min: 100 } } }` shallow-replaces `Resort.altitude_m` whole, dropping the canonical `max`. v5 had no mechanism to reconstruct sibling values. **Fold:** decisions log **D10** added: `DraftShape.resort` mirrors `Partial<Resort>` directly. `setFieldValue` decomposes dotted paths into segments; on first edit of a nested parent, `patchDraftLeaf` hydrates the parent from `store.canonical` (synced on every render via `useWorkspaceState`'s `useResortDetail` access). `buildBodyFromDraft` becomes trivial — just emits the non-empty `draft.resort` / `draft.live_signal` / `draft.editor_modes`. PR 4.4d Task 2 adds a "nested-path edit preserves sibling" test (`altitude_m.min` edit preserves `altitude_m.max`); PR 4.4d Task 7 bridge integration test adds a `season.start_month` round-trip with explicit on-disk sibling assertion.
+- **P2-7 — Edit controls violate AGENTS.md "Admin App Rules" below `md`.** AGENTS.md mandates "Admin UI is read-only below the `md` breakpoint; edit controls are removed from the tab order, not merely disabled." Spec §7.16 deferred this to PR 4.6a (polish), but the rule is baseline-mandatory — shipping 4.4d without the gate creates a 4.4d → 4.6a interim window of AGENTS.md non-compliance on `main`. **Fold:** decisions log **D11** added: PR 4.4d ships a **minimal** responsive gate via a co-located `useIsAboveMd()` hook (`window.matchMedia('(min-width: 768px)')` + `useSyncExternalStore`). Below md: input is absent, ModeToggle degrades to the v4.4b inline render-only `<span aria-disabled>` form. Tests for both viewport branches added to FieldRow.test.tsx. ModeToggle.test.tsx is dropped from PR 4.4d (file budget — coverage achieved through FieldRow.test.tsx + the integration test). 4.6a polishes UX (transitions, ARIA messaging, simulated-viewport regression test) per spec §7.16.
 
 **End of plan.**
