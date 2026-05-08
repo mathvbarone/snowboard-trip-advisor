@@ -34,7 +34,7 @@ Per spec §7.4 this plan must close, on `main`, after PR 4.4d merges:
 | **E1+** | Pessimistic save with **module-scoped per-slug singleton store** + **in-flight token** + **draft-revision counter** + **concurrent-PUT queue**. **The store lives at module scope, keyed by `ResortSlug`** (`storesBySlug: Map<ResortSlug, SlugStore>`); every `useWorkspaceState()` consumer in the same editor subscribes via `useSyncExternalStore` to the SAME `SlugStore` for the active slug. Per-slug fields: `draft`, `status`, `rev`, `inFlightToken`, `queued`, `timer`, `subscribers`. 500ms debounce; every `setFieldValue`/`setMode` increments `store.rev`. On PUT-fire, snapshot `store.rev` as `inFlightRev` and set `store.inFlightToken = Symbol()`. On response, mark `saved` (and adopt canonical state) ONLY IF `store.inFlightToken === token AND store.rev === inFlightRev`. **Never fire a second PUT while one is in-flight** — queue the next debounced flush via `store.queued`. Per-FieldRow indicator: 4 states (`dirty` \| `saving` \| `saved` \| `save-failed`). Save-failed retry is automatic. Drafts NEVER write to `useResortDetail`'s cache. `__resetForTests()` clears `storesBySlug`. | **Codex round-2 P1-1 fold:** v2 used `useState`/`useRef` inside the hook, which means each `useWorkspaceState()` call site (one per FieldRow × 12 rows) creates an INDEPENDENT state instance — 12 independent draft maps, 12 independent in-flight queues. The concurrent-PUT race that E1+ is supposed to prevent reappears across rows. Hoisting state to a module-scoped per-slug singleton (mirroring `useResortDetail`'s cache pattern) gives all consumers in the same editor ONE canonical store, ONE queue, ONE rev counter. The revision counter still catches the keystroke-clobber race within a single row (Codex round-1 P2-2 fold). |
 | **F1** | MANUAL edit input scope: `<input type="number">` for the **7 durable numeric metric paths** (`altitude_m.min`, `altitude_m.max`, `slopes_km`, `lift_count`, `skiable_terrain_ha`, `season.start_month`, `season.end_month`). The 5 live paths (`snow_depth_cm`, `lifts_open.count`, `lifts_open.total`, `lift_pass_day`, `lodging_sample.median_eur`) — including the 3 numeric and 2 money — render explanatory copy in MANUAL: "MANUAL editing for `${path}` lands in PR 4.6a." (NOT a disabled input.) Months use numeric `<input type="number" min={1} max={12}>`; display formatter still renders English month names (asymmetry documented). Gate test uses `slopes_km` (durable, numeric). | Tier 3 → 4 gate only requires MANUAL round-trip on one numeric path. **The cross-key invariant in `WorkspaceFile` (per spec §10.2) restricts `editor_modes` keys to `Object.keys(resort.field_sources)` — i.e., durable paths only. Trying to PUT `editor_modes: { snow_depth_cm: 'manual' }` would fail the refinement and 400 as `invalid-resort`.** Codex round-1 P2-1 fold corrected the v1 plan's "10 numeric paths" claim. Phase-2 widens the schema if live paths need MANUAL. |
 | **D2** (formatters) | `formatMetricValue(path, value)` exhaustive switch on `MetricPath`. Months → English month names via `Date.toLocaleString('en', { month: 'long' })`; out-of-range → `"—"`. Money → `Intl.NumberFormat(undefined, { style: 'currency', currency: m.currency })` (NOT hard-coded EUR). Lifts → `${count} / ${total}`; missing parts → `"—"`. Plain integer + units otherwise. | Type-aware formatting; no i18n in Phase 1. |
-| **D3** (cache shape) | `useResortDetail`: per-slug `Map<ResortSlug, Promise<ResortDetailResponse>>`; rejected promises pinned per ADR-0010; `invalidateResortDetail(slug)` for boundary-driven retry; **`prepopulateResortDetail(slug, response)`** for post-PUT cache update (per **D13**); `__resetForTests()` clears the Map; HMR reset in sibling `useResortDetail.hmr.ts` (coverage-excluded by glob via `apps/admin/vite.config.ts`). | Per-slug cache prevents re-fetch on slug-switch. |
+| **D3** (cache shape — Codex round-9 P2-13 fold for the dual-cache addition) | `useResortDetail` uses **TWO module-scoped Maps**: `cachedPromises: Map<ResortSlug, Promise<ResortDetailResponse>>` for first-mount Suspense reads, and `cachedFulfilled: Map<ResortSlug, ResortDetailResponse>` for synchronous returns on subsequent renders. The hook checks `cachedFulfilled` first — if a fulfilled entry exists, returns it synchronously (no `use()`, no Suspense). Otherwise calls `use(loadOnce(slug))` which suspends until the promise resolves; on resolve, the `.then` callback populates `cachedFulfilled` so subsequent renders take the sync path. Rejected promises stay pinned in `cachedPromises` per ADR-0010 (the `.then` callback never fires on rejection, so `cachedFulfilled` stays empty for the slug — `use()` throws on retry). `invalidateResortDetail(slug)` and `__resetForTests()` clear BOTH maps. **`prepopulateResortDetail(slug, response)`** sets BOTH maps — the synchronous fulfilled entry guarantees no Suspense flicker on the next render (per **D13**). HMR reset in sibling `useResortDetail.hmr.ts` (coverage-excluded by glob via `apps/admin/vite.config.ts`). | Per-slug cache prevents re-fetch on slug-switch. The dual-cache shape is a Codex round-9 P2-13 fold response: React 19's `use(Promise.resolve(value))` does NOT return synchronously — the `.then(resolve)` contract enqueues resolution as a microtask, so the first render after a fresh-Promise replacement always renders the Suspense fallback for at least one tick. With a separate synchronous map, post-PUT renders skip `use()` entirely and never flicker. |
 | **D4** (Suspense placement) | Per-route `<Suspense>` inside `<EditorErrorBoundary>`, NOT at `<Shell>` level. Fallback: inline `<div role="status" aria-live="polite">Loading…</div>`. | Editor suspending must NOT blank sidebar/dashboard. |
 | **D5** (concurrent tabs) | Phase-1 documented as last-writer-wins between two browser tabs on the same loopback. PUT is `If-Match`-less in Phase 1. Phase 2 ships ETag/If-Match. PR 4.4c includes a defensive test asserting the handler ignores any `If-Match` header (so a Phase-2 leak doesn't break Phase 1). | Single-analyst topology makes concurrent tabs rare. |
 | **D6** (test isolation) | Hook tests own their own `__resetForTests()` calls in local `afterEach` blocks. NO global `apps/admin/src/test-setup.ts` modification in PR 4.4a-2 (file-budget pressure; matches the existing `useResortList` pattern). The unwired `useResortList.__resetForTests` is pre-existing technical debt and explicitly out-of-scope for Tier 3. | Vitest gives each test file its own module instance; cross-file leakage is impossible. Local `afterEach` is sufficient and matches existing codebase pattern. |
@@ -454,7 +454,9 @@ git commit -s -m "feat(schema): add projectFieldStates + seed admin-workspace fi
   - **`invalidateResortDetail(slug)`** clears the slug's entry; subsequent render re-fetches.
   - **`invalidateResortDetail()`** (no args) clears the entire Map.
   - **`__resetForTests()`** clears the Map.
-  - **`prepopulateResortDetail(slug, response)`** per Codex round-7 P1-1 fold: replaces the cached entry with a freshly-resolved promise carrying `response`. Subsequent `useResortDetail(slug)` renders return `response` synchronously (no `<Suspense>` fallback, no `apiClient.getResort` call). Verify via `vi.spyOn(apiClient, 'getResort')` (call count stays 0 across the prepopulate + render cycle).
+  - **`prepopulateResortDetail(slug, response)`** per Codex round-7 P1-1 + round-9 P2-13 folds: populates BOTH `cachedFulfilled` and `cachedPromises` (the latter for any concurrent Suspense reader, the former for the load-bearing synchronous read). Subsequent `useResortDetail(slug)` renders return `response` synchronously WITHOUT calling `use()`. Verify via `vi.spyOn(apiClient, 'getResort')` (call count stays 0 across the prepopulate + render cycle) AND via `getRenderCount(<Suspense fallback="loading"/>)` (the fallback NEVER renders on the post-prepopulate render — this catches the round-9 React-19-`use(Promise.resolve())` flicker bug if ever re-introduced).
+  - **Synchronous fast path** per Codex round-9 P2-13 fold: after the first fetch resolves, subsequent `useResortDetail(slug)` calls return synchronously from `cachedFulfilled` (skipping `use()` entirely). Test: render once (suspends + resolves); unmount; re-mount → assert NO Suspense fallback rendered (synchronous path) AND `apiClient.getResort` call count stays at 1.
+  - **Rejected-promise path skips synchronous cache**: if `apiClient.getResort` rejects, `cachedFulfilled` stays empty for that slug (the `.then` callback that populates it never fires). Subsequent `useResortDetail(slug)` calls re-throw the rejection via `use(loadOnce(slug))` (pinned promise per ADR-0010). Verify the dual-cache shape doesn't accidentally swallow the rejection.
 - [ ] **Step 2: Run.** FAIL.
 
 ### Task 6 — Implement `useResortDetail` + HMR
@@ -471,39 +473,71 @@ import { use } from 'react'
 import { apiClient } from '../lib/apiClient'
 import './useResortDetail.hmr'
 
-const cached = new Map<ResortSlug, Promise<ResortDetailResponse>>()
+// Dual-cache per **D3** + Codex round-9 P2-13 fold:
+//   - cachedPromises: for first-mount Suspense reads via use().
+//   - cachedFulfilled: synchronous map populated on Promise resolution
+//     (and on prepopulate). When present, useResortDetail returns
+//     synchronously WITHOUT calling use() — avoids the one-tick Suspense
+//     flicker that React 19's use(Promise.resolve(value)) causes (the
+//     thenable .then(resolve) contract enqueues resolution as a microtask,
+//     so use() suspends for at least one render cycle even when the value
+//     is already known).
+const cachedPromises = new Map<ResortSlug, Promise<ResortDetailResponse>>()
+const cachedFulfilled = new Map<ResortSlug, ResortDetailResponse>()
 
 function loadOnce(slug: ResortSlug): Promise<ResortDetailResponse> {
-  const existing = cached.get(slug)
+  const existing = cachedPromises.get(slug)
   if (existing !== undefined) { return existing }
-  const next = apiClient.getResort(slug)
-  cached.set(slug, next)
+  // Chain via .then so the synchronous cache populates as soon as the
+  // network completes; the next render takes the sync path.
+  const next = apiClient.getResort(slug).then((response): ResortDetailResponse => {
+    cachedFulfilled.set(slug, response)
+    return response
+  })
+  cachedPromises.set(slug, next)
   // Empty terminal .catch suppresses unhandled-rejection signal; rejected
-  // promises stay PINNED in the cache per ADR-0010.
+  // promises stay PINNED in cachedPromises per ADR-0010 (the .then callback
+  // never fires on rejection, so cachedFulfilled stays empty — next render
+  // takes the use() path which re-throws the pinned rejection).
   next.catch((): void => { /* swallow */ })
   return next
 }
 
 export function useResortDetail(slug: ResortSlug): ResortDetailResponse {
+  // Synchronous fast path — avoids the React-19 use()-Promise.resolve flicker
+  // (Codex round-9 P2-13). use() is allowed in conditionals per React 19 docs.
+  const fulfilled = cachedFulfilled.get(slug)
+  if (fulfilled !== undefined) { return fulfilled }
   return use(loadOnce(slug))
 }
 
 export function invalidateResortDetail(slug?: ResortSlug): void {
-  if (slug === undefined) { cached.clear() } else { cached.delete(slug) }
+  if (slug === undefined) {
+    cachedPromises.clear()
+    cachedFulfilled.clear()
+  } else {
+    cachedPromises.delete(slug)
+    cachedFulfilled.delete(slug)
+  }
 }
 
-// Per Codex round-7 P1-1 fold: replace the cached promise for a slug with
-// a freshly-resolved promise carrying the post-PUT response. PR 4.4d's
-// useWorkspaceState calls this on successful PUT so subsequent renders
-// see the persisted canonical state without a Suspense flicker. The
-// previous cached promise is dropped (any in-flight promise reference is
-// orphaned — components currently suspending on it observe the new
-// resolved one on next render via the cache lookup).
+// Per **D13** + Codex round-7 P1-1 + round-9 P2-13 folds: PR 4.4d's
+// useWorkspaceState calls this on successful PUT to publish the post-PUT
+// response into both caches. The synchronous cachedFulfilled entry is the
+// load-bearing piece — the next useResortDetail(slug) call returns
+// synchronously, avoiding the React-19 use(Promise.resolve()) flicker.
+// cachedPromises is also updated so any concurrent Suspense reader (rare,
+// but possible if a sibling component is mid-suspend) sees the same
+// resolved data.
 export function prepopulateResortDetail(slug: ResortSlug, response: ResortDetailResponse): void {
-  cached.set(slug, Promise.resolve(response))
+  cachedFulfilled.set(slug, response)
+  cachedPromises.set(slug, Promise.resolve(response))
 }
 
-export function __resetForTests(): void { cached.clear() }
+export function __resetForTests(): void {
+  cachedPromises.clear()
+  cachedFulfilled.clear()
+}
 ```
 
 `useResortDetail.hmr.ts` (mirrors `apps/public/src/state/useDataset.hmr.ts:14-25` — string-literal accept target avoids the cycle that would form if we imported `__resetForTests` back from `./useResortDetail`):
@@ -1658,5 +1692,11 @@ Two P2 findings on the v9 plan; both real correctness issues; both folded:
 
 - **P2-11 — Formatter test asserted `lift_pass_day: { currency: 'PLN' }`.** v9's PR 4.4b Task 1 formatter-test list specified `lift_pass_day: { amount: 4250, currency: 'PLN' }` → `Intl.NumberFormat ... currency: 'PLN'`. But `Money.currency` is `z.literal('EUR')` (`packages/schema/src/primitives.ts:5-8`); non-EUR upstream prices are encoded via `field_sources.<path>.fx.native_currency` per ADR-0003, NOT via `Money.currency`. Following the test would either be unreachable (schema rejects PLN before the formatter sees it) or force fixtures that fail `ResortDetailResponse.parse()`. Same root cause as round-3 P2-5 (which fixed the seed fixtures); this fold catches the parallel slip in formatter tests. **Fold:** test list updated to `currency: 'EUR'` for both formatter assertions; non-EUR currencies remain a Phase-2 concern when the FX provenance gets a UI surface.
 - **P2-12 — `useResortDetail.hmr.ts` imports `__resetForTests` back from `./useResortDetail`, forming a cycle.** `useResortDetail.ts` does `import './useResortDetail.hmr'` (side-effect import). The HMR file's `import { __resetForTests } from './useResortDetail'` closes the loop. Vite's HMR module-replacement step would re-evaluate both modules through the cycle on every reload — the canonical reset semantics aren't guaranteed. The existing `apps/public/src/state/useDataset.hmr.ts:14-25` explicitly avoids this by using `import.meta.hot.accept('./useDataset', () => {})` — a string-literal accept target with a no-op callback, relying on the new module body to naturally re-initialize its own `cached`. **Fold:** rewrote `useResortDetail.hmr.ts` to mirror the public pattern: `import.meta.hot.accept('./useResortDetail', () => { /* no-op */ })`. No `__resetForTests` import; no cycle. The new module body's `const cached = new Map<...>()` re-initializes naturally. Documentation block in the file references the public pattern + the cycle-avoidance reason.
+
+### Codex round 9 (PR #90 review by `chatgpt-codex-connector`, 2026-05-08)
+
+One P2 finding on the v10 plan; folded:
+
+- **P2-13 — `prepopulateResortDetail(slug, Promise.resolve(response))` doesn't actually avoid the Suspense flicker.** v10 hoped that replacing the cached entry with `Promise.resolve(response)` (a synchronously-fulfilled Promise) would make the next `useResortDetail(slug)` render return synchronously through `use()`. Codex tested it: React 19's `use(Promise.resolve('ok'))` initially renders the Suspense fallback under the admin test setup. The thenable contract (`.then(resolve)`) enqueues resolution as a microtask — `use()` cannot synchronously observe the value. The post-PUT no-flicker guarantee in **D13** was wrong. **Fold:** decisions log **D3** updated to a **dual-cache** shape: `cachedPromises` (Promise-keyed; for first-mount `use()` reads) AND `cachedFulfilled` (data-keyed; synchronous returns). `useResortDetail(slug)` checks `cachedFulfilled` first; if a fulfilled entry exists, returns it synchronously (no `use()`, no Suspense). The `loadOnce` `.then` callback populates `cachedFulfilled` on resolution so subsequent renders take the sync path. `prepopulateResortDetail` populates BOTH caches; rejected promises only populate `cachedPromises` (cachedFulfilled stays empty per ADR-0010 pinning). PR 4.4a-2 Task 5 adds three new tests: prepopulate-no-flicker (assert Suspense fallback NEVER renders post-prepopulate), synchronous fast path (assert subsequent renders skip `use()`), and rejected-promise path skips sync cache (preserves ADR-0010 pinning).
 
 **End of plan.**
