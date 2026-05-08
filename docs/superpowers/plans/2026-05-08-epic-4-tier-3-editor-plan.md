@@ -183,11 +183,11 @@ After implementation completes on a PR's branch:
   - `schema_version: 1`
   - `slug: 'kotelnica-bialczanska'`
   - `resort: Resort` — name (LocalizedString), country `'PL'`, region (LocalizedString), `altitude_m`, `slopes_km`, `lift_count`, `skiable_terrain_ha`, `season`, full `field_sources` map for all 7 durable METRIC_FIELDS.
-  - `live_signal: ResortLiveSignal | null` — non-null with `snow_depth_cm`, `lifts_open: { count, total }`, `lift_pass_day: { amount, currency: 'PLN' }`, `lodging_sample.median_eur: { amount, currency: 'EUR', sample_size }` + matching `field_sources`.
+  - `live_signal: ResortLiveSignal | null` — non-null with `snow_depth_cm`, `lifts_open: { count, total }`, **`lift_pass_day: { amount: <EUR-converted>, currency: 'EUR' }`** (per Codex round-3 P2 fold: `Money` is **EUR-only** in `packages/schema/src/primitives.ts:5-9`; non-EUR source amounts are encoded via `field_sources.lift_pass_day.fx: { source: 'ecb-reference-rate', observed_at, rate, native_amount, native_currency: 'PLN' }` per ADR-0003), `lodging_sample.median_eur: { amount, currency: 'EUR', sample_size }` + matching `field_sources`.
   - `modified_at` — recent ISO datetime.
   - `editor_modes: {}` (sparse default).
 
-- [ ] **Step 2: Write `spindleruv-mlyn.json`** — analogous CZ Krkonoše resort with `country: 'CZ'`, `lift_pass_day.currency: 'CZK'`. Same shape.
+- [ ] **Step 2: Write `spindleruv-mlyn.json`** — analogous CZ Krkonoše resort with `country: 'CZ'`. **`lift_pass_day` is `{ amount: <EUR-converted>, currency: 'EUR' }`** with `field_sources.lift_pass_day.fx.native_currency: 'CZK'` (NOT `currency: 'CZK'` on the `Money` shape — that would fail `Money.parse()`). Same overall shape.
 
 - [ ] **Step 3: Verify both fixtures parse.** Run an inline node REPL or the validator from `packages/schema/src/__tests__/...`:
 
@@ -877,7 +877,9 @@ if (code !== undefined) {
   - Subsequent `toggleMode('slopes_km')` → emits `{ editor_modes: { slopes_km: 'auto' } }`.
   - **`validPaths` guard (silent no-op) — ghost path**: `toggleMode('ghost')` when `'ghost' ∉ field_sources` → NO PUT, NO `console.warn`, NO thrown error. Assert `apiClient.upsertResort` was NOT called.
   - **`validPaths` guard (silent no-op) — live-only path** per Codex round-1 P2-1 fold: `toggleMode('snow_depth_cm')` (live path; in `live_signal.field_sources` but NOT in `resort.field_sources`) → NO PUT, silent no-op. (If 4.4d ever derives `validPaths` from `field_states` keys instead of `resort.field_sources` keys, this test catches it — the live-path PUT would otherwise 400 as `invalid-resort` from the cross-key refinement.)
-  - Default reading: missing `editor_modes` entry → `'auto'`.
+  - Default reading (no draft, no canonical): missing `editor_modes` entry AND `field_states[path].state !== 'manual'` → `'auto'`.
+  - **Canonical-mode reload preservation (gate-blocking)** per Codex round-3 P1-1 fold: MSW serves a `ResortDetailResponse` where `field_states.slopes_km.state === 'manual'` (server has persisted MANUAL); draft is empty (fresh mount, no edits yet) → `modeFor('slopes_km')` returns `'manual'` (NOT `'auto'`). Without the canonical fallback, reload-after-save flips every toggle back to AUTO and the Tier 3 → 4 gate fails. The first `toggleMode('slopes_km')` after this mount inverts to `'auto'` (because `current` reads canonical 'manual' first).
+  - **Draft override wins over canonical**: server projection says `'manual'`, but user has just toggled to `'auto'` (draft `editor_modes.slopes_km === 'auto'`) → `modeFor` returns `'auto'`. Override semantics correct.
   - Local `afterEach(() => { useWorkspaceState.__resetForTests(); useResortDetail.__resetForTests() })`.
 - [ ] **Step 2:** Run. FAIL.
 
@@ -1087,7 +1089,7 @@ export function __resetForTests(): void {
 
 **Files:** New `apps/admin/src/state/useModeToggle.ts`.
 
-- [ ] **Step 1:** Implement as a thin wrapper over `useWorkspaceState`. **Per Codex round-1 P2-1 fold:** `validPaths` is derived INTERNALLY from `useResortDetail(slug).resort.field_sources` — NOT taken as an arg. This keeps PR 4.4d at 8 files (no prop drilling through `MetricPanel` / `ResortEditor`) and pins the durable-only constraint at the hook layer where it cannot be bypassed.
+- [ ] **Step 1:** Implement as a thin wrapper over `useWorkspaceState`. **Per Codex round-1 P2-1 fold:** `validPaths` is derived INTERNALLY from `useResortDetail(slug).resort.field_sources` — NOT taken as an arg. **Per Codex round-3 P1-1 fold:** `modeFor` falls back to the canonical projection's `state === 'manual'` when no draft override exists — otherwise reload-after-save would render every field as AUTO even though the server persisted MANUAL (gate-blocking).
 
 ```ts
 import type { MetricPath } from '@snowboard-trip-advisor/schema'
@@ -1110,19 +1112,36 @@ export function useModeToggle() {
 
   const { draft, setMode } = useWorkspaceState()
 
+  // Canonical-mode derivation per Codex round-3 P1-1 fold: when no draft
+  // override exists, derive mode from the canonical projection. The
+  // projectFieldStates contract guarantees field_states[path].state ===
+  // 'manual' iff editor_modes[path] === 'manual' AND the value is present.
+  // This is the load-bearing piece for the gate-required "reload preserves
+  // MANUAL" round-trip — without it, any reopen of a previously-saved
+  // editor renders every toggle as AUTO and the gate fails.
+  // (Edge case: if the analyst saved MANUAL with a missing value, the
+  // projection compresses to 'failed' and modeFor would return 'auto'
+  // post-reload. Phase-1 acceptable: re-flip MANUAL after providing a
+  // value. Documented in the Decisions log.)
+  function canonicalModeFor(path: MetricPath): 'manual' | 'auto' {
+    return detail.field_states[path].state === 'manual' ? 'manual' : 'auto'
+  }
+
+  function modeFor(path: MetricPath): 'manual' | 'auto' {
+    const override = draft.editor_modes[path]
+    return override ?? canonicalModeFor(path)
+  }
+
   function toggleMode(path: MetricPath): void {
     if (!validPaths.includes(path)) { return /* silent no-op per §6.1 + F1 fold */ }
-    const current = draft.editor_modes[path] ?? 'auto'
+    const current = modeFor(path)  // uses canonical fallback so first toggle inverts the persisted state correctly
     setMode(path, current === 'manual' ? 'auto' : 'manual')
   }
-  return {
-    toggleMode,
-    modeFor: (p: MetricPath): 'manual' | 'auto' => draft.editor_modes[p] ?? 'auto',
-  }
+  return { toggleMode, modeFor }
 }
 ```
 
-- [ ] **Step 2:** Run. PASS.
+- [ ] **Step 2:** Run. PASS on all branches including the new "reload preserves MANUAL" test (Task 1).
 
 ### Task 5 — Extract `<ModeToggle>` (button-based) + tests
 
@@ -1349,5 +1368,12 @@ Three findings on the v3 plan (one P1, two P2); all real correctness issues; all
 - **P1-1 — `useWorkspaceState` per-row state breaks E1+'s singleton guarantee.** v3 used `useState`/`useRef` inside the hook; each `useWorkspaceState()` call site (one per FieldRow × 12 rows) created an INDEPENDENT state instance. The whole concurrent-PUT race that E1+ closes reappears across rows: editing two fields in the same editor would fire two concurrent PUTs. **Fold:** rewrote the impl as a **module-scoped per-slug singleton store** with `useSyncExternalStore` subscription. `storesBySlug: Map<ResortSlug, SlugStore>`; all consumers in the same editor subscribe to the SAME store, sharing `draft`, `inFlightToken`, `queued`, `rev`. Mirrors `useResortDetail`'s per-slug cache pattern. PR 4.4d Task 2 adds two new tests: "shared store across consumers" (two `useWorkspaceState()` calls + one PUT carrying both edits) and "per-slug isolation" (slug switch produces fresh draft). Decisions log E1+ + Reviewer-fold log carry the rationale.
 - **P2-3 — `projectFieldStates` applies live-data TTL to durable paths.** v3 applied the `ageDays > FRESHNESS_TTL_DAYS.{default,max_stale}` checks to ALL `METRIC_FIELDS`, including durable resort attributes. Canonical semantics in `loadResortDatasetFromObject.ts:83-99` + existing `health.ts` / `listResorts.ts` staleness gating treat durable fields as `fresh` unconditionally — only populated live paths can become stale/never_fetched by clock age. v3 would render an old `slopes_km.observed_at` as stale/failed in the editor while the dashboard projection still reports it fresh. **Fold:** added `DURABLE_PATHS` constant and `if (DURABLE_PATHS.has(path)) return { state: 'live', ... }` guard in `projectOne`. Decisions log A1.6 captures the rationale. PR 4.4a-1 Task 4 adds a regression-pinning test ("durable path with old `observed_at` is still `live`").
 - **P2-4 — `resortView.ts` excluded from coverage.** `packages/schema/vite.config.ts` excludes `'src/resortView.ts'` with a v1 "types-only" rationale (correct then; ships only the type + `toFieldValue`). v3 added executable `projectFieldStates` to the same file but did NOT update the exclusion — coverage would silently skip the new code, untested branches passing the 100% gate. **Fold:** PR 4.4a-1 file list adds `packages/schema/vite.config.ts` MODIFY (5 files total) to remove the exclusion. PR 4.4a-1 Task 4.5 adds tests covering the existing `toFieldValue` (4 states) so removing the exclusion doesn't surface a coverage gap.
+
+### Codex round 3 (PR #90 review by `chatgpt-codex-connector`, 2026-05-08)
+
+Two findings on the v4 plan (one P1, one P2); both real correctness issues; both folded:
+
+- **P1-1 — `useModeToggle.modeFor` doesn't hydrate from canonical state on reload (gate-blocking).** v4's `modeFor(path) = draft.editor_modes[path] ?? 'auto'` assumed a fresh draft is the source of truth. But after the mandatory reload-after-save flow (Tier 3 → 4 gate criterion 2), the singleton store's draft is empty and the only mode signal is the server-persisted `WorkspaceFile.editor_modes` reflected in `useResortDetail(slug).field_states[path].state === 'manual'`. v4 would render every toggle as AUTO post-reload — the gate fails. **Fold:** `modeFor` now falls back to `detail.field_states[path].state === 'manual' ? 'manual' : 'auto'` when no draft override exists. `toggleMode` reads through the same `modeFor` so the first toggle after reload inverts the persisted state correctly. PR 4.4d Task 1 adds two new tests: "canonical-mode reload preservation" (server projection 'manual' + empty draft → modeFor returns 'manual') and "draft override wins over canonical". Edge case (analyst saved MANUAL with missing value → projection compresses to 'failed' → modeFor returns 'auto' post-reload) is documented as Phase-1 acceptable; analyst re-flips MANUAL after providing a value.
+- **P2-5 — Seed fixture `Money.currency` constraint violated.** v4's PR 4.4a-1 Task 1 wrote `lift_pass_day: { amount, currency: 'PLN' }` for the PL fixture and `currency: 'CZK'` for the CZ fixture. But `packages/schema/src/primitives.ts:5-9`'s `Money` schema has `currency: z.literal('EUR')` — non-EUR amounts MUST be encoded as `Money` with `currency: 'EUR'` (EUR-converted) plus `field_sources.<path>.fx: { source: 'ecb-reference-rate', native_amount, native_currency, rate, observed_at }` per ADR-0003. v4 fixtures would fail `WorkspaceFile.parse()` and block the entire Tier 3 chain. **Fold:** PR 4.4a-1 Task 1 corrected — `lift_pass_day.currency: 'EUR'` + `field_sources.lift_pass_day.fx.native_currency: 'PLN'` (or `'CZK'`) for the FX provenance.
 
 **End of plan.**
