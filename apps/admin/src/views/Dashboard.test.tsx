@@ -261,8 +261,9 @@ describe('Dashboard (PR 4.2 §1.4)', (): void => {
 
   // ---------------------------------------------------------------------------
   // (f) Card click — clicking the "Failed fields" card pushes URL state.
-  // Closes the deferred test from PR 4.2 §1.4 step 1 (Tier 2 plan).
-  // Spec: docs/superpowers/specs/2026-05-07-dashboard-card-click-design.md §4.1.
+  // Closes the deferred Tier 2 → Tier 3 gate item per Epic 4 spec §7.9.1
+  // (the PR 4.3.1 fold). Click pushes ?route=resorts&hasFailures=true via
+  // setRoute; App-level router resolves to ResortsTable filtered server-side.
   // ---------------------------------------------------------------------------
   it('pushes ?route=resorts&hasFailures=true when the "Failed fields" card is clicked', async (): Promise<void> => {
     server.use(

@@ -538,11 +538,11 @@ Tier 5 ─ Closing
   - Contract snapshot pinned at `packages/schema/api/__snapshots__/contract.snap`; every export from `packages/schema/api/index.ts` represented.
   - `WorkspaceFile.parse()` enforces the `editor_modes` cross-key invariant (per §10.2 / P0-2 fold).
   - Tiered MSW harness present: `apps/admin/src/mocks/server.ts` (canned) + `apps/admin/src/mocks/realHandlers.ts` (bridge) both exist and have unit tests.
-- **Tier 2 → 3 gate (after 4.2 → 4.3 merged):**
-  - Dashboard renders against real `/api/health`; ResortsTable against real `/api/resorts`.
-  - Cold-start empty state visible per §10.9 (Dashboard "No resorts yet" card; ResortsTable empty-state row) when `data/admin-workspace/` is empty AND `data/published/current.v1.json` is missing.
-  - Card-click + row-click navigation works in browser smoke (URL state updates).
-  - Both real handlers tested against missing-`current.v1.json` fixtures.
+- **Tier 2 → 3 gate (after 4.2 → 4.3 merged) — CLOSED.** Originally listed:
+  - Dashboard renders against real `/api/health`; ResortsTable against real `/api/resorts`. ✅
+  - Cold-start empty state visible per §10.9 (Dashboard "No resorts yet" card; ResortsTable empty-state row) when `data/admin-workspace/` is empty AND `data/published/current.v1.json` is missing. ✅
+  - Card-click + row-click navigation works in browser smoke (URL state updates). ✅ (row-click closed by 4.3; card-click closed by PR 4.3.1 — see §7.9.1.)
+  - Both real handlers tested against missing-`current.v1.json` fixtures. ✅
 - **Tier 3 → 4 gate (after 4.4a/b/c/d merged):**
   - Editor opens for both seed slugs (`kotelnica-bialczanska`, `spindleruv-mlyn`); MANUAL edit round-trips through PUT; page reload preserves the workspace state via `editor_modes`.
   - Bridge integration test (`resort-editor-write.test.tsx`, Tier 2 of the test harness) green; per-test workspace tmpdir verified to receive the atomic-written file.
@@ -571,128 +571,27 @@ Tier 5 ─ Closing
 
 ### 7.5 PR 4.1a — Foundation: schema/api + apiClient + FieldStateFor + contract snapshot
 
-**Goal.** No app code yet. Ship the typed wire contract (Zod schemas), the `apiClient` generator, the contract-snapshot test that pins the surface, AND the net-new admin-side projection types `FieldStateFor<T>` + `toFieldValue<T>` that the editor will consume in 4.4a/b/c/d.
-
-**Branch:** `epic-4/pr-4.1a-foundation`. **README:** skip (no user-visible surface).
-
-**Files (tests first per TDD; implementation listed after):**
-
-- Create / extend `packages/schema/src/resortView.test.ts` — cases for `FieldStateFor<T>` (4-state discriminated union: `Live` | `Stale` | `Failed` | `Manual`) + `toFieldValue<T>` (admin → public mapper).
-- Create `packages/schema/src/workspaceFile.test.ts` — schema cases pinning the `editor_modes` cross-key invariant per §10.2 / P0-2 fold:
-  - Happy: `field_sources: {a, b, c}` + `editor_modes: {a: 'manual'}` parses.
-  - Default: missing `editor_modes` parses as `{}`.
-  - Reject: `editor_modes: {d: 'manual'}` when `field_sources` has no `d` — parse fails with the refinement message naming `d`.
-  - Reject: empty-string key in `editor_modes` — parse fails (defensive).
-  - Cold-start: workspace file alone (no published-doc context) parses cleanly per §10.9.
-- Create `packages/schema/api/contract.test.ts` (snapshot test; pins every export from `packages/schema/api/index.ts`; updates `__snapshots__/contract.snap`). The snapshot MUST capture endpoint 6's `:slug` path-param schema as the union `z.union([ResortSlug, z.literal('__all__')])` (per §1.1 divergence row + §4.6); a future Phase 2 PR collapsing the union back to `ResortSlug` is then a visible snapshot diff.
-- Create `apps/admin/src/lib/apiClient.test.ts` — MSW-backed unit tests for each endpoint's happy + error paths.
-- Modify `packages/schema/src/resortView.ts` — implement `FieldStateFor<T>` + `toFieldValue<T>` per the test cases; remove the existing "DEFERRED to Epic 4 PR 4.4" comment block (`resortView.ts` lines 2-5).
-- Create `packages/schema/src/workspaceFile.ts` (`WorkspaceFile` Zod schema with `.passthrough()` per §10.2 + a top-level `editor_modes: z.partialRecord(z.enum(METRIC_FIELDS), z.enum(['manual', 'auto'])).default({})` field + a `.refine()` enforcing the cross-key invariant: every `editor_modes` key MUST be present in `resort.field_sources`. The refinement's error message names the offending paths so `400 invalid-resort` envelopes from `resortUpsert` carry actionable detail. Note: `z.partialRecord` (not `z.record`) is required because Zod v4's `z.record(z.enum(...), v)` is exhaustive — see §4.3 sparse-map note for the v4 behavior).
-- Create `packages/schema/api/index.ts` + 6 schema files (`listResorts.ts`, `resortDetail.ts`, `resortUpsert.ts`, `publish.ts`, `listPublishes.ts`, `health.ts`) + `errorEnvelope.ts` + `rateLimitClass.ts` (per §10.5 + C3 P1 fold — exports `RATE_LIMIT_CLASS = { listResorts: 'read', resortDetail: 'read', resortUpsert: 'write', publish: 'write', listPublishes: 'read', health: 'read' } as const`; schemas reference it via `.describe()` annotations so Phase 2 can wire enforcement without re-shaping the schemas).
-- `errorEnvelope.ts`'s `code` field is `z.enum(['invalid-request', 'invalid-resort', 'not-found', 'not-implemented', 'publish-validation-failed', 'workspace-corrupt', 'internal'])` per §4.10 (`'not-implemented'` is the canonical 501-stub code used by PR 4.1b's stubs; `'workspace-corrupt'` per §10.3.1 / P0-4 fold).
-- `publish.ts`'s `:slug` path-param is `z.union([ResortSlug, z.literal('__all__')])` (per §4.6 / §1.1 divergence row); `resortDetail.ts` keeps plain `ResortSlug`.
-- `resortUpsert.ts`'s `ResortUpsertBody` is `{ resort?: Partial<Resort>, live_signal?: Partial<ResortLiveSignal> | null, editor_modes?: Partial<Record<MetricPath, 'manual' | 'auto'>> }` per §4.3 — all three fields optional, with a Zod `.refine()` enforcing "at least one of the three must be present" (empty bodies return `400 invalid-request`). The Zod schema for the body's `editor_modes` is `z.partialRecord(z.enum(METRIC_FIELDS), z.enum(['manual', 'auto']))` (sparse — Zod v4's `z.record(z.enum(...), v)` is exhaustive; `z.partialRecord` is the canonical sparse-record constructor — Codex P1 fold on `89271db`). The `editor_modes` slot lets `useModeToggle` persist sparse single-key updates through the typed PUT path; making `resort` optional unlocks mode-only PUTs without forcing the SPA to reconstruct the full Resort on every toggle. URL slug is plain `ResortSlug`. The `apiClient.test.ts` deliverable adds a "PUT with empty body returns `400 invalid-request`" case to pin the refinement; the "shallow-merge happy path" case in PR 4.4c's `resortUpsert.test.ts` verifies the same on the handler side and exercises a single-key sparse update.
-- `health.ts`'s `HealthResponse` includes `resorts_with_corrupt_workspace: number` (per §4.8 / P0-4 fold).
-- Modify `packages/schema/src/index.ts` to barrel-export `WorkspaceFile` and the new `resortView` additions.
-- Modify `eslint.config.js`:
-  - Allow `apps/admin/src/**` to import `@snowboard-trip-advisor/schema/api`.
-  - Ban `apps/admin/src/**` from importing `@snowboard-trip-advisor/schema/node` (Node-only; mirrors public app's restriction).
-  - Ban `apps/admin/src/**` from raw `fetch(` references (must use `apiClient`).
-- Create `apps/admin/src/lib/apiClient.ts` — typed client. Each endpoint is one async function (`listResorts(q): Promise<ListResortsResponse>`, etc.). Per B4 P1 fold: `publish()` takes **no slug arg** in Phase 1 — the route's `:slug` is ignored because Phase 1 publish is all-or-nothing. Implementation: the `publish` wrapper hard-codes the sentinel slug `'__all__'` in the URL path (`fetch('/api/resorts/__all__/publish', …)`) so the route's typed schema-driven generation still produces a slugged URL while the SPA caller sees a no-arg function. The handler at `apps/admin/server/publish.ts` ignores the slug entirely in Phase 1 (rebuilds the full published doc) and asserts `slug === '__all__'` to catch accidental per-slug calls until Phase 2 widens the contract. Document this convention in the apiClient module comment so future Phase 2 maintenance does not accidentally promote the slug to a meaningful argument.
-
-**Subagent review trigger:** YES — `packages/schema/**`, `eslint.config.js`.
-
-**Acceptance gate:** `npm run qa` green; contract snapshot present (the snapshot test lives at `packages/schema/api/contract.test.ts` and is picked up by `npm run coverage` automatically — no separate `test:contract-snap` script per F1 P1 fold); apiClient unit tests pass; ESLint rules block illegal imports; `FieldStateFor<T>` + `toFieldValue<T>` exported and tested.
+Status: **DONE** — merged in [#79](https://github.com/mathvbarone/snowboard-trip-advisor/pull/79) (commit `0ad4992`). Delivered: `packages/schema/api/` typed wire contract for all 6 endpoints + contract snapshot test (`__snapshots__/contract.snap`) + `apps/admin/src/lib/apiClient.ts` + `WorkspaceFile` schema with the `editor_modes` cross-key invariant + `FieldStateFor<T>` / `toFieldValue<T>` projection types in `packages/schema/src/resortView.ts` + ESLint allow/ban rules for `apps/admin/**`. The `publish()` wrapper hard-codes the sentinel slug `'__all__'` per the all-or-nothing Phase 1 publish convention.
 
 ### 7.6 PR 4.1b — Vite middleware skeleton + admin Shell composition
 
-**Goal.** `apps/admin` boots at `127.0.0.1:5174 strictPort:true`, the middleware dispatches `/api/*` to handler stubs (which return 501 Not Implemented), and the Shell renders the empty admin chrome.
-
-**Branch:** `epic-4/pr-4.1b-middleware`. **Depends on:** 4.1a merged. **README:** skip.
-
-**Files:**
-
-- Create `apps/admin/vite-plugin-admin-api.ts` — Vite plugin that registers a Connect middleware on `/api/*`, parses request body through Zod schemas, dispatches to `server/*` handlers (stub implementations returning 501 in this PR), wraps response in error envelope. Lifecycle adapter is coverage-excluded; the dispatch helper is unit-tested.
-- Create `apps/admin/server/{listResorts,resortDetail,resortUpsert,publish,listPublishes,health,workspace}.ts` — STUB handlers returning `{ error: { code: 'not-implemented', message: '...' } }` with status 501. Real implementations land in subsequent PRs. The dispatch helper lazy-creates `data/admin-workspace/` via `mkdir -p` on first invocation per §10.9 (matches `publishDataset.ts:30`'s pattern for `data/published/history/`).
-- Create `apps/admin/server/__tests__/dispatch.test.ts` — unit-tests the middleware's request → handler dispatch logic (path matching, schema parsing, error envelope) AND the lazy `mkdir -p` of `data/admin-workspace/` on first invocation.
-- Modify `apps/admin/vite.config.ts` — register `adminApiPlugin()`; bind `127.0.0.1:5174 strictPort:true`.
-- Modify `apps/admin/index.html` — `<html lang="en">`, `<meta name="description">`, basic shell mount point. NO CSP nonce (admin is dev-only).
-- Modify `apps/admin/src/App.tsx` — replace stub `<main className="app-shell" />` with `<Shell><Outlet /></Shell>` composition (or the equivalent without a router until 4.2/4.3 — the App could initially render `<Shell><Dashboard />` placeholder).
-- Create `apps/admin/src/views/Shell.tsx` — composes `<Sidebar>` (placeholder until 4.1c) + `<HeaderBar>` (placeholder) + `<main>{children}</main>`. The component is a placeholder shell until 4.1c lands the design-system pieces.
-- Modify `apps/admin/src/main.tsx` — mount with `<StrictMode>` (already existed); no extra setup.
-- Modify `apps/admin/src/test-setup.ts` — extend with admin-specific MSW server setup (the file already exists per the §2.3 file-tree comment "test-setup.ts # exists"; this PR adds the admin-side handlers; pattern mirrors the public app's `test-setup.ts`).
-- Create `apps/admin/src/mocks/server.ts` — **canned-data MSW handlers** for all 6 endpoints (return canned data; tests override per-suite). File-level header comment makes the test-only intent explicit: "Test-time MSW handlers returning canned data. Used by SPA unit tests (apiClient.test.ts, view tests) and read-only integration tests where no filesystem side effects are exercised. NOT runtime — runtime is `vite-plugin-admin-api.ts` dispatching to `apps/admin/server/*`. For integration tests that need real handler invocation, see `mocks/realHandlers.ts`."
-- Create `apps/admin/src/mocks/realHandlers.ts` + `realHandlers.test.ts` — **bridge MSW handlers** per §6.3 / P0-3 fold. Exports `bridgeHandlers(workspaceDir: string)` returning MSW handlers that decode the request via Zod, invoke the matching real `apps/admin/server/*` handler with the per-test workspace dir override, and encode the response. File-level header comment: "Test-time MSW bridge handlers that decode the request via Zod, invoke the real `apps/admin/server/*` handler with a per-test workspace fixture dir, and encode the response. Used by side-effect-bearing integration tests (4.4d edit roundtrip, 4.5b publish, 4.6b full-flow). NOT runtime. For canned-data SPA unit tests, see `mocks/server.ts`."
-- Both `mocks/server.ts` and `mocks/realHandlers.ts` are test-only — they exist for SPA-side test-time interception (apiClient unit tests, view tests, integration tests). Runtime behavior is `vite-plugin-admin-api.ts` dispatching to `apps/admin/server/*`. The two files differ in response source: `server.ts` returns canned data; `realHandlers.ts` invokes real handlers with a per-test workspace dir.
-
-**Subagent review trigger:** YES — `apps/admin/vite.config.ts` (binding decision), `apps/admin/vite-plugin-admin-api.ts` (new middleware surface).
-
-**Acceptance gate:** `npm run dev:admin` boots on 127.0.0.1:5174; `fetch('/api/resorts')` returns 501 with the error envelope; `App.test.tsx` passes; integration test `tests/integration/apps/admin/shell.test.tsx` (NEW) verifies Shell renders without errors. `realHandlers.test.ts` verifies the bridge handler invokes a real handler with the test-supplied workspace dir.
+Status: **DONE** — merged in [#80](https://github.com/mathvbarone/snowboard-trip-advisor/pull/80) (commit `79bb48f`). Delivered: `apps/admin/vite-plugin-admin-api.ts` (Connect middleware dispatching `/api/*` to `apps/admin/server/*` handlers) + 7 stub handlers returning 501 + `apps/admin/server/__tests__/dispatch.test.ts` + `127.0.0.1:5174 strictPort:true` binding + tiered MSW harness (`apps/admin/src/mocks/server.ts` canned + `mocks/realHandlers.ts` bridge with workspace-dir override). Lazy `mkdir -p data/admin-workspace/` on first dispatch per §10.9.
 
 ### 7.7 PR 4.1c — Design-system additions: Sidebar, StatusPill, Tabs, Popover, DropdownMenu
 
-**Goal.** Five new design-system components ship with full TDD + axe + variant-matrix coverage. Toast is **deferred** to PR 4.5b (first real consumer is publish success/failure).
-
-**PR sizing acknowledgment.** This PR ships 5 design-system components (~12 files including tests, barrel re-export, and Shell wiring), exceeding the standard ≤8-files / ≤300-lines target from AGENTS.md. **Epic 3 PR 3.2 precedent applies:** that PR shipped 9 components / 66 files in one PR with explicit "design-system fan-out is one concern" justification — same pattern here. Splitting these 5 components into 5 separate PRs would multiply CI cost and review fragmentation without improving reviewability (each component is small and independent within the PR; reviewers can scan component-by-component within the diff). Keeping 4.1c bundled is the maintainer-authorized path.
-
-**Branch:** `epic-4/pr-4.1c-design-system`. **Depends on:** 4.1b merged. **README:** evaluation only.
-
-**Files:**
-
-- Create `packages/design-system/src/components/Sidebar.tsx` + `.test.tsx`.
-- Create `packages/design-system/src/components/StatusPill.tsx` + `.test.tsx` (4 variants: `Live`, `Stale`, `Failed`, `Manual`; each axe-clean).
-- Create `packages/design-system/src/primitives/Tabs.tsx` + `.test.tsx` (keyboard-navigable per ARIA: Left/Right, Home/End).
-- Create `packages/design-system/src/primitives/Popover.tsx` + `.test.tsx`.
-- Create `packages/design-system/src/components/DropdownMenu.tsx` + `.test.tsx`.
-- Modify `packages/design-system/src/index.ts` — re-export the 5 new entries.
-- Modify `apps/admin/src/views/Shell.tsx` — replace placeholders with the new Sidebar + DropdownMenu (HeaderBar's user identity placeholder).
-
-**Subagent review trigger:** YES — `packages/design-system/**`.
-
-**Acceptance gate:** `npm run qa` green; each new component renders + axe-clean per variant; Shell shows the actual chrome (not placeholders).
+Status: **DONE** — merged in [#81](https://github.com/mathvbarone/snowboard-trip-advisor/pull/81) (commit `ee78d9c`). Delivered: 5 new DS components (`Sidebar`, `StatusPill` with 4 variants, `Tabs`, `Popover`, `DropdownMenu`) + barrel re-exports + Shell wiring with the real Sidebar + DropdownMenu chrome. Bundled multi-component PR per Epic 3 PR 3.2 precedent (design-system fan-out is one concern).
 
 ### 7.8 PR 4.2 — Dashboard view + GET /api/health endpoint
 
-**Goal.** Dashboard renders health cards from `GET /api/health`; click-through to filtered Resorts.
-
-**Branch:** `epic-4/pr-4.2-dashboard`. **Depends on:** 4.1a/b/c merged. **README:** skip (admin internal).
-
-**Files:**
-
-- Implement `apps/admin/server/health.ts` — replace 4.1b's 501 stub with the real implementation: read all workspace files (skipping ones that fail `WorkspaceFile.parse()`, incrementing `resorts_with_corrupt_workspace`); fall back to published doc for resorts not in workspace; treat missing `data/published/current.v1.json` as `last_published_at: null` + `archive_size_bytes: 0` per §10.9; aggregate per-field statuses; compose `HealthResponse` (including `resorts_with_corrupt_workspace` per §4.8 / P0-4 fold).
-- Create `apps/admin/server/__tests__/health.test.ts` — asserts every `HealthResponse` aggregate field across multiple fixtures:
-  - Happy path with provenance: workspace fixture with intact `field_sources`, asserts `resorts_with_missing_provenance === 0`.
-  - Missing-provenance path: at least one workspace file missing a `field_sources` entry, asserts `resorts_with_missing_provenance === 1` (surfaced to `<PublishDialog>` per §4.3.1).
-  - Corrupt-workspace path (P0-4): fixture with one truncated/invalid JSON file, asserts `resorts_with_corrupt_workspace === 1` AND the healthy slugs are still aggregated correctly (corrupt file skipped, NOT counted in failed/stale aggregates).
-  - Missing-published path (§10.9): no `data/published/current.v1.json` on disk; asserts `last_published_at: null`, `archive_size_bytes: 0`, `resorts_total` reflects workspace-only count.
-  - Cold-start path (§10.9): no workspace files AND no published doc; asserts `resorts_total === 0`, all aggregates `0`.
-- Create `apps/admin/src/state/useHealth.ts` + `.test.ts`.
-- Create `apps/admin/src/views/Dashboard.tsx` + `.test.tsx`. Card click navigates via URL state (e.g., `?route=resorts&filter=stale`). Routing is URL-driven with `useURLState`-style hooks (port from Epic 3's pattern). Renders a "No resorts yet" empty-state card when `resorts_total === 0` per §10.9, with a brief pointer at the §10.9 manual-creation instructions (Phase 1 has no in-UI Create-resort affordance).
-- Create `apps/admin/src/lib/urlState.ts` + `.test.ts` (admin variant of Epic 3's URL-state lib; admin route schema is different but the abstraction is the same).
-- Modify `apps/admin/src/App.tsx` — route by URL state to render Dashboard or future Resorts view.
-
-**Subagent review trigger:** NO (no CODEOWNERS-protected paths beyond design-system, which 4.1c already touched).
-
-**Acceptance gate:** `npm run qa` green; `npm run dev:admin` boots and Dashboard renders the health metrics including `resorts_with_corrupt_workspace`; cold-start fixture (no workspace + no published doc) renders the "No resorts yet" empty state with the §10.9 pointer.
+Status: **DONE** — merged in [#84](https://github.com/mathvbarone/snowboard-trip-advisor/pull/84) (commit `5bc1eb4`). Delivered: real `apps/admin/server/health.ts` aggregating workspace ∪ published per §4.8 + cold-start handling per §10.9 + `useHealth` hook + `Dashboard.tsx` rendering all 8 `HealthResponse` cards with the "No resorts yet" cold-start empty-state + admin URL-state foundation (`apps/admin/src/lib/urlState.ts` parse/serialize + `apps/admin/src/state/useURLState.ts` `useSyncExternalStore` writer with module-scoped subscriber broadcast for programmatic `pushState`). Stale-field staleness window is `default < ageDays <= max_stale` (Codex round-5 fold).
 
 ### 7.9 PR 4.3 — Resorts table + GET /api/resorts endpoint
 
-**Goal.** Resorts table renders the resort list with filterable columns; click row navigates to editor.
+Status: **DONE** — merged in [#85](https://github.com/mathvbarone/snowboard-trip-advisor/pull/85) (commit `27b5456`). Delivered: real `apps/admin/server/listResorts.ts` + `useResortList` hook + `ResortsTable.tsx` with sortable + filterable columns + filtered-empty / cold-start variants + extended `urlState.ts` (resorts + editor route variants with country / hasFailures filters) + Table primitive `onRowSelect` prop for whole-row click navigation + `setRoute` round-trip fix (pushes `serializeURL` output verbatim).
 
-**Branch:** `epic-4/pr-4.3-resorts-table`. **Depends on:** 4.2 merged. **README:** skip.
+### 7.9.1 PR 4.3.1 — Dashboard "Failed fields" card-click + URL-state navigation (Tier 2 → Tier 3 gate fold)
 
-**Files:**
-
-- Implement `apps/admin/server/listResorts.ts` — replace 501 stub. Read workspace files (skipping corrupt per §10.3.1); fall back to published doc for resorts not in workspace; treat missing `data/published/current.v1.json` as empty published set per §10.9; compute summaries; apply filter + page.
-- Create `apps/admin/server/__tests__/listResorts.test.ts` — happy path + draft-resort union per §4.1.1 + missing-published-doc case per §10.9 (workspace-only resorts surface) + cold-start case (empty result list).
-- Create `apps/admin/src/state/useResortList.ts` + `.test.ts`.
-- Create `apps/admin/src/views/ResortsTable.tsx` + `.test.tsx` — uses Epic-3's `Table` design-system primitive (already shipped). Renders an empty-state row pointing to §10.9 manual-creation instructions when the response item list is empty.
-- Modify `apps/admin/src/App.tsx` — wire the Resorts route.
-- Modify `apps/admin/src/lib/urlState.ts` — extend route schema with `resorts` route + filter params.
-
-**Subagent review trigger:** NO.
-
-**Acceptance gate:** Resorts table renders; sort + filter work; clicking a row updates URL state (transition to editor route lands in 4.4a).
+Status: **DONE** — merged in [#88](https://github.com/mathvbarone/snowboard-trip-advisor/pull/88) (commit `4657df3`). Delivered: closes the deferred half of the Tier 2 → Tier 3 gate (§7.4 criterion 3, "Card-click + row-click navigation works in browser smoke"). The Dashboard's "Failed fields" `MetricCard` becomes clickable; click pushes `?route=resorts&hasFailures=true` via `setRoute`. `MetricCardProps` is now a discriminated union (inert vs clickable, both required when clickable) — eliminates dead-branch coverage gaps. Other counter cards stay inert by design (URL schema only supports `country` + `hasFailures` today; expansion is Tier 4/5 work). Spec PR [#86](https://github.com/mathvbarone/snowboard-trip-advisor/pull/86) (commit `85e90b3`) shipped the design rationale; the spec was merged into `main` then pruned in this post-Tier-2 doc-prune. Hook-test env unblocker [#87](https://github.com/mathvbarone/snowboard-trip-advisor/pull/87) (commit `a59006a`) shipped between #86 and #88 to make `npm run qa` green on macOS case-preserving filesystems.
 
 ### 7.10 PR 4.4a — Server read path (resortDetail + workspace read helpers)
 

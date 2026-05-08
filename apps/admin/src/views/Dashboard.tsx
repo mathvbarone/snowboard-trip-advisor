@@ -124,7 +124,8 @@ function MetricCard(props: MetricCardProps): JSX.Element {
 
 function HealthMetricsGrid({ health }: { readonly health: HealthResponse }): JSX.Element {
   // Only "Failed fields" is wired pre-Epic-5; other counter cards lack a
-  // stable URL filter (see spec docs/superpowers/specs/2026-05-07-dashboard-card-click-design.md §1.2).
+  // stable URL filter — the URL schema only supports country + hasFailures
+  // today (extending it is Tier 4/5 work). See Epic 4 spec §7.9.1.
   return (
     <section aria-label="Health metrics">
       <MetricCard label="Resorts total" value={health.resorts_total} />
