@@ -2,16 +2,16 @@
 // Covers (a) loading state, (b) resolved state (8 HealthResponse fields),
 // (c) cold-start empty state (resorts_total === 0), (d) error state,
 // (e) axe-clean across all 4 states.
-// Test (f) — click on "Failed fields" card updates URL state — is deferred
-// to §1.5 (setRoute / useURLState don't exist yet).
 
 import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { axe } from 'jest-axe'
 import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { server } from '../mocks/server'
 import { __resetForTests } from '../state/useHealth'
+import { __resetForTests as __resetURLStateForTests } from '../state/useURLState'
 
 import { Dashboard } from './Dashboard'
 
@@ -21,9 +21,13 @@ import { Dashboard } from './Dashboard'
 // to duplicate it here.
 beforeEach((): void => {
   __resetForTests()
+  __resetURLStateForTests()
+  window.history.replaceState({}, '', '/')
 })
 afterEach((): void => {
   __resetForTests()
+  __resetURLStateForTests()
+  window.history.replaceState({}, '', '/')
 })
 
 describe('Dashboard (PR 4.2 §1.4)', (): void => {
@@ -253,5 +257,72 @@ describe('Dashboard (PR 4.2 §1.4)', (): void => {
 
     // axe (e) — error state
     expect(await axe(container)).toHaveNoViolations()
+  })
+
+  // ---------------------------------------------------------------------------
+  // (f) Card click — clicking the "Failed fields" card pushes URL state.
+  // Closes the deferred test from PR 4.2 §1.4 step 1 (Tier 2 plan).
+  // Spec: docs/superpowers/specs/2026-05-07-dashboard-card-click-design.md §4.1.
+  // ---------------------------------------------------------------------------
+  it('pushes ?route=resorts&hasFailures=true when the "Failed fields" card is clicked', async (): Promise<void> => {
+    server.use(
+      http.get('/api/health', (): Response =>
+        HttpResponse.json({
+          resorts_total: 3,
+          resorts_with_stale_fields: 0,
+          resorts_with_failed_fields: 1,
+          resorts_with_missing_provenance: 0,
+          resorts_with_corrupt_workspace: 0,
+          pending_integration_errors: 0,
+          last_published_at: null,
+          archive_size_bytes: 0,
+        }),
+      ),
+    )
+
+    const { container } = render(<Dashboard />)
+
+    const failedFieldsButton = await screen.findByRole('button', {
+      name: /view resorts with failed fields/i,
+    })
+
+    expect(await axe(container)).toHaveNoViolations()
+
+    await userEvent.click(failedFieldsButton)
+
+    expect(window.location.search).toBe('?route=resorts&hasFailures=true')
+  })
+
+  // (f2) Keyboard activation — pressing Enter on the focused "Failed fields"
+  // button must produce the same URL update as a mouse click. Pins the button-
+  // semantic so a future refactor to <div role="button"> would visibly fail.
+  it('pushes the same URL state when the "Failed fields" card is activated via keyboard', async (): Promise<void> => {
+    server.use(
+      http.get('/api/health', (): Response =>
+        HttpResponse.json({
+          resorts_total: 3,
+          resorts_with_stale_fields: 0,
+          resorts_with_failed_fields: 1,
+          resorts_with_missing_provenance: 0,
+          resorts_with_corrupt_workspace: 0,
+          pending_integration_errors: 0,
+          last_published_at: null,
+          archive_size_bytes: 0,
+        }),
+      ),
+    )
+
+    render(<Dashboard />)
+
+    const failedFieldsButton = await screen.findByRole('button', {
+      name: /view resorts with failed fields/i,
+    })
+
+    failedFieldsButton.focus()
+    expect(failedFieldsButton).toHaveFocus()
+
+    await userEvent.keyboard('{Enter}')
+
+    expect(window.location.search).toBe('?route=resorts&hasFailures=true')
   })
 })
