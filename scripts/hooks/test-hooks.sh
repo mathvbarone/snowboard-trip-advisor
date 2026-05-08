@@ -262,22 +262,121 @@ run_test_silent "post-pr-create: silent — malformed JSON"                     
 # the same git worktree list we just queried.
 PROJECT_DIR="$(pwd)"
 export CLAUDE_PROJECT_DIR="$PROJECT_DIR"
-SELF_WORKTREE="$(git -C "$PROJECT_DIR" rev-parse --show-toplevel)"
+
+# Two distinct values are needed:
+#
+#   WT_CWD          — the cwd to inject into the synthetic hook payload.
+#                     This must be the agent's actual `pwd`, in whatever
+#                     case the user's shell saw it. On a case-insensitive
+#                     filesystem (HFS+/APFS default on macOS) the user
+#                     can be in /Users/foo/Projects/... while git stored
+#                     /Users/foo/projects/... at `git worktree add` time.
+#                     The hook is supposed to handle that mismatch via
+#                     darwin-only lowercase normalization in
+#                     post-pr-create-reminder.mjs::normalizePath; this
+#                     test exercises that path by injecting the real pwd.
+#
+#   WT_EXPECTED     — the worktree path the hook is expected to emit in
+#                     its reminder for that cwd. The hook returns the
+#                     `bestBlock.path` from `git worktree list
+#                     --porcelain` verbatim (porcelain case preserved).
+#                     We INDEPENDENTLY re-implement the hook's
+#                     `resolveWorktree` algorithm here — longest
+#                     porcelain prefix match against WT_CWD, with both
+#                     sides realpath-canonicalized (resolving symlinks)
+#                     and lowercased on darwin only — so the assertion
+#                     verifies hook output against the algorithm rather
+#                     than degenerating into a tautology that just feeds
+#                     porcelain back to itself. The case-folding step
+#                     is darwin-gated: mirroring the hook's
+#                     `platform === 'darwin'` branch in normalizePath,
+#                     it tolerates HFS+/APFS case quirks on macOS
+#                     while preserving case-sensitive matching on
+#                     Linux, where Git can legally have sibling
+#                     worktrees that differ only in case (e.g.
+#                     `repo` and `Repo`). Realpath handles the case
+#                     where the harness is launched through a
+#                     symlinked checkout (e.g. /tmp/linkrepo →
+#                     /workspace/repo): without it `pwd` returns the
+#                     logical symlink path while porcelain reports the
+#                     real path, no porcelain block matches,
+#                     WT_EXPECTED stays empty, and the harness aborts
+#                     before the assertions run. The hook itself uses
+#                     realpathSync for the same reason in normalizePath.
+#
+# Earlier revisions used `git rev-parse --show-toplevel` for both roles.
+# That returns the FS-canonical case (which on macOS may differ from
+# porcelain), causing the substring assertion to fail on case-mismatch
+# checkouts. Hence this two-variable split.
+
+# canon_path: realpath-canonicalize a path. `cd -P` resolves symlinks
+# and `pwd -P` reports the physical (no-symlinks) cwd. The subshell
+# preserves the parent shell's cwd. Falls back to the input on failure
+# (e.g. stale porcelain entry whose worktree directory was removed) —
+# mirrors the hook's realpathSync→resolve fallback in normalizePath.
+canon_path() {
+  ( cd -P "$1" 2>/dev/null && pwd -P ) || printf '%s' "$1"
+}
+
+# case_fold: lowercase on darwin only, identity elsewhere. Mirrors the
+# hook's `platform === 'darwin' ? resolved.toLowerCase() : resolved`
+# branch in normalizePath. Universally lowercasing on Linux would
+# wrongly conflate sibling worktrees that legally differ only in case
+# (e.g. `repo` and `Repo`), so the harness must respect the same OS
+# distinction the hook makes — otherwise harness and hook disagree on
+# which block is the longest-prefix match for a case-variant cwd, the
+# integration assertion fails, and `npm run qa`/pre-commit blocks.
+HARNESS_HOST_OS="$(uname -s)"
+case_fold() {
+  if [ "$HARNESS_HOST_OS" = "Darwin" ]; then
+    printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
+  else
+    printf '%s' "$1"
+  fi
+}
+
+WT_CWD="$PROJECT_DIR"
+WT_CWD_NORM="$(case_fold "$(canon_path "$WT_CWD")")"
+
+WT_EXPECTED=""
+WT_BEST_LEN=-1
+while IFS= read -r line; do
+  case "$line" in
+    "worktree "*)
+      path="${line#worktree }"
+      norm="$(case_fold "$(canon_path "$path")")"
+      remainder="${WT_CWD_NORM#"${norm}/"}"
+      if [ "$WT_CWD_NORM" = "$norm" ] || [ "$remainder" != "$WT_CWD_NORM" ]; then
+        if [ "${#norm}" -gt "$WT_BEST_LEN" ]; then
+          WT_EXPECTED="$path"
+          WT_BEST_LEN="${#norm}"
+        fi
+      fi
+      ;;
+  esac
+done <<EOF
+$(git -C "$PROJECT_DIR" worktree list --porcelain)
+EOF
+
+if [ -z "$WT_EXPECTED" ]; then
+  echo "FAIL: harness could not resolve a worktree from porcelain for cwd=$WT_CWD (norm=$WT_CWD_NORM)" >&2
+  exit 1
+fi
 
 # Build a synthetic JSON payload with cwd set to the current worktree.
 # `printf` is the portable way to emit a string with a single embedded
 # variable; we construct the JSON inline below.
-WT_PAYLOAD_MATCH='{"cwd":"'"$SELF_WORKTREE"'","tool_input":{"command":"gh pr create"},"tool_response":{"stdout":"'"$PR_URL_OK"'"}}'
-WT_PAYLOAD_NESTED='{"cwd":"'"$SELF_WORKTREE/scripts/hooks"'","tool_input":{"command":"gh pr create"},"tool_response":{"stdout":"'"$PR_URL_OK"'"}}'
+WT_PAYLOAD_MATCH='{"cwd":"'"$WT_CWD"'","tool_input":{"command":"gh pr create"},"tool_response":{"stdout":"'"$PR_URL_OK"'"}}'
+WT_PAYLOAD_NESTED='{"cwd":"'"$WT_CWD/scripts/hooks"'","tool_input":{"command":"gh pr create"},"tool_response":{"stdout":"'"$PR_URL_OK"'"}}'
 WT_PAYLOAD_OUTSIDE='{"cwd":"/tmp/definitely-not-a-worktree","tool_input":{"command":"gh pr create"},"tool_response":{"stdout":"'"$PR_URL_OK"'"}}'
 WT_PAYLOAD_NO_CWD='{"tool_input":{"command":"gh pr create"},"tool_response":{"stdout":"'"$PR_URL_OK"'"}}'
 
 run_test_emits_contains \
   "post-pr-create: injects worktree path when cwd matches" \
-  "$HOOK" "$WT_PAYLOAD_MATCH" "worktree at $SELF_WORKTREE"
+  "$HOOK" "$WT_PAYLOAD_MATCH" "worktree at $WT_EXPECTED"
 run_test_emits_contains \
   "post-pr-create: injects worktree path when cwd is nested inside worktree" \
-  "$HOOK" "$WT_PAYLOAD_NESTED" "worktree at $SELF_WORKTREE"
+  "$HOOK" "$WT_PAYLOAD_NESTED" "worktree at $WT_EXPECTED"
 run_test_emits_excludes \
   "post-pr-create: falls back to v1 when cwd is outside any worktree" \
   "$HOOK" "$WT_PAYLOAD_OUTSIDE" "worktree at /"
@@ -290,7 +389,7 @@ run_test_emits_excludes \
 # for sub-second portability across BSD/GNU date. Take 3 samples and
 # assert on the min — a real >500ms regression still trips 3-of-3, but
 # busy CI runners no longer flake on a single noisy sample.
-SLO_INPUT='{"cwd":"'"$SELF_WORKTREE"'","tool_input":{"command":"gh pr create"},"tool_response":{"stdout":"'"$PR_URL_OK"'"}}'
+SLO_INPUT='{"cwd":"'"$WT_CWD"'","tool_input":{"command":"gh pr create"},"tool_response":{"stdout":"'"$PR_URL_OK"'"}}'
 MIN_MS=999999
 for SAMPLE in 1 2 3; do
   START_MS="$(perl -MTime::HiRes=time -e 'printf "%d\n", time()*1000')"
