@@ -9,9 +9,9 @@
 // canned fixture drifts from the schema shape, the test process fails on
 // import — the gap surfaces immediately, not silently masked.
 //
-// Inline literals (no fixtureResort builder; PR 4.0 deferred the
-// `./fixtures` subpath export per the post-execution amendment in
-// docs/superpowers/plans/2026-05-02-epic-4-tier-1-foundation-plan.md §1.2).
+// Inline literals (no fixtureResort builder); the `./fixtures` subpath
+// export was deferred during Epic 4 PR 4.0 plumbing — extracting now would
+// be premature DRY since each test only needs one or two canned shapes.
 
 import {
   HealthResponse,

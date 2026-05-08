@@ -67,33 +67,28 @@ The detail drawer is a non-modal right-edge panel that opens over the cards or m
 
 ## Current state today
 
-**The pivot is documented but not executed.** The codebase on `main` is still the pre-pivot scoring pipeline. Migration happens on the `pivot/data-transparency` branch across six epics (spec §9); `main` stays deployable until Epic 6 closes.
+The pivot is **mostly executed** on `main`. Epics 1–3 and Epic 4 Tiers 1–2 have shipped; Epic 4 Tiers 3–5 (admin editor write path, publish UI, polish) and Epics 5–6 (real upstream adapters, ops) remain. There is no long-lived `pivot/data-transparency` integration branch — feature branches ship directly to `main`. (See [AGENTS.md §"Migration / Hotfix Branch Rules"](AGENTS.md) for the rationale.)
 
 What exists on `main` today:
 
-- a single-app Vite frontend that reads a published JSON snapshot;
-- a research pipeline that normalizes resort data, **scores it**, reports changes, and publishes versioned snapshots;
-- a shared Zod schema for the current v0 dataset.
-
-What will change during the pivot (see spec §10 for the full file-by-file disposition):
-
-- scoring code and config are deleted (`config/scoring.ts`, `research/scoring/*`);
-- schema moves to `packages/schema/` and gains the durable-vs-live split;
-- frontend splits into `apps/public` and `apps/admin`;
-- published dataset migrates from `current.json` to `current.v1.json` via a one-shot `migrate:v0-to-v1` CLI.
-
-Until the branch merges, the `main` branch still behaves like a scoring-based discovery app.
+- **`packages/schema`** — the v1 Zod schema with the durable-vs-live split, `loadResortDataset` / `loadResortDatasetFromObject` projection, `validatePublishedDataset` (provenance enforcement at publish time), `WorkspaceFile` admin schema with the `editor_modes` cross-key invariant, and the typed `packages/schema/api/` wire contract for the 6 admin endpoints (snapshot-pinned).
+- **`packages/design-system`** — hand-built design system: `Card`, `Button`, `IconButton`, `Input`, `Select`, `Chip`, `Pill`, `SourceBadge`, `FieldValueRenderer`, `Modal`, `Drawer`, `Tooltip`, `Table`, `ToggleButtonGroup`, `Shell`, `HeaderBar`, `Sidebar`, `StatusPill`, `Tabs`, `Popover`, `DropdownMenu`, `EmptyStateLayout`, `Skeleton`, glyph icons, generated `tokens.css`.
+- **`apps/public`** — full Phase 1 cards landing + matrix view + detail drawer + URL-shared shortlist + share-URL dialog (`ShortlistDrawer`, `ShareUrlDialog`, `MergeReplaceDialog` are app-local views composed on top of the DS `Drawer` / `Modal` primitives) + view toggle + `?highlight=` row affordance + bundle-budget tooling (`npm run analyze`).
+- **`apps/admin`** — loopback-only editor (`127.0.0.1:5174`, `strictPort:true`). Real handlers for `GET /api/health` (full aggregates including `resorts_with_corrupt_workspace`) and `GET /api/resorts` (filterable + sortable); the other 4 endpoints (`resortDetail`, `resortUpsert`, `publish`, `listPublishes`) are 501-stubs that ship in Tier 3 / Tier 4. Dashboard view + ResortsTable view + Dashboard "Failed fields" card-click navigation. Editor view + write path land in Tier 3; publish handler lands in Tier 4 PR 4.5a.
+- **Publish pipeline (library only, today)** — `@snowboard-trip-advisor/schema/node` exports `publishDataset()` + `validatePublishedDataset()` (parse → Zod validate → provenance check → atomic write → archive). The admin's `POST /api/resorts/:slug/publish` endpoint that calls into this library is **not yet wired** — it lands in Tier 4 PR 4.5a; today the route returns a 501 stub. The pre-pivot `research/` directory and its scoring code were deleted in Epic 2; a `research/cli.ts` wrapping the same library is planned for Epic 5 alongside the first real upstream adapters.
+- **Two seed resorts** in `data/published/current.v1.json`: Kotelnica Białczańska (Poland) and Špindlerův Mlýn (Czech Republic), each with the full FX-aware `field_sources` provenance.
 
 ## Getting started
 
 ```bash
 npm install
-npm run setup      # installs the pre-commit hook
+npm run setup      # installs the pre-commit hook + regenerates tokens.css
 npm run dev        # Vite dev server for the public app
-npm run qa         # lint → typecheck → coverage (hard gate)
+npm run dev:admin  # loopback admin app (127.0.0.1:5174)
+npm run qa         # lint → drift → typecheck → coverage → tokens → hooks → integration (hard gate)
 ```
 
-Additional Phase 1 commands — `npm run dev:admin` (loopback admin) and `npm run research test:adapter -- --record` (fixture recording) — become available as their epics land on `pivot/data-transparency` (see spec §9). They are not on `main` yet.
+`npm run research test:adapter -- --record` (fixture recording for real upstream adapters) becomes available when Epic 5 lands.
 
 ## Quality gate
 
@@ -119,15 +114,20 @@ Details and agent rules are in [`CLAUDE.md`](CLAUDE.md).
 
 ## Project layout
 
-The layout below reflects `main` today. The target layout after the pivot is documented in spec §10.3.
-
 ```
-src/                     Vite frontend (pre-pivot; becomes apps/public/)
-research/                Research pipeline (schema, normalize, score, validate, publish, CLI)
-config/                  Scoring thresholds (deleted in Epic 2)
-data/published/          Published JSON snapshots consumed by the frontend
-docs/superpowers/specs/  Design specs (current direction: 2026-04-22-product-pivot-design.md)
-docs/adr/                Architecture decision records (current: ADR-0001)
+apps/public/             Public discovery app (cards landing, matrix view, detail drawer, shortlist)
+apps/admin/              Admin loopback editor (Dashboard, ResortsTable; editor lands in Epic 4 Tier 3)
+packages/schema/         Zod schema + projections + validators + publishDataset + the typed admin /api/* wire contract
+packages/design-system/  Hand-built design system + generated tokens.css
+packages/integrations/   Adapter contract (Epic 5 onwards lands real upstream adapters here)
+config/                  Build-time configuration (CSP, fonts, etc.)
+data/published/          Published v1 JSON snapshots
+data/admin-workspace/    Per-resort workspace files the admin editor writes (Phase 1 filesystem-only)
+docs/superpowers/specs/  Design specs (parent + per-epic)
+docs/superpowers/handoffs/  Tracked post-milestone handoffs
+docs/adr/                Architecture decision records
+scripts/                 Repo automation (hooks, build-budget, drift checks, hooks-test harness)
+tests/integration/       Cross-workspace integration tests
 ```
 
 ## Licensing & contributing
@@ -136,12 +136,12 @@ docs/adr/                Architecture decision records (current: ADR-0001)
 - Data snapshots: **CC BY 4.0**.
 - Contributions: **DCO sign-off** (`git commit -s`). No CLA.
 
-The full license boundary (which file types fall under which license) is specified in spec §11.1.1. `LICENSE`, `NOTICE`, and `CONTRIBUTING.md` land with Epic 1 PR 1.1 (earliest workspace scaffolding PR) per §11.3.
+The full license boundary (which file types fall under which license) is specified in spec §11.1.1. `LICENSE`, `NOTICE`, and `CONTRIBUTING.md` shipped with Epic 1.
 
 ## Status & roadmap
 
-- **Phase 1** — in progress on `pivot/data-transparency`. Six epics, ~30 PRs; `main` stays deployable until the branch merges back.
-- **Phase 2** — target; detailed in spec §8. Starts after Phase 1 ships and a dedicated Phase 2 spec is written.
+- **Phase 1** — in progress on `main`. Epics 1–3 (workspace scaffolding + schema migration + public app) shipped; Epic 4 (admin app) is mid-flight: Tiers 1–2 (foundation, navigation) are on `main`, Tiers 3–5 (editor, publish, polish) are pending. Epics 5–6 (real adapters, ops) follow.
+- **Phase 2** — target; detailed in spec §8. Multi-operator deployments, Postgres-backed admin API, authenticated admin users. Starts after Phase 1 ships and a dedicated Phase 2 spec is written.
 - **Phase 3+** — out of scope. Any proposal requires a GitHub Discussion and an ADR before PRs.
 
 ## Links

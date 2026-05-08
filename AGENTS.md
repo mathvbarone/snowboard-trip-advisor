@@ -233,7 +233,7 @@ React:
 
 **Known gap (non-blocking):** the px-literal ESLint selector (banning literal `px` values inside `style={{ }}` objects + CSS-in-JS template literals; full rule catalog in spec §6.3) is **deferred to Epic 3 PR 3.1**, when `apps/public` first uses inline styles and the rule has actual violations to validate against. Until then the rule above is enforced by reviewer discipline only.
 
-## Admin App Rules (lands with Epic 4)
+## Admin App Rules
 
 - `apps/admin` is loopback-only; binds `127.0.0.1:5174` with `strictPort: true`.
 - Never build `apps/admin` into a production container image.
