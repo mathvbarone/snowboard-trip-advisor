@@ -254,11 +254,22 @@ export function projectFieldStates(
   modes: Partial<Record<MetricPath, 'manual' | 'auto'>>,
   now: Date,
 ): Record<MetricPath, FieldStateFor<unknown>> {
-  const liveSources = live?.field_sources ?? {}
-  const combined = { ...resort.field_sources, ...liveSources }
+  // Per Codex round-14 P2-18 fold: select the source map per path's
+  // durable-vs-live class — DO NOT merge resort.field_sources with
+  // live_signal.field_sources. The merged-map approach lets a same-named
+  // resort.field_sources entry (which Resort schema allows since
+  // field_sources accepts arbitrary string keys) MASK a missing
+  // live_signal.field_sources entry, projecting the live field as
+  // 'live'/'stale' (from the durable entry's provenance) instead of the
+  // correct 'failed (no field_sources entry)'. The editor must surface
+  // missing live provenance, not paper over it.
   const out = {} as Record<MetricPath, FieldStateFor<unknown>>
   for (const path of METRIC_FIELDS) {
-    out[path] = projectOne(path, combined[path], resolveValue(path, resort, live), modes[path], now)
+    const isDurable = DURABLE_PATHS.has(path)
+    const fs = isDurable
+      ? resort.field_sources[path]
+      : live?.field_sources?.[path]
+    out[path] = projectOne(path, fs, resolveValue(path, resort, live), modes[path], now)
   }
   return out
 }
@@ -337,7 +348,7 @@ function resolveValue(path: MetricPath, resort: Resort, live: ResortLiveSignal |
   - **manual without value**: `editor_modes: { slopes_km: 'manual' }` but `value === undefined` → falls back to `failed`.
   - **mode 'auto' (durable)**: `editor_modes: { slopes_km: 'auto' }` → same as missing entry → `live` (durable path).
   - **mode 'auto' (live, stale window)**: `editor_modes: { snow_depth_cm: 'auto' }` with `observed_at` 21 days ago → `stale` (the auto reset doesn't suppress live-path TTL aging).
-  - **live wins over resort.field_sources**: when `live_signal.field_sources.snow_depth_cm` is more recent than `resort.field_sources.snow_depth_cm`, the projection uses live's `observed_at` for the staleness check.
+  - **Per-path source selection (live paths read ONLY from live_signal.field_sources)** per Codex round-14 P2-18 fold: fixture has `resort.field_sources.snow_depth_cm: <durable-style entry>` (allowed by Resort schema since `field_sources` accepts arbitrary string keys) AND `live_signal.field_sources.snow_depth_cm` is **MISSING**. The projection MUST return `{ state: 'failed', reason: 'no field_sources entry' }` for `snow_depth_cm` — NOT pick up the durable-side entry as a fallback. Without per-path selection, missing live provenance would be silently masked. Conversely: durable paths read ONLY from `resort.field_sources` — a same-named entry in `live_signal.field_sources` is ignored for them.
   - **null live_signal**: durable paths still project as `live`; live paths all `failed (no field_sources entry)`.
 - [ ] **Step 2: Run.** PASS on all branches.
 
@@ -1763,5 +1774,11 @@ One P2 finding on the v13 plan; folded:
 One P2 finding on the v14 plan; folded:
 
 - **P2-17 — Bridge integration test asserted nested `editor_modes.season.start_month`, but the persisted shape is flat-keyed.** v14's PR 4.4d Task 7 nested-path round-trip step asserted `editor_modes.season.start_month === 'manual'`. But `editor_modes` is `Partial<Record<MetricPath, 'manual' \| 'auto'>>` — a SPARSE FLAT map keyed by the LITERAL DOTTED STRING `'season.start_month'`. The correct assertion is `editor_modes['season.start_month'] === 'manual'`. The previous assertion would either fail against the correct on-disk shape OR push the implementer toward a nested `{ season: { start_month: ... } }` structure that fails `WorkspaceFile.parse()` (because `season` is not a `MetricPath` enum value — `MetricPath` is the union of the 12 dotted-path strings). **Fold:** PR 4.4d Task 7 nested-path round-trip assertion corrected to `editor_modes['season.start_month'] === 'manual'`.
+
+### Codex round 14 (PR #90 review by `chatgpt-codex-connector`, 2026-05-08)
+
+One P2 finding on the v15 plan; folded:
+
+- **P2-18 — `projectFieldStates` merged-map approach masks missing live provenance.** v15 did `combined = { ...resort.field_sources, ...liveSources }` then looked up `combined[path]` for every path. But `Resort.field_sources` accepts arbitrary string keys (the cross-key invariant is on `editor_modes`, not on `resort.field_sources` itself). If a hand-edited workspace file had `resort.field_sources.snow_depth_cm: <some entry>` (durable-style provenance for a live path) AND `live_signal.field_sources.snow_depth_cm` was missing, v15's projection would pick up the durable-side entry as a fallback and project the live path as `live`/`stale` — masking the missing live provenance instead of surfacing it as `failed (no field_sources entry)`. **Fold:** select the source map per path's durable-vs-live class — durable paths read ONLY from `resort.field_sources`; live paths read ONLY from `live_signal?.field_sources`. NO merge. PR 4.4a-1 Task 4 test case "live wins over resort.field_sources" replaced with "Per-path source selection: live paths read only from live_signal.field_sources" — fixture has a durable-style entry at `resort.field_sources.snow_depth_cm` AND missing `live_signal.field_sources.snow_depth_cm`; assertion: `field_states.snow_depth_cm.state === 'failed'` (not `'live'`).
 
 **End of plan.**
