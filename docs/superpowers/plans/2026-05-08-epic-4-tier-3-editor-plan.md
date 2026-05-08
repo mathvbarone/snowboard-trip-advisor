@@ -979,6 +979,7 @@ if (code !== undefined) {
   - **Manual provenance written on value edit** per **D12** + Codex round-5 P1-1 fold: `setFieldValue('slopes_km', 150)` against canonical with `field_sources.slopes_km.source === 'opensnow'` → assert: (a) `draft.resort.slopes_km === 150`; (b) `draft.resort.field_sources.slopes_km.source === 'manual'`; (c) `draft.resort.field_sources.slopes_km.source_url === 'https://admin.local/manual'`; (d) `upstream_hash` matches `/^[a-f0-9]{64}$/`; (e) `observed_at` ≈ now. **And `field_sources` is sparse** per Codex round-6 P1-1 + round-7 P2-10 folds: assert `Object.keys(draft.resort.field_sources)` is **exactly `['slopes_km']`** (no canonical siblings copied). Server's deep-merge for `field_sources` (spec §4.3) preserves other entries automatically; including them in the PUT would risk overwriting concurrent server-side adapter updates.
   - **Save → later edit clears prior draft** per **D13** + Codex round-7 P1-1 fold: setFieldValue('slopes_km', 150) → debounce → PUT succeeds (rev unchanged path) → assert draft is reset to `{ editor_modes: {} }` and `lastSentDraft` is null. Then setFieldValue('lift_count', 7) → debounce → next PUT body contains ONLY `{ resort: { lift_count: 7, field_sources: { lift_count: <manual> } } }` (NOT `slopes_km` again). Without the reset, the second PUT would re-send `slopes_km: 150` plus its now-stale manual-source entry, risking last-writer-wins clobber against any concurrent server-side update to `slopes_km`.
   - **Edit during round-trip → queued flush diffs against lastSentDraft** per Codex round-16 P2-22 fold: setFieldValue('slopes_km', 150) → debounce flush fires PUT for slopes_km (in-flight). BEFORE response, setFieldValue('lift_count', 7) — rev advances; draft now has both. PUT response arrives → rev-moved path: draft NOT reset, `lastSentDraft = { resort: { slopes_km: 150, field_sources: { slopes_km: <manual> } } }`, prepopulate cache. Queued flush fires → body = diff(currentDraft, lastSentDraft) = ONLY `{ resort: { lift_count: 7, field_sources: { lift_count: <manual> } } }`. **Assert: the second PUT body does NOT include `slopes_km` re-send.** Without the diff, the queued flush would re-send slopes_km's already-persisted state, risking concurrent-server-update clobber.
+  - **Empty-diff queued flush short-circuits** per Codex round-18 P2-25 fold: setFieldValue('slopes_km', 150) → debounce flush fires PUT (in-flight). BEFORE response, setFieldValue('slopes_km', 200) → rev advances. Response arrives → rev-moved path: lastSentDraft = { slopes_km: 150 }; queued flush scheduled. BEFORE the queued flush fires, setFieldValue('slopes_km', 150) — reverts to the already-sent value. Queued flush body = diff(currentDraft={slopes_km:150}, lastSent={slopes_km:150}) = `{}`. **Assert: `apiClient.upsertResort` is NOT called for the empty diff** (call count stays at 1 from the first flush). **Assert: dirty/saving statuses become `saved`** (server already has slopes_km=150). Without this guard, an empty body would 400 from the server and the field would erroneously show `save-failed` despite the workspace already matching.
   - **`setMode` does NOT touch field_sources** per **D12**: `setMode('slopes_km', 'manual')` against canonical → assert `draft.resort?.field_sources` is undefined (or unchanged). Mode-flip-without-edit preserves old upstream provenance — only an actual value change triggers the source switch.
 - [ ] **Step 2:** Run. FAIL.
 
@@ -1165,6 +1166,28 @@ async function flush(slug: ResortSlug): Promise<void> {
     // First flush has lastSent = null → body is the entire draft. Subsequent
     // flushes (after a previous success) only send PATHS that changed since.
     const body = buildBodyFromDraft(inFlightDraft, store.lastSentDraft)
+    // Per Codex round-18 P2-25 fold: an empty-diff body would be rejected
+    // by the server as `400 invalid-request` (ResortUpsertBody requires at
+    // least one of resort/live_signal/editor_modes). Empty diff means the
+    // user edited during a round-trip then reverted to the already-sent
+    // value — the workspace already matches; no PUT needed. Mark dirty/saving
+    // paths as saved and short-circuit. (Note: this is reachable in the
+    // rev-moved path; the rev-unchanged path with empty diff is a no-op
+    // double-flush we also guard via the same branch.)
+    if (Object.keys(body).length === 0) {
+      patchState(store, (s) => {
+        const nextStatus = { ...s.status }
+        for (const [path, status] of Object.entries(s.status)) {
+          if (status === 'dirty' || status === 'saving') {
+            nextStatus[path as MetricPath] = 'saved'
+          }
+        }
+        return { rev: s.rev, status: nextStatus, draft: s.draft }
+      })
+      // No PUT fired; lastSentDraft stays as-is (the diff baseline is still
+      // accurate for the next flush). Skip the response-handling branches.
+      return
+    }
     const response = await apiClient.upsertResort(slug, body)
     if (store.inFlightToken === token && store.state.rev === inFlightRev) {
       // Rev unchanged — clean success. Reset draft, mark statuses saved,
@@ -1909,5 +1932,11 @@ Two P2 findings on the v18 plan; both real correctness issues; both folded:
 
 - **P2-23 — Whitespace-only numeric input bypasses the empty-string guard.** v18's `onLocalChange` checked `raw === ''` but accepted `'   '` (whitespace only). `Number(' ')` is `0`, so `setFieldValue(path, 0)` would fire and persist 0 with manual provenance — workspace data corruption (e.g., `slopes_km: 0` for a real resort). **Fold:** changed the guard to `raw.trim() === ''`. Whitespace-only strings are now transient like the empty string. Test list updated to cover the whitespace case.
 - **P2-24 — Round-11 test assertion required draft to hold a value that should remain absent in a fresh-mount sparse-draft case.** v18's PR 4.4d Task 6 test asserted that after clearing the input, `draft.resort.slopes_km` STILL holds 150 (the persisted value). But in the fresh-mount case described, the 150 comes from canonical `field_states`, not from the draft — the draft starts as `{ editor_modes: {} }` (sparse). Clearing the input returns before `setFieldValue` fires, so `draft.resort.slopes_km` is never written and remains `undefined`. The previous assertion would either fail against the correct sparse-draft impl OR push implementers to pre-populate the draft with canonical data (which conflicts with the sparse-PUT design from rounds 6/7/16). **Fold:** assertion corrected to "**`draft.resort?.slopes_km` is still `undefined`** — sparse draft, no setFieldValue fired". Display value continues to come from canonical via `valueFor(state)`.
+
+### Codex round 18 (PR #90 review by `chatgpt-codex-connector`, 2026-05-08)
+
+One P2 finding on the v19 plan; folded:
+
+- **P2-25 — Empty-diff queued flush 400s and leaves the field in `save-failed`.** v19's flush always called `apiClient.upsertResort(slug, body)` regardless of body size. After a rev-moved success (round 16 P2-22), the queued flush builds a diff body. If the user edited during the round-trip then reverted the edit back to the already-sent value before the queued flush ran, `buildBodyFromDraft` returns `{}` (no fields differ from `lastSentDraft`). The server's `ResortUpsertBody` schema rejects empty bodies with `400 invalid-request` (per spec §4.3 / Codex round-1 fold on `0b235e3`); the queued flush hits the catch branch and marks the path as `save-failed` — even though the workspace already matches the current draft. **Fold:** added an empty-diff short-circuit BEFORE `apiClient.upsertResort`. If `Object.keys(body).length === 0`, mark dirty/saving statuses as `saved` (workspace already matches, no PUT needed) and `return` — the existing `finally` block runs cleanup (`store.inFlightToken = null` + queued-flush scheduling). PR 4.4d Task 2 adds an "empty-diff queued flush short-circuits" test that simulates the edit-then-revert sequence and asserts `apiClient.upsertResort` is NOT called for the empty diff.
 
 **End of plan.**
