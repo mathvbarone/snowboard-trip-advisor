@@ -1548,6 +1548,7 @@ afterEach(() => { vi.unstubAllGlobals() })
   - **Tab order assertion**: above md, the ModeToggle button has the default tab order (no `tabindex`). Below md, the render-only span has no `tabindex` (spans are not focusable by default), so the editor element is absent from the tab order.
   - **Empty/whitespace-only input does NOT persist** per Codex round-11 P2-15 + round-17 P2-23 + round-17 P2-24 folds: above-md MANUAL on `slopes_km` with canonical (NOT draft) holding 150 from `field_states`. Simulate user clearing the input (`fireEvent.change(input, { target: { value: '' } })`); fast-forward debounce; assert (a) `apiClient.upsertResort` was NOT called, (b) the input element displays the empty string (local state updated), (c) **`draft.resort?.slopes_km` is still `undefined`** (the draft is sparse — no setFieldValue fired, so no entry was ever written). The canonical state is unchanged at 150. Repeat with whitespace-only input (`'   '`) — same assertions (Codex round-17 P2-23: trim BEFORE checking empty, since `Number(' ') === 0`). Then simulate typing `'7'`; fast-forward; assert PUT fires with `slopes_km: 7`. Without these guards, `Number('')` or `Number(' ')` would coerce to 0 and PUT would persist 0 with manual provenance — workspace data corruption.
   - **Invalid intermediate input does NOT persist** per same fold: simulate `value: '-'` (negative-sign-in-progress), `'1e'` (scientific notation in progress), `'.'` (decimal-only) — `Number(...)` is NaN for each → no PUT fires; local string updates so the user sees what they typed.
+  - **Fractional `lift_count` does NOT persist** per Codex round-19 P2-26 fold: above-md MANUAL on `lift_count`. Type `'7.5'` → `Number('7.5') === 7.5` (NOT NaN) — but `Resort.lift_count` is `z.number().int()` (`packages/schema/src/resort.ts:14`). Without the integer guard, the PUT would fire and the server would reject as `400 invalid-resort`, leaving the field in `save-failed` despite valid local intent. Assertion: `apiClient.upsertResort` is NOT called for `'7.5'`; local string updates to `'7.5'`. Then type `'7'` → PUT fires with `lift_count: 7`. (`slopes_km`, `altitude_m.*`, `skiable_terrain_ha` are NOT `.int()` — fractional values pass through. Test only `lift_count` for the integer guard.)
 - [ ] **Step 4:** The pre-existing 4.4b inline-span tests must each call `stubMatchMedia(false)` (or default to false in their `beforeEach`) so they exercise the below-md branch unambiguously after the responsive gate ships.
 - [ ] **Step 5:** Run failing.
 - [ ] **Step 6: Implement.** Replace the FieldRow body:
@@ -1650,6 +1651,15 @@ function FieldRow({ path, state }: FieldRowProps): JSX.Element {
     if (isMonth && (parsed < 1 || parsed > 12 || !Number.isInteger(parsed))) {
       return /* out-of-range or non-integer month — local-only until valid */
     }
+    // Per Codex round-19 P2-26 fold: lift_count is z.number().int() per
+    // packages/schema/src/resort.ts:14. Fractional values (e.g., 7.5) would
+    // be sent and rejected by the server with 400 invalid-resort, leaving
+    // the field in save-failed instead of staying as local invalid input.
+    // (slopes_km / altitude_m.* / skiable_terrain_ha are NOT .int() per the
+    // same file — fractional is OK there.)
+    if (path === 'lift_count' && !Number.isInteger(parsed)) {
+      return /* fractional lift_count — local-only until integer */
+    }
     setFieldValue(path, parsed)
   }
 
@@ -1708,7 +1718,7 @@ function readDraftLeaf(draftResort: Partial<Resort> | undefined, path: MetricPat
   - Mount `<App />` with `?route=editor&slug=kotelnica-bialczanska`.
   - Wait for editor render (await `findByRole('tablist')` or similar).
   - Click `<ModeToggle>` for `slopes_km` → MANUAL.
-  - Type `150` into the new MANUAL `<input type="number">`.
+  - Type `150` into the MANUAL DS Input (query: `getByRole('textbox', { name: labelForPath('slopes_km') })` per Codex round-19 P3-27 fold — NOT `<input type="number">`/`spinbutton`, since DS Input renders `type="text"` per Codex round-15 P2-20).
   - Fast-forward debounce (500ms via `vi.advanceTimersByTime` or `vi.useFakeTimers`).
   - Wait for PUT response.
   - **Filesystem assertion**: `await readFile(join(tmpdir, 'data/admin-workspace/kotelnica-bialczanska.json'), 'utf-8')` → parses to `WorkspaceFile`; `editor_modes.slopes_km === 'manual'`; `resort.slopes_km === 150`; **`resort.field_sources.slopes_km.source === 'manual'` per **D12**** (provenance reflects the override, NOT the prior upstream `'opensnow'`/etc.); other `field_sources` entries unchanged.
@@ -1938,5 +1948,12 @@ Two P2 findings on the v18 plan; both real correctness issues; both folded:
 One P2 finding on the v19 plan; folded:
 
 - **P2-25 — Empty-diff queued flush 400s and leaves the field in `save-failed`.** v19's flush always called `apiClient.upsertResort(slug, body)` regardless of body size. After a rev-moved success (round 16 P2-22), the queued flush builds a diff body. If the user edited during the round-trip then reverted the edit back to the already-sent value before the queued flush ran, `buildBodyFromDraft` returns `{}` (no fields differ from `lastSentDraft`). The server's `ResortUpsertBody` schema rejects empty bodies with `400 invalid-request` (per spec §4.3 / Codex round-1 fold on `0b235e3`); the queued flush hits the catch branch and marks the path as `save-failed` — even though the workspace already matches the current draft. **Fold:** added an empty-diff short-circuit BEFORE `apiClient.upsertResort`. If `Object.keys(body).length === 0`, mark dirty/saving statuses as `saved` (workspace already matches, no PUT needed) and `return` — the existing `finally` block runs cleanup (`store.inFlightToken = null` + queued-flush scheduling). PR 4.4d Task 2 adds an "empty-diff queued flush short-circuits" test that simulates the edit-then-revert sequence and asserts `apiClient.upsertResort` is NOT called for the empty diff.
+
+### Codex round 19 (PR #90 review by `chatgpt-codex-connector`, 2026-05-08)
+
+Two findings on the v20 plan (one P2, one P3); both folded:
+
+- **P2-26 — Fractional `lift_count` would server-reject and leave `save-failed`.** v20's `onLocalChange` only validated integer/range for month paths (`isMonth` check). But `Resort.lift_count` is `z.number().int()` (`packages/schema/src/resort.ts:14`); typing `'7.5'` would parse to `7.5` (NOT NaN), pass through onLocalChange, and `setFieldValue(path, 7.5)` would fire the debounced PUT. Server rejects `lift_count: 7.5` with `400 invalid-resort`, leaving the field in `save-failed`. **Fold:** added a per-path integer guard for `lift_count` (`if (path === 'lift_count' && !Number.isInteger(parsed)) { return }`). `slopes_km`, `altitude_m.*`, `skiable_terrain_ha` stay un-guarded since their schema is `z.number()` (not `.int()`). PR 4.4d Task 6 test list adds a "fractional `lift_count` does not persist" case.
+- **P3-27 — Bridge integration test referenced `<input type="number">`.** v20's PR 4.4d Task 7 step said "Type `150` into the new MANUAL `<input type="number">`" — but round-15 P2-20 swapped to DS Input (`type="text"`). The test's selector would fail against the actual implementation. **Fold:** updated the bridge-test step to `getByRole('textbox', { name: labelForPath('slopes_km') })` — the correct query for DS Input's rendered `<label>` + `<input type="text">`.
 
 **End of plan.**
