@@ -30,8 +30,8 @@ Per spec §7.4 this plan must close, on `main`, after PR 4.4d merges:
 | **B1** | Export `atomicWriteText` from `@snowboard-trip-advisor/schema/node` by adding the `export` keyword to `publishDataset.ts`'s existing `async function atomicWriteText`. The schema package's `node.ts` already does `export * from './publishDataset'`, so no `node.ts` modification is needed. | Eliminates byte-for-byte drift risk; minimum-touch addition; tested via `packages/schema/src/exports-map.test.ts`. |
 | **C1+** | PR 4.4a-2 adds canonical read-helper signatures in `apps/admin/server/workspace.ts` (using `health.ts`'s separate-guard `ENOENT` / `SyntaxError` semantics, NOT `listResorts.ts`'s collapsed predicate). Only `resortDetail.ts` consumes them. `health.ts` and `listResorts.ts` keep their existing duplicates. A separate post-Tier-3 refactor PR ports the duplicates onto the canonical shape. | Pins canonical signature now; defers the consolidation to keep PR review surfaces atomic. |
 | **D1** | `<EditorErrorBoundary>` co-located inside `ResortEditor.tsx` (NOT a separate file). Per-error-code copy: 404 → "Resort not found." + "Back to resorts" link; 500 `workspace-corrupt` → literal `data/admin-workspace/${slug}.json` recovery copy + "Back to resorts" + "Retry" button. Retry-key is component state (NOT URL state). On 404: `invalidateResortDetail(slug); setRoute({ route: 'resorts' })`. Cache-clear MUST be inside `startTransition` with the `retryKey` bump. | Mirrors Epic 3's `ShellErrorBoundary` retry discipline; loop-safe per ADR-0010. |
-| **E1+** | Pessimistic save with **in-flight token + concurrent-PUT queue**. Local draft holds in-flight value; 500ms debounce; on PUT-fire, snapshot draft as `inFlightToken`. On response, replace draft with canonical state ONLY IF `currentDraft === inFlightToken`. **Never fire a second PUT while one is in-flight** — queue the next debounced flush. Per-FieldRow indicator: 4 states (`dirty` \| `saving` \| `saved` \| `save-failed`). Save-failed retry is automatic. Drafts NEVER write to `useResortDetail`'s cache; reload → cache miss → re-fetch canonical. | Closes the keystroke-clobber race + the silent-data-loss race from concurrent PUTs through the merge step. |
-| **F1** | MANUAL edit input scope: `<input type="number">` for the **10 numeric metric paths**. Money paths (`lift_pass_day`, `lodging_sample.median_eur`) in MANUAL render explanatory copy: "MANUAL editing for `${path}` lands in PR 4.6a." (NOT a disabled input.) Months use numeric `<input type="number" min={1} max={12}>`; display formatter still renders English month names (asymmetry documented). Gate test uses `slopes_km`. | Tier 3 → 4 gate only requires MANUAL round-trip on one numeric path. |
+| **E1+** | Pessimistic save with **in-flight token + draft-revision counter + concurrent-PUT queue**. Local draft holds in-flight value; 500ms debounce; every `setDraft` increments a module-scoped `revRef` counter. On PUT-fire, snapshot the current `revRef.current` as `inFlightRev` AND set `inFlightTokenRef.current = Symbol()`. On response, **replace draft with canonical state (and mark `saved`) ONLY IF `inFlightTokenRef.current === token AND revRef.current === inFlightRev`** (i.e., the user did NOT edit during the round-trip). If the rev moved, leave the indicator at `dirty` — the next debounce flush picks up the new draft. **Never fire a second PUT while one is in-flight** — queue the next debounced flush. Per-FieldRow indicator: 4 states (`dirty` \| `saving` \| `saved` \| `save-failed`). Save-failed retry is automatic. Drafts NEVER write to `useResortDetail`'s cache; reload → cache miss → re-fetch canonical. | The token alone closes the silent-data-loss race from concurrent PUTs but NOT the keystroke-clobber race (the token stays the same throughout the round-trip; it doesn't observe in-flight `setDraft` calls). The revision counter is what catches "user edited during round-trip" — Codex round-1 P2-2 fold. |
+| **F1** | MANUAL edit input scope: `<input type="number">` for the **7 durable numeric metric paths** (`altitude_m.min`, `altitude_m.max`, `slopes_km`, `lift_count`, `skiable_terrain_ha`, `season.start_month`, `season.end_month`). The 5 live paths (`snow_depth_cm`, `lifts_open.count`, `lifts_open.total`, `lift_pass_day`, `lodging_sample.median_eur`) — including the 3 numeric and 2 money — render explanatory copy in MANUAL: "MANUAL editing for `${path}` lands in PR 4.6a." (NOT a disabled input.) Months use numeric `<input type="number" min={1} max={12}>`; display formatter still renders English month names (asymmetry documented). Gate test uses `slopes_km` (durable, numeric). | Tier 3 → 4 gate only requires MANUAL round-trip on one numeric path. **The cross-key invariant in `WorkspaceFile` (per spec §10.2) restricts `editor_modes` keys to `Object.keys(resort.field_sources)` — i.e., durable paths only. Trying to PUT `editor_modes: { snow_depth_cm: 'manual' }` would fail the refinement and 400 as `invalid-resort`.** Codex round-1 P2-1 fold corrected the v1 plan's "10 numeric paths" claim. Phase-2 widens the schema if live paths need MANUAL. |
 | **D2** (formatters) | `formatMetricValue(path, value)` exhaustive switch on `MetricPath`. Months → English month names via `Date.toLocaleString('en', { month: 'long' })`; out-of-range → `"—"`. Money → `Intl.NumberFormat(undefined, { style: 'currency', currency: m.currency })` (NOT hard-coded EUR). Lifts → `${count} / ${total}`; missing parts → `"—"`. Plain integer + units otherwise. | Type-aware formatting; no i18n in Phase 1. |
 | **D3** (cache shape) | `useResortDetail`: per-slug `Map<ResortSlug, Promise<ResortDetailResponse>>`; rejected promises pinned per ADR-0010; `invalidateResortDetail(slug)` for boundary-driven retry; `__resetForTests()` clears the Map; HMR reset in sibling `useResortDetail.hmr.ts` (coverage-excluded by glob via `apps/admin/vite.config.ts`). | Per-slug cache prevents re-fetch on slug-switch. |
 | **D4** (Suspense placement) | Per-route `<Suspense>` inside `<EditorErrorBoundary>`, NOT at `<Shell>` level. Fallback: inline `<div role="status" aria-live="polite">Loading…</div>`. | Editor suspending must NOT blank sidebar/dashboard. |
@@ -831,7 +831,7 @@ if (code !== undefined) {
 
 ## PR 4.4d — Editor edit interaction
 
-**Goal.** Editor becomes edit-interactive. `useWorkspaceState` carries the in-flight draft + debounced PUT (with in-flight token + concurrent-PUT queue per **E1+**); `useModeToggle` flips AUTO ↔ MANUAL and persists via PUT; MANUAL mode exposes the edit input for the 10 numeric paths (per **F1**); the bridge integration test proves the workspace file is actually written and survives reload.
+**Goal.** Editor becomes edit-interactive. `useWorkspaceState` carries the in-flight draft + debounced PUT (with in-flight token + draft-revision counter + concurrent-PUT queue per **E1+**); `useModeToggle` flips AUTO ↔ MANUAL and persists via PUT; MANUAL mode exposes the edit input for the **7 durable numeric paths** (per **F1**); the bridge integration test proves the workspace file is actually written and survives reload.
 
 **Acceptance gate.** `npm run qa` green; bridge integration test green with on-disk filesystem assertion (NOT just MSW request log); page reload preserves workspace state through the bridge (with explicit `__resetForTests()` between unmount/remount per fold §5); `validPaths` guard prevents invalid PUTs (silent no-op); Tier 3 → Tier 4 gate passes via manual `npm run dev:admin` editor MANUAL flip + numeric edit + reload sequence.
 
@@ -839,10 +839,11 @@ if (code !== undefined) {
 
 **Files:** New `apps/admin/src/state/useModeToggle.test.ts`.
 
-- [ ] **Step 1: Write tests** (slug derived from `useURLState` per **D7** — tests set `window.history.replaceState({}, '', '/?route=editor&slug=kotelnica-bialczanska')` before render):
-  - `toggleMode('slopes_km')` when valid path → emits PUT `{ editor_modes: { slopes_km: 'manual' } }`.
+- [ ] **Step 1: Write tests** (slug derived from `useURLState` per **D7** — tests set `window.history.replaceState({}, '', '/?route=editor&slug=kotelnica-bialczanska')` before render). **Reminder per F1 fold:** `validPaths` MUST be `Object.keys(resort.field_sources)` — i.e. the **durable** subset only — NOT `Object.keys(field_states)`. The `WorkspaceFile` cross-key invariant rejects `editor_modes` entries for paths not in `resort.field_sources`, so silently no-op'ing on live-only paths is the correct guard:
+  - `toggleMode('slopes_km')` (durable) → emits PUT `{ editor_modes: { slopes_km: 'manual' } }`.
   - Subsequent `toggleMode('slopes_km')` → emits `{ editor_modes: { slopes_km: 'auto' } }`.
-  - **`validPaths` guard (silent no-op)**: `toggleMode('ghost')` when `'ghost' ∉ field_sources` → NO PUT, NO `console.warn`, NO thrown error. Assert `apiClient.upsertResort` was NOT called.
+  - **`validPaths` guard (silent no-op) — ghost path**: `toggleMode('ghost')` when `'ghost' ∉ field_sources` → NO PUT, NO `console.warn`, NO thrown error. Assert `apiClient.upsertResort` was NOT called.
+  - **`validPaths` guard (silent no-op) — live-only path** per Codex round-1 P2-1 fold: `toggleMode('snow_depth_cm')` (live path; in `live_signal.field_sources` but NOT in `resort.field_sources`) → NO PUT, silent no-op. (If 4.4d ever derives `validPaths` from `field_states` keys instead of `resort.field_sources` keys, this test catches it — the live-path PUT would otherwise 400 as `invalid-resort` from the cross-key refinement.)
   - Default reading: missing `editor_modes` entry → `'auto'`.
   - Local `afterEach(() => { useWorkspaceState.__resetForTests(); useResortDetail.__resetForTests() })`.
 - [ ] **Step 2:** Run. FAIL.
@@ -853,9 +854,10 @@ if (code !== undefined) {
 
 - [ ] **Step 1: Write tests** for **E1+**:
   - **Debounce 500ms** with vitest fake timers: 5 rapid `setFieldValue('slopes_km', n)` within 500ms → 1 PUT carrying final `n`.
-  - **In-flight token**: PUT in flight → `setFieldValue('slopes_km', 500)` BEFORE response → response with canonical `50` arrives → draft IS STILL `500` (not clobbered).
-  - **No concurrent PUTs**: while one PUT in flight, second debounce queues; only fires after first resolves. Use `vi.spyOn(apiClient, 'upsertResort')` to count calls.
-  - **4-state indicator**: setFieldValue → `dirty`; flush → `saving`; success → `saved`; failure → `save-failed`.
+  - **In-flight token (concurrent-PUT guard)**: while a PUT is in-flight, a second debounce flush is QUEUED, not fired. Use `vi.spyOn(apiClient, 'upsertResort')` and assert call count is 1 until the in-flight PUT resolves; then 2.
+  - **Draft-revision counter (keystroke-clobber guard)** per Codex round-1 P2-2 fold: PUT for `slopes_km: 50` is in-flight → `setFieldValue('slopes_km', 500)` BEFORE response → response (canonical `50`) arrives → assert: (a) the draft state IS STILL `500` (NOT replaced with canonical `50`); (b) the FieldRow indicator for `slopes_km` is STILL `dirty` (NOT marked `saved`); (c) the next debounce flush fires a fresh PUT with `500`. Without the revision counter, `inFlightTokenRef.current === token` would be `true`, the canonical `50` would clobber the user's `500`, and the indicator would falsely show `saved`.
+  - **No concurrent PUTs**: while one PUT in flight, second debounce queues; only fires after first resolves. (Subsumed by the concurrent-PUT guard test above; kept as a separate assertion for clarity.)
+  - **4-state indicator**: setFieldValue → `dirty`; flush → `saving`; success → `saved` (only when revision unchanged); failure → `save-failed`.
   - **Save-failed retry-by-edit**: PUT rejects → indicator `save-failed` → next `setFieldValue` triggers fresh debounced flush → success → `saved`.
   - **Cache isolation (observable spy)** per fold §5: assert `apiClient.getResort` is NOT called during `useWorkspaceState` flush — i.e., `useWorkspaceState` does not invalidate `useResortDetail`'s cache. Use `vi.spyOn(apiClient, 'getResort')`.
 - [ ] **Step 2:** Run. FAIL.
@@ -864,7 +866,7 @@ if (code !== undefined) {
 
 **Files:** New `apps/admin/src/state/useWorkspaceState.ts`.
 
-- [ ] **Step 1:** Implement the in-flight token + queue pattern. Pseudo-shape:
+- [ ] **Step 1:** Implement the in-flight token + draft-revision counter + concurrent-PUT queue (per **E1+** + Codex round-1 P2-2 fold). Pseudo-shape:
 
 ```ts
 import { useEffect, useRef, useState } from 'react'
@@ -893,9 +895,24 @@ export function useWorkspaceState() {
   const [draft, setDraft] = useState<DraftShape>({ field_values: {}, editor_modes: {} })
   const [status, setStatus] = useState<Record<MetricPath, Status>>({} as Record<MetricPath, Status>)
 
+  // The draft-revision counter — incremented on every setDraft. The flush
+  // captures revRef.current at PUT-fire time as `inFlightRev`; on response
+  // we only adopt canonical state / mark `saved` when revRef.current is
+  // STILL inFlightRev (i.e., the user did NOT edit during the round-trip).
+  // Without this guard, the in-flight token alone (which stays the same
+  // throughout the round-trip) would falsely mark a newer dirty draft as
+  // saved — Codex round-1 P2-2 fold.
+  const revRef = useRef<number>(0)
+  const draftRef = useRef<DraftShape>(draft)  // mirrors current draft for closure access in flush()
+
   const inFlightTokenRef = useRef<symbol | null>(null)
   const queuedRef = useRef<boolean>(false)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Keep draftRef in sync with the draft state value so flush() can compare
+  // post-await without depending on a closed-over `draft` (which would be
+  // stale).
+  useEffect((): void => { draftRef.current = draft }, [draft])
 
   function scheduleFlush(): void {
     if (timerRef.current !== null) { clearTimeout(timerRef.current) }
@@ -908,20 +925,31 @@ export function useWorkspaceState() {
       return
     }
     const token = Symbol('flush')
+    const inFlightRev = revRef.current
+    const inFlightDraft = draftRef.current  // snapshot what we're about to send
     inFlightTokenRef.current = token
     setStatusForDirty('saving')
     try {
-      const body = buildBodyFromDraft(draft)
+      const body = buildBodyFromDraft(inFlightDraft)
       await apiClient.upsertResort(slug, body)
-      // Only adopt canonical state if user did NOT mutate during round-trip.
-      if (inFlightTokenRef.current === token) {
+      // Only mark `saved` (and adopt canonical state, if wired) when:
+      //   1. This token still owns the in-flight slot (no race)
+      //   2. The draft revision did NOT advance during the round-trip
+      // Otherwise: the user edited mid-flight — keep `dirty` so the next
+      // debounce flush picks up the newer draft.
+      if (inFlightTokenRef.current === token && revRef.current === inFlightRev) {
         setStatusForDirty('saved')
       }
     } catch {
-      setStatusForDirty('save-failed')
+      // Same race-safety as success branch: only mark `save-failed` when
+      // the token is still ours. (If the rev moved, the failure is for a
+      // stale snapshot — the next flush will re-attempt with the new draft.)
+      if (inFlightTokenRef.current === token && revRef.current === inFlightRev) {
+        setStatusForDirty('save-failed')
+      }
     } finally {
       inFlightTokenRef.current = null
-      if (queuedRef.current) {
+      if (queuedRef.current || revRef.current !== inFlightRev) {
         queuedRef.current = false
         scheduleFlush()
       }
@@ -929,12 +957,14 @@ export function useWorkspaceState() {
   }
 
   function setFieldValue(path: MetricPath, value: unknown): void {
+    revRef.current += 1
     setDraft((d): DraftShape => ({ ...d, field_values: { ...d.field_values, [path]: value } }))
     setStatus((s): Record<MetricPath, Status> => ({ ...s, [path]: 'dirty' }))
     scheduleFlush()
   }
 
   function setMode(path: MetricPath, mode: 'manual' | 'auto'): void {
+    revRef.current += 1
     setDraft((d): DraftShape => ({ ...d, editor_modes: { ...d.editor_modes, [path]: mode } }))
     setStatus((s): Record<MetricPath, Status> => ({ ...s, [path]: 'dirty' }))
     scheduleFlush()
@@ -942,6 +972,9 @@ export function useWorkspaceState() {
 
   return { draft, status, setFieldValue, setMode }
 }
+```
+
+`buildBodyFromDraft` and `setStatusForDirty` are filled in by the executor at coding time; the test surface (Task 2) is the correctness contract.
 
 // helpers — bodies omitted for brevity:
 function buildBodyFromDraft(draft: DraftShape): ResortUpsertBody { /* ... */ return {} as ResortUpsertBody }
@@ -958,17 +991,31 @@ export function __resetForTests(): void { /* clear internal refs if module-scope
 
 **Files:** New `apps/admin/src/state/useModeToggle.ts`.
 
-- [ ] **Step 1:** Implement as a thin wrapper over `useWorkspaceState`:
+- [ ] **Step 1:** Implement as a thin wrapper over `useWorkspaceState`. **Per Codex round-1 P2-1 fold:** `validPaths` is derived INTERNALLY from `useResortDetail(slug).resort.field_sources` — NOT taken as an arg. This keeps PR 4.4d at 8 files (no prop drilling through `MetricPanel` / `ResortEditor`) and pins the durable-only constraint at the hook layer where it cannot be bypassed.
 
 ```ts
 import type { MetricPath } from '@snowboard-trip-advisor/schema'
 
+import { useURLState } from './useURLState'
+import { useResortDetail } from './useResortDetail'
 import { useWorkspaceState } from './useWorkspaceState'
 
-export function useModeToggle(validPaths: ReadonlyArray<MetricPath>) {
+export function useModeToggle() {
+  const route = useURLState()
+  if (route.route !== 'editor') {
+    throw new Error('useModeToggle called outside the editor route')
+  }
+  // useResortDetail returns a cached (settled) response under Suspense —
+  // FieldRow renders inside the editor's <Suspense> boundary so the read
+  // never re-suspends here. The per-slug Map cache means this is the same
+  // ResortDetailResponse object the parent <ResortEditorBody> already read.
+  const detail = useResortDetail(route.slug)
+  const validPaths = Object.keys(detail.resort.field_sources) as ReadonlyArray<MetricPath>
+
   const { draft, setMode } = useWorkspaceState()
+
   function toggleMode(path: MetricPath): void {
-    if (!validPaths.includes(path)) { return /* silent no-op per §6.1 */ }
+    if (!validPaths.includes(path)) { return /* silent no-op per §6.1 + F1 fold */ }
     const current = draft.editor_modes[path] ?? 'auto'
     setMode(path, current === 'manual' ? 'auto' : 'manual')
   }
@@ -1025,25 +1072,40 @@ export function ModeToggle({ path, mode, onToggle }: ModeToggleProps): JSX.Eleme
 
 **Files:** Modify `apps/admin/src/views/ResortEditor/FieldRow.tsx`.
 
-- [ ] **Step 1:** Replace the inline `<span role="switch">` ModeToggle with the new `<ModeToggle>` component. Add an editor-mode branch:
+- [ ] **Step 1:** Replace the inline `<span role="switch">` ModeToggle with the new `<ModeToggle>` component. Add an editor-mode branch. **Per F1 fold (Codex round-1 P2-1):** `MANUAL_EDITABLE_PATHS` is the **7 durable numeric paths** only — live paths cannot be MANUAL because the `WorkspaceFile` cross-key invariant restricts `editor_modes` keys to `Object.keys(resort.field_sources)` (durable subset). `useModeToggle` enforces the same durable-only constraint internally (it derives `validPaths` from `useResortDetail`); FieldRow does NOT need a `resort` prop. `FieldRowProps` is unchanged from PR 4.4b's `{ path, state }` signature.
 
 ```tsx
-const NUMERIC_PATHS: ReadonlySet<MetricPath> = new Set([
+// 7 durable paths that can be MANUAL-edited via numeric inputs.
+// Live paths (snow_depth_cm, lifts_open.{count,total}, lift_pass_day,
+// lodging_sample.median_eur) are NOT in this set — see the explanatory-
+// copy branch below. Phase 2 widens the WorkspaceFile schema if live-path
+// MANUAL becomes needed.
+const MANUAL_EDITABLE_PATHS: ReadonlySet<MetricPath> = new Set([
   'altitude_m.min', 'altitude_m.max', 'slopes_km', 'lift_count',
   'skiable_terrain_ha', 'season.start_month', 'season.end_month',
-  'snow_depth_cm', 'lifts_open.count', 'lifts_open.total',
 ])
 
 function FieldRow({ path, state }: FieldRowProps): JSX.Element {
   const { draft, setFieldValue } = useWorkspaceState()
-  const { toggleMode, modeFor } = useModeToggle(/* validPaths */ /* from a parent prop or read from useResortDetail */)
+  const { toggleMode, modeFor } = useModeToggle()  // no args; reads slug + validPaths internally
 
   const inputValue = draft.field_values[path] ?? valueFor(state)
-
   const isManual = modeFor(path) === 'manual'
+  const isMonth = path === 'season.start_month' || path === 'season.end_month'
+
   const inputElement = !isManual ? null
-    : NUMERIC_PATHS.has(path)
-      ? <input type="number" value={inputValue as number} onChange={(e): void => setFieldValue(path, Number(e.target.value))} {...(path === 'season.start_month' || path === 'season.end_month' ? { min: 1, max: 12 } : {})} />
+    : MANUAL_EDITABLE_PATHS.has(path)
+      ? (
+        <input
+          type="number"
+          value={inputValue as number}
+          onChange={(e): void => setFieldValue(path, Number(e.target.value))}
+          {...(isMonth ? { min: 1, max: 12 } : {})}
+        />
+      )
+      // Per F1 fold: live paths (3 numeric + 2 money) all render explanatory
+      // copy in MANUAL — the editor_modes schema invariant rejects PUTs that
+      // mode-flag a path not in resort.field_sources.
       : <span>MANUAL editing for {path} lands in PR 4.6a.</span>
 
   return (
@@ -1051,6 +1113,12 @@ function FieldRow({ path, state }: FieldRowProps): JSX.Element {
       <StatusPill variant={pillVariantFor(state)} />
       <span>{formatMetricValue(path, isManual ? inputValue : valueFor(state))}</span>
       <span>{sourceFor(state)}</span>
+      {/*
+        ModeToggle is rendered for ALL paths — clicking a live-path's toggle
+        is a silent no-op via useModeToggle's validPaths guard. This is
+        intentional: the toggle being VISIBLE on every row is the spec §6.1
+        surface; the no-op happens at the hook layer, not the render layer.
+      */}
       <ModeToggle path={path} mode={modeFor(path)} onToggle={(): void => toggleMode(path)} />
       {inputElement}
     </div>
@@ -1058,7 +1126,7 @@ function FieldRow({ path, state }: FieldRowProps): JSX.Element {
 }
 ```
 
-(Executor fills in the data-flow detail; `validPaths` is derived from `useResortDetail(slug)`'s response — `Object.keys(field_states)` cast to `MetricPath`.)
+(Executor fills in the data-flow detail. **Per Codex round-1 P2-1 fold:** `useModeToggle` reads `useResortDetail(slug).resort.field_sources` for `validPaths` — derivation lives at the hook layer where the durable-only constraint cannot be bypassed.)
 
 - [ ] **Step 2:** Run existing FieldRow tests. Tests asserting `<span role="switch" aria-disabled="true">` will FAIL (the inline span is replaced by `<button>`); update those tests to assert the new structure or rely on `ModeToggle.test.tsx` for the toggle's behavior.
 
@@ -1170,5 +1238,12 @@ This plan was reviewed by an independent subagent. The fold:
 - **§8 dispatch.ts modification.** v1 omitted; reviewer flagged that `editor_modes` cross-key reject test requires `details` pass-through. **Fold:** PR 4.4c Tasks 5-6 modify `dispatch.ts`.
 - **§8 test-setup wiring.** v1 added test-setup.ts modify to PR 4.4a-2. **Fold:** dropped (file-budget pressure + matches existing `useResortList` pattern of local `afterEach`); pre-existing `useResortList.__resetForTests` debt explicitly left out-of-scope.
 - **§8 freshness.ts non-existent.** v1 imported from `./freshness`. **Fold:** corrected to `./loadResortDatasetFromObject` everywhere.
+
+### Codex round 1 (PR #90 review by `chatgpt-codex-connector`, 2026-05-08)
+
+Two P2 findings on the v2 plan; both real correctness issues; both folded:
+
+- **P2-1 — F1 scope wrong (live paths in MANUAL would 400 as `invalid-resort`).** v2 declared MANUAL editing for "10 numeric metric paths" but the `WorkspaceFile` cross-key invariant (spec §10.2) restricts `editor_modes` keys to `Object.keys(resort.field_sources)` — durable paths only (7). MANUAL on a live path (`snow_depth_cm`, `lifts_open.{count,total}`, `lift_pass_day`, `lodging_sample.median_eur`) would PUT-reject. **Fold:** F1 reduced to **7 durable numeric paths**. The 5 live paths render explanatory copy. `useModeToggle` now derives `validPaths` INTERNALLY from `useResortDetail(slug).resort.field_sources` (was: passed as arg). PR 4.4d Task 1 adds a live-path silent-no-op test (`toggleMode('snow_depth_cm')`) to pin the durable-only constraint at the test layer.
+- **P2-2 — E1+ keystroke-clobber race.** v2's in-flight token check (`inFlightTokenRef.current === token`) doesn't catch the case where the user edits during the round-trip — the token stays the same throughout, so a newer dirty draft gets clobbered (or marked saved) when the response arrives. **Fold:** added a draft-revision counter (`revRef`) incremented on every `setDraft`. Flush snapshots `revRef.current` as `inFlightRev`; on response, only mark `saved` when BOTH `inFlightTokenRef.current === token` AND `revRef.current === inFlightRev`. PR 4.4d Task 2 adds an explicit "user edits during round-trip" test case that fails without the counter.
 
 **End of plan.**
