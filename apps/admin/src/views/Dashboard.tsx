@@ -1,4 +1,5 @@
 import {
+  Button,
   Card,
   EmptyStateLayout,
   Skeleton,
@@ -7,6 +8,7 @@ import type { HealthResponse } from '@snowboard-trip-advisor/schema/api'
 import type { JSX } from 'react'
 
 import { useHealth } from '../state/useHealth'
+import { setRoute } from '../state/useURLState'
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -83,31 +85,56 @@ function formatArchiveSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-interface MetricCardProps {
+type MetricCardInertProps = {
   readonly label: string
   readonly value: string | number
 }
 
-function MetricCard({ label, value }: MetricCardProps): JSX.Element {
+type MetricCardClickableProps = MetricCardInertProps & {
+  readonly onClick: () => void
+  readonly ariaLabel: string
+}
+
+type MetricCardProps = MetricCardInertProps | MetricCardClickableProps
+
+function MetricCard(props: MetricCardProps): JSX.Element {
+  if ('onClick' in props) {
+    // Clickable variant: phrasing-content <span>s only — HTML5 forbids flow
+    // content (incl. <dl>) inside <button>. See spec §2.2.
+    // The call site composes the full aria-label (including the count) so SR
+    // users hear what the action does AND the current value.
+    return (
+      <Card>
+        <Button variant="ghost" onClick={props.onClick} aria-label={props.ariaLabel}>
+          <span data-role="metric-label">{props.label}</span>
+          <span data-role="metric-value">{String(props.value)}</span>
+        </Button>
+      </Card>
+    )
+  }
   return (
     <Card>
       <dl>
-        <dt>{label}</dt>
-        <dd>{String(value)}</dd>
+        <dt>{props.label}</dt>
+        <dd>{String(props.value)}</dd>
       </dl>
     </Card>
   )
 }
 
 function HealthMetricsGrid({ health }: { readonly health: HealthResponse }): JSX.Element {
-  // TODO(PR 4.2 §1.5 + PR 4.3): Card click navigates via URL state per spec §7.8.
-  // Cards are inert in §1.4; setRoute lands in §1.5; the resorts route + filter
-  // schema lands in PR 4.3 §2.3.
+  // Only "Failed fields" is wired pre-Epic-5; other counter cards lack a
+  // stable URL filter (see spec docs/superpowers/specs/2026-05-07-dashboard-card-click-design.md §1.2).
   return (
     <section aria-label="Health metrics">
       <MetricCard label="Resorts total" value={health.resorts_total} />
       <MetricCard label="Stale fields" value={health.resorts_with_stale_fields} />
-      <MetricCard label="Failed fields" value={health.resorts_with_failed_fields} />
+      <MetricCard
+        label="Failed fields"
+        value={health.resorts_with_failed_fields}
+        onClick={(): void => { setRoute({ route: 'resorts', hasFailures: true }) }}
+        ariaLabel={`View resorts with failed fields. Current count: ${String(health.resorts_with_failed_fields)}.`}
+      />
       <MetricCard label="Missing provenance" value={health.resorts_with_missing_provenance} />
       <MetricCard label="Corrupt workspace" value={health.resorts_with_corrupt_workspace} />
       <MetricCard label="Pending integration errors" value={health.pending_integration_errors} />
