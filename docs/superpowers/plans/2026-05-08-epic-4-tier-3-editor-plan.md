@@ -27,10 +27,11 @@ Per spec §7.4 this plan must close, on `main`, after PR 4.4d merges:
 |---|---|---|
 | **A1** | `projectFieldStates(resort, live, modes, now): Record<MetricPath, FieldStateFor<unknown>>` lives in `packages/schema/src/resortView.ts`. Modes parameter typed as `Partial<Record<MetricPath, 'manual' \| 'auto'>>` directly (NOT `WorkspaceFile['editor_modes']`) to avoid circular dep. `FRESHNESS_TTL_DAYS` is imported from the existing `./loadResortDatasetFromObject` module (NOT a non-existent `./freshness`). | Phase-2 reusable; co-located with `FieldStateFor` type and `toFieldValue`. |
 | **A1.5** | `failed.reason` on `FieldStateFor<T>` is a free-form string. The admin code uses the sentinel string `'never_fetched'` for the `ageDays > max_stale` branch (NOT a separate state). The public-app side has a separate `FieldValue<T>` type with a real `'never_fetched'` state; admin-side projection compresses both into `'failed'`. | Documented in plan to disambiguate the two types reviewer-flagged. |
+| **A1.6** (durable vs live TTL — Codex round-2 P2-3 fold) | `projectFieldStates` MUST apply clock-aging TTL semantics to **live paths only**. Durable resort attributes (`altitude_m.{min,max}`, `slopes_km`, `lift_count`, `skiable_terrain_ha`, `season.{start_month,end_month}`) are NEVER `stale` or `failed (never_fetched)` based on `observed_at` age — they project as `live` whenever a `field_sources` entry exists, and `failed (no field_sources entry)` only when missing. Mirrors the canonical semantics in `loadResortDatasetFromObject.ts:83-99` ("durable resort attributes return state: 'fresh' unconditionally") and the existing `health.ts` / `listResorts.ts` staleness checks (gated on `populatedLivePaths`). | Without this gate, an old `slopes_km.observed_at` would render `stale` or `failed` in the editor while the dashboard + resorts list (canonical projections) report it `fresh` — visible inconsistency between admin views over a Phase-1 normal data shape. |
 | **B1** | Export `atomicWriteText` from `@snowboard-trip-advisor/schema/node` by adding the `export` keyword to `publishDataset.ts`'s existing `async function atomicWriteText`. The schema package's `node.ts` already does `export * from './publishDataset'`, so no `node.ts` modification is needed. | Eliminates byte-for-byte drift risk; minimum-touch addition; tested via `packages/schema/src/exports-map.test.ts`. |
 | **C1+** | PR 4.4a-2 adds canonical read-helper signatures in `apps/admin/server/workspace.ts` (using `health.ts`'s separate-guard `ENOENT` / `SyntaxError` semantics, NOT `listResorts.ts`'s collapsed predicate). Only `resortDetail.ts` consumes them. `health.ts` and `listResorts.ts` keep their existing duplicates. A separate post-Tier-3 refactor PR ports the duplicates onto the canonical shape. | Pins canonical signature now; defers the consolidation to keep PR review surfaces atomic. |
 | **D1** | `<EditorErrorBoundary>` co-located inside `ResortEditor.tsx` (NOT a separate file). Per-error-code copy: 404 → "Resort not found." + "Back to resorts" link; 500 `workspace-corrupt` → literal `data/admin-workspace/${slug}.json` recovery copy + "Back to resorts" + "Retry" button. Retry-key is component state (NOT URL state). On 404: `invalidateResortDetail(slug); setRoute({ route: 'resorts' })`. Cache-clear MUST be inside `startTransition` with the `retryKey` bump. | Mirrors Epic 3's `ShellErrorBoundary` retry discipline; loop-safe per ADR-0010. |
-| **E1+** | Pessimistic save with **in-flight token + draft-revision counter + concurrent-PUT queue**. Local draft holds in-flight value; 500ms debounce; every `setDraft` increments a module-scoped `revRef` counter. On PUT-fire, snapshot the current `revRef.current` as `inFlightRev` AND set `inFlightTokenRef.current = Symbol()`. On response, **replace draft with canonical state (and mark `saved`) ONLY IF `inFlightTokenRef.current === token AND revRef.current === inFlightRev`** (i.e., the user did NOT edit during the round-trip). If the rev moved, leave the indicator at `dirty` — the next debounce flush picks up the new draft. **Never fire a second PUT while one is in-flight** — queue the next debounced flush. Per-FieldRow indicator: 4 states (`dirty` \| `saving` \| `saved` \| `save-failed`). Save-failed retry is automatic. Drafts NEVER write to `useResortDetail`'s cache; reload → cache miss → re-fetch canonical. | The token alone closes the silent-data-loss race from concurrent PUTs but NOT the keystroke-clobber race (the token stays the same throughout the round-trip; it doesn't observe in-flight `setDraft` calls). The revision counter is what catches "user edited during round-trip" — Codex round-1 P2-2 fold. |
+| **E1+** | Pessimistic save with **module-scoped per-slug singleton store** + **in-flight token** + **draft-revision counter** + **concurrent-PUT queue**. **The store lives at module scope, keyed by `ResortSlug`** (`storesBySlug: Map<ResortSlug, SlugStore>`); every `useWorkspaceState()` consumer in the same editor subscribes via `useSyncExternalStore` to the SAME `SlugStore` for the active slug. Per-slug fields: `draft`, `status`, `rev`, `inFlightToken`, `queued`, `timer`, `subscribers`. 500ms debounce; every `setFieldValue`/`setMode` increments `store.rev`. On PUT-fire, snapshot `store.rev` as `inFlightRev` and set `store.inFlightToken = Symbol()`. On response, mark `saved` (and adopt canonical state) ONLY IF `store.inFlightToken === token AND store.rev === inFlightRev`. **Never fire a second PUT while one is in-flight** — queue the next debounced flush via `store.queued`. Per-FieldRow indicator: 4 states (`dirty` \| `saving` \| `saved` \| `save-failed`). Save-failed retry is automatic. Drafts NEVER write to `useResortDetail`'s cache. `__resetForTests()` clears `storesBySlug`. | **Codex round-2 P1-1 fold:** v2 used `useState`/`useRef` inside the hook, which means each `useWorkspaceState()` call site (one per FieldRow × 12 rows) creates an INDEPENDENT state instance — 12 independent draft maps, 12 independent in-flight queues. The concurrent-PUT race that E1+ is supposed to prevent reappears across rows. Hoisting state to a module-scoped per-slug singleton (mirroring `useResortDetail`'s cache pattern) gives all consumers in the same editor ONE canonical store, ONE queue, ONE rev counter. The revision counter still catches the keystroke-clobber race within a single row (Codex round-1 P2-2 fold). |
 | **F1** | MANUAL edit input scope: `<input type="number">` for the **7 durable numeric metric paths** (`altitude_m.min`, `altitude_m.max`, `slopes_km`, `lift_count`, `skiable_terrain_ha`, `season.start_month`, `season.end_month`). The 5 live paths (`snow_depth_cm`, `lifts_open.count`, `lifts_open.total`, `lift_pass_day`, `lodging_sample.median_eur`) — including the 3 numeric and 2 money — render explanatory copy in MANUAL: "MANUAL editing for `${path}` lands in PR 4.6a." (NOT a disabled input.) Months use numeric `<input type="number" min={1} max={12}>`; display formatter still renders English month names (asymmetry documented). Gate test uses `slopes_km` (durable, numeric). | Tier 3 → 4 gate only requires MANUAL round-trip on one numeric path. **The cross-key invariant in `WorkspaceFile` (per spec §10.2) restricts `editor_modes` keys to `Object.keys(resort.field_sources)` — i.e., durable paths only. Trying to PUT `editor_modes: { snow_depth_cm: 'manual' }` would fail the refinement and 400 as `invalid-resort`.** Codex round-1 P2-1 fold corrected the v1 plan's "10 numeric paths" claim. Phase-2 widens the schema if live paths need MANUAL. |
 | **D2** (formatters) | `formatMetricValue(path, value)` exhaustive switch on `MetricPath`. Months → English month names via `Date.toLocaleString('en', { month: 'long' })`; out-of-range → `"—"`. Money → `Intl.NumberFormat(undefined, { style: 'currency', currency: m.currency })` (NOT hard-coded EUR). Lifts → `${count} / ${total}`; missing parts → `"—"`. Plain integer + units otherwise. | Type-aware formatting; no i18n in Phase 1. |
 | **D3** (cache shape) | `useResortDetail`: per-slug `Map<ResortSlug, Promise<ResortDetailResponse>>`; rejected promises pinned per ADR-0010; `invalidateResortDetail(slug)` for boundary-driven retry; `__resetForTests()` clears the Map; HMR reset in sibling `useResortDetail.hmr.ts` (coverage-excluded by glob via `apps/admin/vite.config.ts`). | Per-slug cache prevents re-fetch on slug-switch. |
@@ -53,10 +54,11 @@ Per spec §7.4 this plan must close, on `main`, after PR 4.4d merges:
 |---|---|---|
 | 1 | `tests/fixtures/admin-workspace/kotelnica-bialczanska.json` | NEW — seed fixture (PL Tatra resort; matches `WorkspaceFile` Zod parse) |
 | 2 | `tests/fixtures/admin-workspace/spindleruv-mlyn.json` | NEW — seed fixture (CZ Krkonoše resort) |
-| 3 | `packages/schema/src/resortView.test.ts` | MODIFY — add `projectFieldStates` tests + seed-fixture parity test |
+| 3 | `packages/schema/src/resortView.test.ts` | MODIFY — add `projectFieldStates` tests + seed-fixture parity + close coverage gap on existing `toFieldValue` (4 states) |
 | 4 | `packages/schema/src/resortView.ts` | MODIFY — add `projectFieldStates` function |
+| 5 | `packages/schema/vite.config.ts` | MODIFY — remove `'src/resortView.ts'` from coverage `exclude` (per Codex round-2 P2-4 fold) |
 
-**Files: 4.** ≤300 LOC.
+**Files: 5.** ≤300 LOC. The `vite.config.ts` change drops the v1 "types-only" exclusion that would otherwise hide the new executable projection logic from the 100% gate.
 
 ### PR 4.4a-2 — Server read + `useResortDetail` hook
 
@@ -257,6 +259,17 @@ export function projectFieldStates(
   return out
 }
 
+// Per A1.6 / Codex round-2 P2-3 fold: clock-aging applies to LIVE paths only.
+// Durable resort attributes (altitude_m.{min,max}, slopes_km, lift_count,
+// skiable_terrain_ha, season.{start_month,end_month}) are 'live' whenever a
+// field_sources entry exists; their observed_at age never makes them 'stale'
+// or 'failed (never_fetched)'. Mirrors loadResortDatasetFromObject.ts:83-99
+// and the existing health.ts/listResorts.ts staleness gating.
+const DURABLE_PATHS: ReadonlySet<MetricPath> = new Set([
+  'altitude_m.min', 'altitude_m.max', 'slopes_km', 'lift_count',
+  'skiable_terrain_ha', 'season.start_month', 'season.end_month',
+])
+
 function projectOne(
   path: MetricPath,
   fs: FieldSource | undefined,
@@ -271,6 +284,11 @@ function projectOne(
     // Sentinel reason 'no field_sources entry' (free-form string per A1.5).
     return { state: 'failed', reason: 'no field_sources entry', observed_at: ISODateTimeString.parse(now.toISOString()) }
   }
+  // Durable paths: never age out — editorial review is the Phase-2 stale signal.
+  if (DURABLE_PATHS.has(path)) {
+    return { state: 'live', value, source: fs.source, observed_at: fs.observed_at }
+  }
+  // Live paths: clock-aging applies.
   const ageDays = (now.getTime() - new Date(fs.observed_at).getTime()) / (24 * 60 * 60 * 1000)
   if (ageDays > FRESHNESS_TTL_DAYS.max_stale) {
     // Sentinel reason 'never_fetched' (free-form string per A1.5).
@@ -302,18 +320,33 @@ function resolveValue(path: MetricPath, resort: Resort, live: ResortLiveSignal |
 
 - [ ] **Step 2: Run.** Same command. PASS.
 
-### Task 4 — `stale`, `failed`, `manual` coverage tests
+### Task 4 — `stale`, `failed`, `manual`, durable-vs-live coverage tests
 
-- [ ] **Step 1: Add tests** (one per branch):
-  - **stale**: observed_at 21 days ago (between default=14 and max_stale=30) → `{ state: 'stale', age_days: ~21 }`.
-  - **failed (never_fetched)**: observed_at 60 days ago (> max_stale) → `{ state: 'failed', reason: 'never_fetched' }`.
-  - **failed (no field_sources entry)**: missing `field_sources[path]` → `{ state: 'failed', reason: 'no field_sources entry' }`.
-  - **manual**: `editor_modes: { slopes_km: 'manual' }` with valid value → `{ state: 'manual', value, observed_at }`.
+- [ ] **Step 1: Add tests** (one per branch). **Per A1.6 / Codex round-2 P2-3 fold:** stale/never_fetched only fire on **live paths**; durable paths stay `live` regardless of `observed_at` age.
+  - **stale (live path)**: `snow_depth_cm` with `observed_at` 21 days ago (between default=14 and max_stale=30) → `{ state: 'stale', age_days: ~21 }`.
+  - **failed (never_fetched, live path)**: `snow_depth_cm` with `observed_at` 60 days ago (> max_stale) → `{ state: 'failed', reason: 'never_fetched' }`.
+  - **durable path with old `observed_at` is still `live`** (regression-pinning the A1.6 separation): `slopes_km` with `observed_at` 60 days ago AND `editor_modes` empty → `{ state: 'live' }`. Without the `DURABLE_PATHS` guard, this would falsely return `failed (never_fetched)` and disagree with the dashboard / resorts-list projections.
+  - **failed (no field_sources entry)** — both branches:
+    - durable path with missing `resort.field_sources[path]` → `{ state: 'failed', reason: 'no field_sources entry' }`.
+    - live path with missing `live_signal.field_sources[path]` (and value undefined) → same.
+  - **manual (durable)**: `editor_modes: { slopes_km: 'manual' }` with valid value → `{ state: 'manual', value, observed_at }`.
   - **manual without value**: `editor_modes: { slopes_km: 'manual' }` but `value === undefined` → falls back to `failed`.
-  - **mode 'auto'**: `editor_modes: { slopes_km: 'auto' }` → same as missing entry (live/stale/failed depending on age).
-  - **live wins over resort.field_sources**: when `live.field_sources.snow_depth_cm` is more recent than `resort.field_sources.snow_depth_cm`, the projection uses live.
-  - **null live_signal**: durable paths still project; live paths all `failed (no field_sources entry)`.
+  - **mode 'auto' (durable)**: `editor_modes: { slopes_km: 'auto' }` → same as missing entry → `live` (durable path).
+  - **mode 'auto' (live, stale window)**: `editor_modes: { snow_depth_cm: 'auto' }` with `observed_at` 21 days ago → `stale` (the auto reset doesn't suppress live-path TTL aging).
+  - **live wins over resort.field_sources**: when `live_signal.field_sources.snow_depth_cm` is more recent than `resort.field_sources.snow_depth_cm`, the projection uses live's `observed_at` for the staleness check.
+  - **null live_signal**: durable paths still project as `live`; live paths all `failed (no field_sources entry)`.
 - [ ] **Step 2: Run.** PASS on all branches.
+
+### Task 4.5 — `toFieldValue` coverage closure
+
+The existing `toFieldValue<T>(state)` function was previously coverage-excluded with the `src/resortView.ts` whole-file glob. Removing the exclusion (file-list item 5) means BOTH `projectFieldStates` AND `toFieldValue` need 100% coverage in PR 4.4a-1.
+
+- [ ] **Step 1: Add tests** for `toFieldValue` covering all 4 input states (`live` | `stale` | `failed` | `manual`):
+  - `toFieldValue({ state: 'live', value: 42, source, observed_at })` → `{ state: 'fresh', value: 42, source, observed_at }`.
+  - `toFieldValue({ state: 'stale', value: 42, source, observed_at, age_days: 21 })` → `{ state: 'stale', value: 42, source, observed_at, age_days: 21 }`.
+  - `toFieldValue({ state: 'failed', reason: 'never_fetched', observed_at })` → `{ state: 'never_fetched' }`.
+  - `toFieldValue({ state: 'manual', value: 42, observed_at })` → `{ state: 'fresh', value: 42, source: 'manual', observed_at }`.
+- [ ] **Step 2: Run.** PASS. `npm run --workspace=packages/schema coverage` should now show `resortView.ts` at 100% lines/branches/functions/statements.
 
 ### Task 5 — Seed fixture parity test
 
@@ -333,7 +366,7 @@ This pins the fixture-shape contract and proves both will work for downstream PR
 - [ ] **Step 3: Commit.**
 
 ```bash
-git add tests/fixtures/admin-workspace/ packages/schema/src/resortView.{ts,test.ts}
+git add tests/fixtures/admin-workspace/ packages/schema/src/resortView.{ts,test.ts} packages/schema/vite.config.ts
 git commit -s -m "feat(schema): add projectFieldStates + seed admin-workspace fixtures (PR 4.4a-1)"
 ```
 
@@ -852,26 +885,29 @@ if (code !== undefined) {
 
 **Files:** New `apps/admin/src/state/useWorkspaceState.test.ts`.
 
-- [ ] **Step 1: Write tests** for **E1+**:
+- [ ] **Step 1: Write tests** for **E1+** (the module-scoped per-slug singleton store from the updated decisions log):
   - **Debounce 500ms** with vitest fake timers: 5 rapid `setFieldValue('slopes_km', n)` within 500ms → 1 PUT carrying final `n`.
+  - **Shared store across `useWorkspaceState()` consumers** per Codex round-2 P1-1 fold: render a test component that calls `useWorkspaceState()` TWICE (mimicking two FieldRows in the same editor); use one consumer to `setFieldValue('slopes_km', 5)` and the OTHER consumer to `setFieldValue('lift_count', 7)` within the same debounce window → only ONE PUT fires (call count = 1) carrying BOTH `slopes_km: 5` and `lift_count: 7`. Without the singleton, two independent debouncers fire two PUTs and the second clobbers the first. The test asserts singleton-per-slug semantics directly.
+  - **Per-slug isolation**: render `useWorkspaceState()` for slug `kotelnica-bialczanska`, `setFieldValue('slopes_km', 5)`. Then unmount, change URL to `slug=spindleruv-mlyn`, re-mount. Assert the new mount sees a FRESH draft (not the prior slug's `slopes_km: 5`). Mirrors `useResortDetail`'s per-slug cache pattern.
   - **In-flight token (concurrent-PUT guard)**: while a PUT is in-flight, a second debounce flush is QUEUED, not fired. Use `vi.spyOn(apiClient, 'upsertResort')` and assert call count is 1 until the in-flight PUT resolves; then 2.
-  - **Draft-revision counter (keystroke-clobber guard)** per Codex round-1 P2-2 fold: PUT for `slopes_km: 50` is in-flight → `setFieldValue('slopes_km', 500)` BEFORE response → response (canonical `50`) arrives → assert: (a) the draft state IS STILL `500` (NOT replaced with canonical `50`); (b) the FieldRow indicator for `slopes_km` is STILL `dirty` (NOT marked `saved`); (c) the next debounce flush fires a fresh PUT with `500`. Without the revision counter, `inFlightTokenRef.current === token` would be `true`, the canonical `50` would clobber the user's `500`, and the indicator would falsely show `saved`.
-  - **No concurrent PUTs**: while one PUT in flight, second debounce queues; only fires after first resolves. (Subsumed by the concurrent-PUT guard test above; kept as a separate assertion for clarity.)
-  - **4-state indicator**: setFieldValue → `dirty`; flush → `saving`; success → `saved` (only when revision unchanged); failure → `save-failed`.
+  - **Draft-revision counter (keystroke-clobber guard)** per Codex round-1 P2-2 fold: PUT for `slopes_km: 50` is in-flight → `setFieldValue('slopes_km', 500)` BEFORE response → response (canonical `50`) arrives → assert: (a) draft state IS STILL `500`; (b) FieldRow indicator for `slopes_km` STILL `dirty` (NOT `saved`); (c) next debounce flush fires a fresh PUT with `500`. Without the revision counter, the in-flight token check alone would falsely mark `saved`.
+  - **4-state indicator**: setFieldValue → `dirty`; flush → `saving`; success (rev unchanged) → `saved`; failure (rev unchanged) → `save-failed`. If rev moves during flush → indicator stays `dirty`.
   - **Save-failed retry-by-edit**: PUT rejects → indicator `save-failed` → next `setFieldValue` triggers fresh debounced flush → success → `saved`.
-  - **Cache isolation (observable spy)** per fold §5: assert `apiClient.getResort` is NOT called during `useWorkspaceState` flush — i.e., `useWorkspaceState` does not invalidate `useResortDetail`'s cache. Use `vi.spyOn(apiClient, 'getResort')`.
+  - **Cache isolation (observable spy)** per pre-Codex fold §5: assert `apiClient.getResort` is NOT called during `useWorkspaceState` flush. Use `vi.spyOn(apiClient, 'getResort')`.
+  - **`__resetForTests()` clears `storesBySlug`**: setFieldValue → reset → next mount sees fresh draft.
 - [ ] **Step 2:** Run. FAIL.
 
 ### Task 3 — Implement `useWorkspaceState`
 
 **Files:** New `apps/admin/src/state/useWorkspaceState.ts`.
 
-- [ ] **Step 1:** Implement the in-flight token + draft-revision counter + concurrent-PUT queue (per **E1+** + Codex round-1 P2-2 fold). Pseudo-shape:
+- [ ] **Step 1:** Implement the module-scoped per-slug singleton store with `useSyncExternalStore` subscription (per **E1+** + Codex round-2 P1-1 fold + Codex round-1 P2-2 fold). Pseudo-shape:
 
 ```ts
-import { useEffect, useRef, useState } from 'react'
+import { useCallback } from 'react'
+import { useSyncExternalStore } from 'react'
 
-import type { MetricPath } from '@snowboard-trip-advisor/schema'
+import type { MetricPath, ResortSlug } from '@snowboard-trip-advisor/schema'
 import type { ResortUpsertBody } from '@snowboard-trip-advisor/schema/api'
 
 import { apiClient } from '../lib/apiClient'
@@ -885,107 +921,167 @@ type DraftShape = {
   editor_modes: Partial<Record<MetricPath, 'manual' | 'auto'>>
 }
 
+interface StoreState {
+  readonly draft: DraftShape
+  readonly status: Record<MetricPath, Status>
+  readonly rev: number
+}
+
+interface SlugStore {
+  state: StoreState
+  inFlightToken: symbol | null
+  queued: boolean
+  timer: ReturnType<typeof setTimeout> | null
+  subscribers: Set<() => void>
+}
+
+// Module-scoped per-slug singleton store. Every useWorkspaceState() consumer
+// for the same slug subscribes to the SAME SlugStore — so two FieldRows in
+// the same editor share one draft, one in-flight token, one queue.
+// Codex round-2 P1-1 fold: the v2 useState/useRef-per-hook design created
+// 12 independent stores (one per FieldRow), reintroducing the concurrent-PUT
+// race that E1+ is supposed to prevent.
+const storesBySlug = new Map<ResortSlug, SlugStore>()
+
+function emptyState(): StoreState {
+  return { draft: { field_values: {}, editor_modes: {} }, status: {} as Record<MetricPath, Status>, rev: 0 }
+}
+
+function getOrCreateStore(slug: ResortSlug): SlugStore {
+  let store = storesBySlug.get(slug)
+  if (store === undefined) {
+    store = { state: emptyState(), inFlightToken: null, queued: false, timer: null, subscribers: new Set() }
+    storesBySlug.set(slug, store)
+  }
+  return store
+}
+
+function emit(store: SlugStore): void {
+  for (const cb of store.subscribers) { cb() }
+}
+
+function patchState(store: SlugStore, fn: (s: StoreState) => StoreState): void {
+  store.state = fn(store.state)
+  emit(store)
+}
+
+function setStatusForDirty(store: SlugStore, target: Status): void {
+  patchState(store, (s) => {
+    const next = { ...s.status }
+    for (const [path, status] of Object.entries(s.status)) {
+      if (status === 'dirty' || status === 'saving') {
+        next[path as MetricPath] = target
+      }
+    }
+    return { ...s, status: next }
+  })
+}
+
+function scheduleFlush(slug: ResortSlug): void {
+  const store = getOrCreateStore(slug)
+  if (store.timer !== null) { clearTimeout(store.timer) }
+  store.timer = setTimeout((): void => { void flush(slug) }, DEBOUNCE_MS)
+}
+
+async function flush(slug: ResortSlug): Promise<void> {
+  const store = getOrCreateStore(slug)
+  if (store.inFlightToken !== null) {
+    store.queued = true
+    return
+  }
+  const token = Symbol('flush')
+  const inFlightRev = store.state.rev
+  const inFlightDraft = store.state.draft
+  store.inFlightToken = token
+  setStatusForDirty(store, 'saving')
+  try {
+    const body = buildBodyFromDraft(inFlightDraft)
+    await apiClient.upsertResort(slug, body)
+    // Mark saved only if BOTH the token is still ours (no race) AND the rev
+    // did NOT advance during the round-trip (Codex round-1 P2-2 fold).
+    if (store.inFlightToken === token && store.state.rev === inFlightRev) {
+      setStatusForDirty(store, 'saved')
+    }
+  } catch {
+    if (store.inFlightToken === token && store.state.rev === inFlightRev) {
+      setStatusForDirty(store, 'save-failed')
+    }
+  } finally {
+    store.inFlightToken = null
+    if (store.queued || store.state.rev !== inFlightRev) {
+      store.queued = false
+      scheduleFlush(slug)
+    }
+  }
+}
+
+function buildBodyFromDraft(draft: DraftShape): ResortUpsertBody {
+  // Filled in per spec §4.3 — wraps non-empty parts of draft into the
+  // ResortUpsertBody shape. Body must contain at least one of
+  // resort/live_signal/editor_modes (server rejects empty body as
+  // invalid-request).
+  // ... executor implements
+  return {} as ResortUpsertBody
+}
+
+export function setFieldValue(slug: ResortSlug, path: MetricPath, value: unknown): void {
+  const store = getOrCreateStore(slug)
+  patchState(store, (s) => ({
+    rev: s.rev + 1,
+    draft: { ...s.draft, field_values: { ...s.draft.field_values, [path]: value } },
+    status: { ...s.status, [path]: 'dirty' },
+  }))
+  scheduleFlush(slug)
+}
+
+export function setMode(slug: ResortSlug, path: MetricPath, mode: 'manual' | 'auto'): void {
+  const store = getOrCreateStore(slug)
+  patchState(store, (s) => ({
+    rev: s.rev + 1,
+    draft: { ...s.draft, editor_modes: { ...s.draft.editor_modes, [path]: mode } },
+    status: { ...s.status, [path]: 'dirty' },
+  }))
+  scheduleFlush(slug)
+}
+
 export function useWorkspaceState() {
   const route = useURLState()
   if (route.route !== 'editor') {
     throw new Error('useWorkspaceState called outside the editor route')
   }
   const slug = route.slug
+  const store = getOrCreateStore(slug)
 
-  const [draft, setDraft] = useState<DraftShape>({ field_values: {}, editor_modes: {} })
-  const [status, setStatus] = useState<Record<MetricPath, Status>>({} as Record<MetricPath, Status>)
+  const subscribe = useCallback((cb: () => void): (() => void) => {
+    store.subscribers.add(cb)
+    return (): void => { store.subscribers.delete(cb) }
+  }, [store])
 
-  // The draft-revision counter — incremented on every setDraft. The flush
-  // captures revRef.current at PUT-fire time as `inFlightRev`; on response
-  // we only adopt canonical state / mark `saved` when revRef.current is
-  // STILL inFlightRev (i.e., the user did NOT edit during the round-trip).
-  // Without this guard, the in-flight token alone (which stays the same
-  // throughout the round-trip) would falsely mark a newer dirty draft as
-  // saved — Codex round-1 P2-2 fold.
-  const revRef = useRef<number>(0)
-  const draftRef = useRef<DraftShape>(draft)  // mirrors current draft for closure access in flush()
+  const getSnapshot = useCallback((): StoreState => store.state, [store])
 
-  const inFlightTokenRef = useRef<symbol | null>(null)
-  const queuedRef = useRef<boolean>(false)
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const state = useSyncExternalStore(subscribe, getSnapshot)
 
-  // Keep draftRef in sync with the draft state value so flush() can compare
-  // post-await without depending on a closed-over `draft` (which would be
-  // stale).
-  useEffect((): void => { draftRef.current = draft }, [draft])
-
-  function scheduleFlush(): void {
-    if (timerRef.current !== null) { clearTimeout(timerRef.current) }
-    timerRef.current = setTimeout((): void => { void flush() }, DEBOUNCE_MS)
+  return {
+    draft: state.draft,
+    status: state.status,
+    setFieldValue: (path: MetricPath, value: unknown): void => setFieldValue(slug, path, value),
+    setMode: (path: MetricPath, mode: 'manual' | 'auto'): void => setMode(slug, path, mode),
   }
+}
 
-  async function flush(): Promise<void> {
-    if (inFlightTokenRef.current !== null) {
-      queuedRef.current = true
-      return
-    }
-    const token = Symbol('flush')
-    const inFlightRev = revRef.current
-    const inFlightDraft = draftRef.current  // snapshot what we're about to send
-    inFlightTokenRef.current = token
-    setStatusForDirty('saving')
-    try {
-      const body = buildBodyFromDraft(inFlightDraft)
-      await apiClient.upsertResort(slug, body)
-      // Only mark `saved` (and adopt canonical state, if wired) when:
-      //   1. This token still owns the in-flight slot (no race)
-      //   2. The draft revision did NOT advance during the round-trip
-      // Otherwise: the user edited mid-flight — keep `dirty` so the next
-      // debounce flush picks up the newer draft.
-      if (inFlightTokenRef.current === token && revRef.current === inFlightRev) {
-        setStatusForDirty('saved')
-      }
-    } catch {
-      // Same race-safety as success branch: only mark `save-failed` when
-      // the token is still ours. (If the rev moved, the failure is for a
-      // stale snapshot — the next flush will re-attempt with the new draft.)
-      if (inFlightTokenRef.current === token && revRef.current === inFlightRev) {
-        setStatusForDirty('save-failed')
-      }
-    } finally {
-      inFlightTokenRef.current = null
-      if (queuedRef.current || revRef.current !== inFlightRev) {
-        queuedRef.current = false
-        scheduleFlush()
-      }
-    }
+export function __resetForTests(): void {
+  for (const store of storesBySlug.values()) {
+    if (store.timer !== null) { clearTimeout(store.timer) }
   }
-
-  function setFieldValue(path: MetricPath, value: unknown): void {
-    revRef.current += 1
-    setDraft((d): DraftShape => ({ ...d, field_values: { ...d.field_values, [path]: value } }))
-    setStatus((s): Record<MetricPath, Status> => ({ ...s, [path]: 'dirty' }))
-    scheduleFlush()
-  }
-
-  function setMode(path: MetricPath, mode: 'manual' | 'auto'): void {
-    revRef.current += 1
-    setDraft((d): DraftShape => ({ ...d, editor_modes: { ...d.editor_modes, [path]: mode } }))
-    setStatus((s): Record<MetricPath, Status> => ({ ...s, [path]: 'dirty' }))
-    scheduleFlush()
-  }
-
-  return { draft, status, setFieldValue, setMode }
+  storesBySlug.clear()
 }
 ```
 
-`buildBodyFromDraft` and `setStatusForDirty` are filled in by the executor at coding time; the test surface (Task 2) is the correctness contract.
+**Note:** the consumer-facing `setFieldValue` / `setMode` returned from `useWorkspaceState()` are slug-bound closures over the module-level functions. The module-level functions are also exported for direct programmatic use (e.g., from `useModeToggle` if it ever needs to short-circuit the React-rendered path) — but in practice all writes go through the hook's returned methods. `__resetForTests` clears all per-slug stores AND any pending debounce timers.
 
-// helpers — bodies omitted for brevity:
-function buildBodyFromDraft(draft: DraftShape): ResortUpsertBody { /* ... */ return {} as ResortUpsertBody }
-function setStatusForDirty(_target: Status): void { /* updates status for paths currently dirty */ }
+`buildBodyFromDraft` is filled in by the executor at coding time per spec §4.3's merge semantics.
 
-export function __resetForTests(): void { /* clear internal refs if module-scoped */ }
-```
-
-(The executor fills in `buildBodyFromDraft` per the merge semantics in spec §4.3 and `setStatusForDirty` per the indicator state machine.)
-
-- [ ] **Step 2:** Run. PASS.
+- [ ] **Step 2:** Run. PASS on all branches including the singleton-shared-store test.
 
 ### Task 4 — Implement `useModeToggle`
 
@@ -1245,5 +1341,13 @@ Two P2 findings on the v2 plan; both real correctness issues; both folded:
 
 - **P2-1 — F1 scope wrong (live paths in MANUAL would 400 as `invalid-resort`).** v2 declared MANUAL editing for "10 numeric metric paths" but the `WorkspaceFile` cross-key invariant (spec §10.2) restricts `editor_modes` keys to `Object.keys(resort.field_sources)` — durable paths only (7). MANUAL on a live path (`snow_depth_cm`, `lifts_open.{count,total}`, `lift_pass_day`, `lodging_sample.median_eur`) would PUT-reject. **Fold:** F1 reduced to **7 durable numeric paths**. The 5 live paths render explanatory copy. `useModeToggle` now derives `validPaths` INTERNALLY from `useResortDetail(slug).resort.field_sources` (was: passed as arg). PR 4.4d Task 1 adds a live-path silent-no-op test (`toggleMode('snow_depth_cm')`) to pin the durable-only constraint at the test layer.
 - **P2-2 — E1+ keystroke-clobber race.** v2's in-flight token check (`inFlightTokenRef.current === token`) doesn't catch the case where the user edits during the round-trip — the token stays the same throughout, so a newer dirty draft gets clobbered (or marked saved) when the response arrives. **Fold:** added a draft-revision counter (`revRef`) incremented on every `setDraft`. Flush snapshots `revRef.current` as `inFlightRev`; on response, only mark `saved` when BOTH `inFlightTokenRef.current === token` AND `revRef.current === inFlightRev`. PR 4.4d Task 2 adds an explicit "user edits during round-trip" test case that fails without the counter.
+
+### Codex round 2 (PR #90 review by `chatgpt-codex-connector`, 2026-05-08)
+
+Three findings on the v3 plan (one P1, two P2); all real correctness issues; all folded:
+
+- **P1-1 — `useWorkspaceState` per-row state breaks E1+'s singleton guarantee.** v3 used `useState`/`useRef` inside the hook; each `useWorkspaceState()` call site (one per FieldRow × 12 rows) created an INDEPENDENT state instance. The whole concurrent-PUT race that E1+ closes reappears across rows: editing two fields in the same editor would fire two concurrent PUTs. **Fold:** rewrote the impl as a **module-scoped per-slug singleton store** with `useSyncExternalStore` subscription. `storesBySlug: Map<ResortSlug, SlugStore>`; all consumers in the same editor subscribe to the SAME store, sharing `draft`, `inFlightToken`, `queued`, `rev`. Mirrors `useResortDetail`'s per-slug cache pattern. PR 4.4d Task 2 adds two new tests: "shared store across consumers" (two `useWorkspaceState()` calls + one PUT carrying both edits) and "per-slug isolation" (slug switch produces fresh draft). Decisions log E1+ + Reviewer-fold log carry the rationale.
+- **P2-3 — `projectFieldStates` applies live-data TTL to durable paths.** v3 applied the `ageDays > FRESHNESS_TTL_DAYS.{default,max_stale}` checks to ALL `METRIC_FIELDS`, including durable resort attributes. Canonical semantics in `loadResortDatasetFromObject.ts:83-99` + existing `health.ts` / `listResorts.ts` staleness gating treat durable fields as `fresh` unconditionally — only populated live paths can become stale/never_fetched by clock age. v3 would render an old `slopes_km.observed_at` as stale/failed in the editor while the dashboard projection still reports it fresh. **Fold:** added `DURABLE_PATHS` constant and `if (DURABLE_PATHS.has(path)) return { state: 'live', ... }` guard in `projectOne`. Decisions log A1.6 captures the rationale. PR 4.4a-1 Task 4 adds a regression-pinning test ("durable path with old `observed_at` is still `live`").
+- **P2-4 — `resortView.ts` excluded from coverage.** `packages/schema/vite.config.ts` excludes `'src/resortView.ts'` with a v1 "types-only" rationale (correct then; ships only the type + `toFieldValue`). v3 added executable `projectFieldStates` to the same file but did NOT update the exclusion — coverage would silently skip the new code, untested branches passing the 100% gate. **Fold:** PR 4.4a-1 file list adds `packages/schema/vite.config.ts` MODIFY (5 files total) to remove the exclusion. PR 4.4a-1 Task 4.5 adds tests covering the existing `toFieldValue` (4 states) so removing the exclusion doesn't surface a coverage gap.
 
 **End of plan.**
