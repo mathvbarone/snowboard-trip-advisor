@@ -506,13 +506,27 @@ export function prepopulateResortDetail(slug: ResortSlug, response: ResortDetail
 export function __resetForTests(): void { cached.clear() }
 ```
 
-`useResortDetail.hmr.ts`:
+`useResortDetail.hmr.ts` (mirrors `apps/public/src/state/useDataset.hmr.ts:14-25` — string-literal accept target avoids the cycle that would form if we imported `__resetForTests` back from `./useResortDetail`):
 
 ```ts
-import { __resetForTests } from './useResortDetail'
+// HMR-only safety net: in dev, when `useResortDetail.ts` hot-reloads, accept
+// the update so Vite cleanly swaps the module. The new module body
+// re-initializes its own `cached` (a fresh empty Map) — no callback work
+// needed. Excluded from coverage in apps/admin/vite.config.ts because
+// import.meta.hot is undefined under vitest (the entire module body is
+// dead code in the test environment).
+//
+// Per Codex round-8 P2-12 fold: importing `__resetForTests` from
+// `./useResortDetail` would form a cycle (useResortDetail.ts side-effect-
+// imports this file). The accept target is expressed as a string literal
+// instead — Vite accepts the dependency by name without us having to import
+// it back into the module under reload. Mirrors the existing public
+// `useDataset.hmr.ts` pattern.
 
-if (import.meta.hot !== undefined) {
-  import.meta.hot.dispose((): void => { __resetForTests() })
+if (import.meta.hot) {
+  import.meta.hot.accept('./useResortDetail', (): void => {
+    /* no-op — module replacement re-initializes cached to a fresh Map naturally */
+  })
 }
 ```
 
@@ -545,7 +559,7 @@ if (import.meta.hot !== undefined) {
   - `slopes_km: 142` → `"142 km"`.
   - `lift_count: 24` → `"24"`.
   - `season.start_month: 12` → `"December"`; `season.start_month: 0` → `"—"`.
-  - `lift_pass_day: { amount: 4250, currency: 'PLN' }` → `Intl.NumberFormat(undefined, { style: 'currency', currency: 'PLN' }).format(4250)` (locale-dependent string; assert via the same construction).
+  - `lift_pass_day: { amount: 4250, currency: 'EUR' }` → `Intl.NumberFormat(undefined, { style: 'currency', currency: 'EUR' }).format(4250)` (locale-dependent string; assert via the same construction). Per Codex round-8 P2-11 fold: `Money.currency` is `z.literal('EUR')` (`packages/schema/src/primitives.ts:5-8`) — non-EUR upstream prices live on `field_sources.<path>.fx.native_currency` per ADR-0003, NOT on `Money.currency`. Testing the formatter with `currency: 'PLN'` would either be unreachable (the schema rejects it before the formatter sees it) OR force fixtures that fail `ResortDetailResponse.parse()`.
   - `lifts_open: { count: 12, total: 24 }` → `"12 / 24"`; missing `total` → `"12 / —"`.
   - `snow_depth_cm: 145` → `"145 cm"`.
 - [ ] **Step 2:** Run. FAIL.
@@ -1637,5 +1651,12 @@ Three findings on the v8 plan (one P1, two P2); all real correctness issues; all
 - **P1-1 — Successful PUTs don't clear the draft, so later edits re-send stale manual provenance.** v8's success branch only marked statuses `saved` — it left `draft.resort` / `draft.live_signal` / `draft.resort.field_sources` populated with the just-saved fields. A later edit to a different field would build a PUT body that includes the prior edit AND its now-stale manual `FieldSource`. Under server's last-writer-wins merge, this risks clobbering any concurrent server-side adapter update to the prior field. **Fold:** decisions log **D13** added: on PUT success (rev unchanged), the impl resets `draft` to `{ editor_modes: {} }` AND calls `prepopulateResortDetail(slug, response)` to replace the canonical cache with the post-PUT state. The prepopulate avoids a Suspense flicker — FieldRow's value display reads from canonical (which now matches what was saved), so the user doesn't see their just-edited value disappear. PR 4.4a-2 Task 5 + 6 add the new export + test for `prepopulateResortDetail`. PR 4.4d Task 2 adds a "save → later edit clears prior draft" test that fails without the reset.
 - **P2-9 — Hardcoded 768px doesn't match the design-system `md` token (900px).** v8's `MD_QUERY = '(min-width: 768px)'` would leave 768–899px tablet widths interactive — violates AGENTS.md "Admin UI is read-only below the `md` breakpoint" because the project breakpoint is `tokens.breakpoint.md === 900` (`packages/design-system/src/tokens.ts:21`). **Fold:** decisions log **D11** updated: `MD_QUERY` now imports `tokens` from `@snowboard-trip-advisor/design-system` and constructs the query as `\`(min-width: ${tokens.breakpoint.md}px)\``. Test viewport stubs aligned to the same value.
 - **P2-10 — Test required `field_sources` siblings copied from canonical, contradicting the round-6 sparse-PUT fold.** v8's PR 4.4d Task 2 test list still carried "field_sources siblings preserved" from a prior revision — but the round-6 P1-1 fold dropped canonical hydration in `patchFieldSource`. Implementers following the test would re-introduce the stale-provenance race; following the impl would break the test. **Fold:** test assertion replaced with "**`field_sources` is sparse** — `Object.keys(draft.resort.field_sources)` is exactly `['<edited-path>']` (no canonical siblings)". Aligns with the round-6 sparse PUT design; server's deep-merge preserves other entries.
+
+### Codex round 8 (PR #90 review by `chatgpt-codex-connector`, 2026-05-08)
+
+Two P2 findings on the v9 plan; both real correctness issues; both folded:
+
+- **P2-11 — Formatter test asserted `lift_pass_day: { currency: 'PLN' }`.** v9's PR 4.4b Task 1 formatter-test list specified `lift_pass_day: { amount: 4250, currency: 'PLN' }` → `Intl.NumberFormat ... currency: 'PLN'`. But `Money.currency` is `z.literal('EUR')` (`packages/schema/src/primitives.ts:5-8`); non-EUR upstream prices are encoded via `field_sources.<path>.fx.native_currency` per ADR-0003, NOT via `Money.currency`. Following the test would either be unreachable (schema rejects PLN before the formatter sees it) or force fixtures that fail `ResortDetailResponse.parse()`. Same root cause as round-3 P2-5 (which fixed the seed fixtures); this fold catches the parallel slip in formatter tests. **Fold:** test list updated to `currency: 'EUR'` for both formatter assertions; non-EUR currencies remain a Phase-2 concern when the FX provenance gets a UI surface.
+- **P2-12 — `useResortDetail.hmr.ts` imports `__resetForTests` back from `./useResortDetail`, forming a cycle.** `useResortDetail.ts` does `import './useResortDetail.hmr'` (side-effect import). The HMR file's `import { __resetForTests } from './useResortDetail'` closes the loop. Vite's HMR module-replacement step would re-evaluate both modules through the cycle on every reload — the canonical reset semantics aren't guaranteed. The existing `apps/public/src/state/useDataset.hmr.ts:14-25` explicitly avoids this by using `import.meta.hot.accept('./useDataset', () => {})` — a string-literal accept target with a no-op callback, relying on the new module body to naturally re-initialize its own `cached`. **Fold:** rewrote `useResortDetail.hmr.ts` to mirror the public pattern: `import.meta.hot.accept('./useResortDetail', () => { /* no-op */ })`. No `__resetForTests` import; no cycle. The new module body's `const cached = new Map<...>()` re-initializes naturally. Documentation block in the file references the public pattern + the cycle-avoidance reason.
 
 **End of plan.**
