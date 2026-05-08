@@ -1373,11 +1373,13 @@ export function useModeToggle() {
 
 **Files:** New `apps/admin/src/views/ResortEditor/ModeToggle.tsx`. **No separate test file** per **D11** (file-budget). ModeToggle behavior is covered through FieldRow.test.tsx mods (Task 6) and the integration test (Task 7).
 
-- [ ] **Step 1: Implement.**
+- [ ] **Step 1: Implement.** Per Codex round-15 P2-19 fold: use the design-system `Button` (`variant="ghost"`) — raw `<button>` JSX is banned by `eslint.config.js` `no-restricted-syntax` for `apps/admin/src/**` (selector `JSXOpeningElement[name.name=/^(button|input|a|dialog|select|textarea)$/]` per `eslint.config.js:19,255`). The DS `Button` already exposes `aria-pressed` for toggle-style usage (`packages/design-system/src/components/Button.tsx:15-19,34`); semantics are "toggle button" rather than "switch" but functionally equivalent for the editor surface.
 
 ```tsx
 import type { JSX } from 'react'
 import type { MetricPath } from '@snowboard-trip-advisor/schema'
+
+import { Button } from '@snowboard-trip-advisor/design-system'
 
 import { labelForPath } from './FieldRow'  // re-export from FieldRow's co-location
 
@@ -1389,15 +1391,14 @@ interface ModeToggleProps {
 
 export function ModeToggle({ path, mode, onToggle }: ModeToggleProps): JSX.Element {
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={mode === 'manual'}
+    <Button
+      variant="ghost"
       aria-label={`Mode for ${labelForPath(path)}`}
+      aria-pressed={mode === 'manual'}
       onClick={onToggle}
     >
       {mode === 'manual' ? 'MANUAL' : 'AUTO'}
-    </button>
+    </Button>
   )
 }
 ```
@@ -1423,9 +1424,9 @@ afterEach(() => { vi.unstubAllGlobals() })
 ```
 
 - [ ] **Step 2: Add failing tests** to `FieldRow.test.tsx`. Three new branches (each test calls `stubMatchMedia(true)` or `stubMatchMedia(false)` per its viewport intent):
-  - **Above md** (`stubMatchMedia(true)`): MANUAL on `slopes_km` renders `<input type="number">` AND a `<ModeToggle>` button (`role="switch"`, NO `aria-disabled`). Clicking the button calls toggleMode. Typing in the input calls setFieldValue.
+  - **Above md** (`stubMatchMedia(true)`): MANUAL on `slopes_km` renders the DS `<Input type="text">` (per Codex round-15 P2-20: raw `<input>` JSX is banned in apps/admin) AND a `<ModeToggle>` (DS `<Button variant="ghost" aria-pressed>` per Codex round-15 P2-19: raw `<button>` JSX is banned). Use `getByRole('textbox', { name: labelForPath('slopes_km') })` and `getByRole('button', { name: /Mode for/ })` for the queries. Clicking the button calls toggleMode. Typing in the textbox calls setFieldValue (when the parsed value is valid).
   - **Above md, money/live path**: MANUAL on `lift_pass_day` renders the explanatory `<span>` (NOT an input).
-  - **Below md** (`stubMatchMedia(false)`): MANUAL on `slopes_km` renders NEITHER the input NOR the interactive `<button>` ModeToggle — instead, the v4.4b inline render-only `<span role="switch" aria-disabled="true">` ModeToggle is shown. The input element is absent from the DOM. (Per **D11** + AGENTS.md "Admin App Rules".)
+  - **Below md** (`stubMatchMedia(false)`): MANUAL on `slopes_km` renders NEITHER the DS Input NOR the interactive DS Button ModeToggle — instead, the v4.4b inline render-only `<span role="switch" aria-disabled="true">` ModeToggle is shown. The Input is absent from the DOM (assert via `queryByRole('textbox')` returning null). (Per **D11** + AGENTS.md "Admin App Rules".)
   - **Tab order assertion**: above md, the ModeToggle button has the default tab order (no `tabindex`). Below md, the render-only span has no `tabindex` (spans are not focusable by default), so the editor element is absent from the tab order.
   - **Empty/transient input does NOT persist** per Codex round-11 P2-15 fold: above-md MANUAL on `slopes_km` with persisted value 150. Simulate user clearing the input (`fireEvent.change(input, { target: { value: '' } })`); fast-forward debounce; assert (a) `apiClient.upsertResort` was NOT called (empty string is transient), (b) the input element STILL displays the empty string (local state updated), (c) `draft.resort.slopes_km` STILL holds 150 (persisted state untouched). Then simulate typing `'7'`; fast-forward; assert PUT fires with `slopes_km: 7`. Without this guard, `Number('')` would coerce to 0 and PUT would persist 0 with manual provenance — workspace data corruption.
   - **Invalid intermediate input does NOT persist** per same fold: simulate `value: '-'` (negative-sign-in-progress), `'1e'` (scientific notation in progress), `'.'` (decimal-only) — `Number(...)` is NaN for each → no PUT fires; local string updates so the user sees what they typed.
@@ -1434,7 +1435,9 @@ afterEach(() => { vi.unstubAllGlobals() })
 - [ ] **Step 6: Implement.** Replace the FieldRow body:
 
 ```tsx
-import { useRef, useState, useSyncExternalStore, type ChangeEvent } from 'react'
+import { useRef, useState, useSyncExternalStore } from 'react'
+
+import { Input, tokens } from '@snowboard-trip-advisor/design-system'
 
 // 7 durable paths that can be MANUAL-edited via numeric inputs (per F1 fold).
 const MANUAL_EDITABLE_PATHS: ReadonlySet<MetricPath> = new Set([
@@ -1446,8 +1449,8 @@ const MANUAL_EDITABLE_PATHS: ReadonlySet<MetricPath> = new Set([
 // NOT 768. Drive the query from the design-system token so the hook stays
 // aligned if the token is ever updated. `tokens` re-exports the breakpoint
 // object as `Object.freeze({ xs: 360, sm: 600, md: 900, lg: 1280 })` per
-// `packages/design-system/src/tokens.ts:21`.
-import { tokens } from '@snowboard-trip-advisor/design-system'
+// `packages/design-system/src/tokens.ts:21`. (The `tokens` import already
+// happens at the top of this file alongside `Input`.)
 const MD_QUERY = `(min-width: ${tokens.breakpoint.md}px)`  // = '(min-width: 900px)'
 
 // Subscribes to viewport changes. matchMedia is reactive — `addEventListener('change', cb)` fires
@@ -1509,31 +1512,38 @@ function FieldRow({ path, state }: FieldRowProps): JSX.Element {
       </span>
     )
 
-  // Per Codex round-11 P2-15 fold: empty / NaN strings are local-only
-  // transient state — do NOT call setFieldValue (which would persist 0
-  // or NaN with manual provenance under the 500ms debounce). The local
-  // string still updates so the input element reflects what the user
-  // typed; only valid numbers propagate to the persisted draft.
-  const onInputChange = (e: ChangeEvent<HTMLInputElement>): void => {
-    const raw = e.target.value
+  // Per Codex round-11 P2-15 + round-15 P2-20 folds: empty / NaN / out-of-
+  // range strings are local-only transient state — do NOT call setFieldValue
+  // (which would persist 0 / NaN / invalid month with manual provenance under
+  // the 500ms debounce). The local string still updates so the Input element
+  // reflects what the user typed; only valid + in-range numbers propagate to
+  // the persisted draft. The DS Input is `type="text"` (Phase 1 — DS doesn't
+  // ship `type="number"`); JS-side validation enforces both numeric-ness AND
+  // the 1–12 range for month paths (which type="number" min/max would have
+  // covered natively if available).
+  const onLocalChange = (raw: string): void => {
     setLocalString(raw)
     if (raw === '') { return /* transient — wait for valid number */ }
     const parsed = Number(raw)
     if (Number.isNaN(parsed)) { return /* transient invalid intermediate (e.g., '-', '.', '1e') */ }
+    if (isMonth && (parsed < 1 || parsed > 12 || !Number.isInteger(parsed))) {
+      return /* out-of-range or non-integer month — local-only until valid */
+    }
     setFieldValue(path, parsed)
   }
 
-  // Input: above md AND MANUAL AND a durable numeric path → render <input>;
+  // Input: above md AND MANUAL AND a durable numeric path → DS <Input type="text">
+  // (per Codex round-15 P2-20: raw <input> JSX banned in apps/admin/src/**);
   // above md AND MANUAL AND non-durable → render explanatory copy;
   // below md → absent from DOM (per **D11**).
   const inputElement = (!isAboveMd || !isManual) ? null
     : MANUAL_EDITABLE_PATHS.has(path)
       ? (
-        <input
-          type="number"
+        <Input
+          label={labelForPath(path)}
+          type="text"
           value={localString}
-          onChange={onInputChange}
-          {...(isMonth ? { min: 1, max: 12 } : {})}
+          onChange={onLocalChange}
         />
       )
       : <span>MANUAL editing for {path} lands in PR 4.6a.</span>
@@ -1780,5 +1790,12 @@ One P2 finding on the v14 plan; folded:
 One P2 finding on the v15 plan; folded:
 
 - **P2-18 — `projectFieldStates` merged-map approach masks missing live provenance.** v15 did `combined = { ...resort.field_sources, ...liveSources }` then looked up `combined[path]` for every path. But `Resort.field_sources` accepts arbitrary string keys (the cross-key invariant is on `editor_modes`, not on `resort.field_sources` itself). If a hand-edited workspace file had `resort.field_sources.snow_depth_cm: <some entry>` (durable-style provenance for a live path) AND `live_signal.field_sources.snow_depth_cm` was missing, v15's projection would pick up the durable-side entry as a fallback and project the live path as `live`/`stale` — masking the missing live provenance instead of surfacing it as `failed (no field_sources entry)`. **Fold:** select the source map per path's durable-vs-live class — durable paths read ONLY from `resort.field_sources`; live paths read ONLY from `live_signal?.field_sources`. NO merge. PR 4.4a-1 Task 4 test case "live wins over resort.field_sources" replaced with "Per-path source selection: live paths read only from live_signal.field_sources" — fixture has a durable-style entry at `resort.field_sources.snow_depth_cm` AND missing `live_signal.field_sources.snow_depth_cm`; assertion: `field_states.snow_depth_cm.state === 'failed'` (not `'live'`).
+
+### Codex round 15 (PR #90 review by `chatgpt-codex-connector`, 2026-05-08)
+
+Two related P2 findings on the v16 plan; both real correctness issues blocking the lint quality gate; both folded:
+
+- **P2-19 — Raw `<button>` JSX banned in apps/admin/src/**.** v16's `ModeToggle.tsx` impl used a raw `<button type="button" role="switch">`. But `eslint.config.js:19` defines `RAW_HTML_ELS = '^(button|input|a|dialog|select|textarea)$'` and the apps/** lint block at line 255 rejects any `JSXOpeningElement` matching that regex — `npm run lint` would block the PR before tests even run. AGENTS.md "UI Code Rules" says "No raw HTML element imports where a design-system component exists". **Fold:** `ModeToggle.tsx` now uses the DS `Button` component with `variant="ghost"` + `aria-pressed={mode === 'manual'}`. The DS `Button` already exposes `aria-pressed` for toggle-style usage (`packages/design-system/src/components/Button.tsx:15-19,34`); semantics shift from `role="switch"` to "toggle button" but functionally equivalent for the editor UX. No DS extension needed.
+- **P2-20 — Raw `<input>` JSX similarly banned, AND DS `Input` doesn't ship `type="number"`.** Same lint rule blocks `<input type="number">`. The DS `Input` component supports only `type: 'text' | 'date'` (`packages/design-system/src/components/Input.tsx:20`). Extending DS Input would add `packages/design-system/**` files to PR 4.4d, busting its 8-file budget. **Fold:** PR 4.4d uses DS `Input` with `type="text"` and adds JS-side numeric + month-range validation (extends the round-11 `Number.isNaN` guard with `parsed < 1 || parsed > 12 || !Number.isInteger(parsed)` for the month paths). Test queries change to `getByRole('textbox', { name: labelForPath(path) })`. Tradeoff: lose the browser's native `type="number"` spinner buttons + numeric keyboard on mobile — acceptable for Phase-1 admin (loopback dev-only on desktop). DS Input extension is a Phase-2 / 4.6a-polish concern, NOT a Tier-3 blocker.
 
 **End of plan.**
