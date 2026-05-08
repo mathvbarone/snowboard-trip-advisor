@@ -1579,7 +1579,7 @@ function readDraftLeaf(draftResort: Partial<Resort> | undefined, path: MetricPat
   - Type `11` into the MANUAL input.
   - Fast-forward debounce; wait for PUT response.
   - **Filesystem assertion (sibling preserved)**: `await readFile(...)` → parses; assert `resort.season === { start_month: 11, end_month: 4 }` — `end_month` survived the shallow-merge because the draft hydrated the parent on first edit. Without the **D10** hydration, `resort.season` would be `{ start_month: 11 }` and the schema parse would fail (or silently drop end_month).
-  - **`editor_modes.season.start_month === 'manual'`** persisted.
+  - **`editor_modes['season.start_month'] === 'manual'`** persisted (per Codex round-13 P2-17 fold: `editor_modes` is a sparse `Partial<Record<MetricPath, 'manual'|'auto'>>` keyed by the LITERAL DOTTED STRING `'season.start_month'` — NOT a nested `{ season: { start_month: ... } }` structure. The latter would fail `WorkspaceFile.parse()` because `season` is not a `MetricPath` enum value).
 - [ ] **Step 4:** Run. PASS on both round-trip variants.
 
 ### Task 8 — Coverage + qa + PR + Codex cycle
@@ -1757,5 +1757,11 @@ One P2 finding on the v12 plan; folded:
 One P2 finding on the v13 plan; folded:
 
 - **P2-16 — Seed fixture `lodging_sample` shape was wrong.** v13's PR 4.4a-1 Task 1 instruction wrote `lodging_sample.median_eur: { amount, currency: 'EUR', sample_size }` — putting `sample_size` INSIDE the Money shape. But the `ResortLiveSignal` schema at `packages/schema/src/liveSignal.ts:15` is `lodging_sample: z.object({ median_eur: Money, sample_size: z.number().int() }).optional()` — `sample_size` is a SIBLING of `median_eur`, NOT nested inside it. `Money` itself is just `{ amount, currency }` (no third field). An implementer following v13's instruction would generate fixtures that fail `WorkspaceFile.parse()` at the schema-validation step, blocking PR 4.4a-1's "verify both fixtures parse" Task 1 Step 3 and the entire downstream Tier 3 chain. **Fold:** PR 4.4a-1 Task 1 Step 1 corrected — `lodging_sample: { median_eur: { amount, currency: 'EUR' }, sample_size: <int> }` (siblings). Confirms the schema citation explicitly so the executor doesn't rebuild from memory.
+
+### Codex round 13 (PR #90 review by `chatgpt-codex-connector`, 2026-05-08)
+
+One P2 finding on the v14 plan; folded:
+
+- **P2-17 — Bridge integration test asserted nested `editor_modes.season.start_month`, but the persisted shape is flat-keyed.** v14's PR 4.4d Task 7 nested-path round-trip step asserted `editor_modes.season.start_month === 'manual'`. But `editor_modes` is `Partial<Record<MetricPath, 'manual' \| 'auto'>>` — a SPARSE FLAT map keyed by the LITERAL DOTTED STRING `'season.start_month'`. The correct assertion is `editor_modes['season.start_month'] === 'manual'`. The previous assertion would either fail against the correct on-disk shape OR push the implementer toward a nested `{ season: { start_month: ... } }` structure that fails `WorkspaceFile.parse()` (because `season` is not a `MetricPath` enum value — `MetricPath` is the union of the 12 dotted-path strings). **Fold:** PR 4.4d Task 7 nested-path round-trip assertion corrected to `editor_modes['season.start_month'] === 'manual'`.
 
 **End of plan.**
