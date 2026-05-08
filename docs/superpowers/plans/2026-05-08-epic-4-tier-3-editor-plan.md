@@ -887,8 +887,8 @@ if (code !== undefined) {
   - `modified_at` brand-parse: `ISODateTimeString.parse(new Date().toISOString())`.
   - `editor_modes` shallow-merge happy: existing `{a: 'manual', b: 'manual'}` + PUT `{a: 'auto', c: 'manual'}` → `{a: 'auto', b: 'manual', c: 'manual'}`.
   - `editor_modes` reset-to-AUTO: PUT `{a: 'auto'}` semantics per spec §10.2.
-  - `editor_modes` ghost-path reject: PUT `{ghost: 'manual'}` when `field_sources` has no `ghost` → `InvalidResortError` with `.details` containing the refinement message; dispatch maps to `400 invalid-resort` with details surfaced.
-  - `editor_modes` field-source-removal reject: PUT drops `field_sources.a` while keeping `editor_modes.a` → reject.
+  - **`editor_modes` cross-key reject (request-pipeline-aware)** per Codex round-10 P2-14 fold: `ResortUpsertBody`'s schema (`packages/schema/api/resortUpsert.ts`) uses `z.partialRecord(z.enum(METRIC_FIELDS), ...)` — sending `editor_modes: { ghost: 'manual' }` (a non-`MetricPath` key) fails Zod parse at the request layer and returns `400 invalid-request` (NOT `invalid-resort`); the handler never runs and the refinement is never invoked. To exercise the **handler-level cross-key refinement** that produces `invalid-resort`, use a **valid MetricPath that is NOT in `resort.field_sources`** for the test fixture. The fixture's `resort.field_sources` covers only the 7 durable paths; sending `editor_modes: { snow_depth_cm: 'manual' }` parses cleanly through `ResortUpsertBody` (snow_depth_cm IS in METRIC_FIELDS) but fails the `WorkspaceFile.parse()` cross-key refinement post-merge (snow_depth_cm is in `live_signal.field_sources` but NOT in `resort.field_sources`, which is what the invariant checks). Handler throws `InvalidResortError`; dispatch maps to `400 invalid-resort` with the refinement message in `details`.
+  - **Drop "field-source-removal reject"** per Codex round-10 P2-14 fold: the PUT body cannot REPRESENT a field_sources removal because (a) `ResortUpsertBody.resort` is `Partial<Resort>`, (b) spec §4.3 specifies field_sources is deep-merged on the server. The client can ADD/UPDATE entries but not DELETE them via PUT. The cross-key refinement at `WorkspaceFile.parse()` still protects against this state, but it can only arise from direct workspace-file editing (covered by `workspaceFile.test.ts`'s schema tests in PR 4.1a), not via the PUT API. This test case is removed from the PR 4.4c handler tests.
   - Resort schema reject (e.g., malformed `country`).
   - Corrupt-workspace target → `WorkspaceCorruptError` and refuses to overwrite (assert file on disk is byte-equal to its corrupt state).
   - Cold-start (workspace doesn't exist, slug NOT in published) → `NotFoundError`.
@@ -921,7 +921,7 @@ if (code !== undefined) {
 - [ ] **Step 1:** `npm run qa`. 100% × 4.
 - [ ] **Step 2:** Open PR. PR description points out: "imports `atomicWriteText` rather than copying — same canonical impl, no drift" (per **B1**) + "dispatch.ts now passes `.details` from thrown errors" (per **D8**).
 - [ ] **Step 3:** `@codex review`; fold; iterate.
-- [ ] **Step 4:** Local-test plan: spin `npm run dev:admin`; manually `curl -X PUT http://127.0.0.1:5174/api/resorts/kotelnica-bialczanska -H 'Content-Type: application/json' -d '{"editor_modes":{"slopes_km":"manual"}}'` and confirm the workspace file is written. Confirm a malformed PUT (`{"editor_modes":{"ghost":"manual"}}`) returns 400 with the refinement message in `details`.
+- [ ] **Step 4:** Local-test plan: spin `npm run dev:admin`; manually `curl -X PUT http://127.0.0.1:5174/api/resorts/kotelnica-bialczanska -H 'Content-Type: application/json' -d '{"editor_modes":{"slopes_km":"manual"}}'` and confirm the workspace file is written. **Two distinct reject paths to verify** (per Codex round-10 P2-14 fold): (a) request-layer reject — `curl ... -d '{"editor_modes":{"ghost":"manual"}}'` (non-MetricPath key) → `400 invalid-request` (Zod parse fail at `ResortUpsertBody.parse()`); (b) handler-layer reject — `curl ... -d '{"editor_modes":{"snow_depth_cm":"manual"}}'` (valid MetricPath but NOT in `kotelnica`'s `resort.field_sources`) → `400 invalid-resort` with the refinement message in `details` (cross-key invariant fires post-merge at `WorkspaceFile.parse()`).
 - [ ] **Step 5:** Surface to maintainer.
 
 ---
@@ -1556,7 +1556,9 @@ function readDraftLeaf(draftResort: Partial<Resort> | undefined, path: MetricPat
   - Confirm editor renders with `slopes_km` MANUAL showing `150`.
   - Confirm `data/admin-workspace/kotelnica-bialczanska.json` on disk has `editor_modes.slopes_km === 'manual'`.
   - Repeat for `spindleruv-mlyn`.
-  - Submit malformed PUT via `curl`: `curl -X PUT http://127.0.0.1:5174/api/resorts/kotelnica-bialczanska -H 'Content-Type: application/json' -d '{"editor_modes":{"ghost":"manual"}}'` → 400 `invalid-resort` with refinement in `details`.
+  - Submit malformed PUTs via `curl` to verify both reject paths (per Codex round-10 P2-14 fold):
+    - **Request-layer reject** (non-MetricPath key fails Zod parse): `curl ... -d '{"editor_modes":{"ghost":"manual"}}'` → `400 invalid-request`.
+    - **Handler-layer reject** (cross-key refinement fires post-merge): `curl ... -d '{"editor_modes":{"snow_depth_cm":"manual"}}'` against `kotelnica-bialczanska` (whose `resort.field_sources` does NOT include `snow_depth_cm`) → `400 invalid-resort` with refinement message in `details`.
 - [ ] **Step 4:** Surface to maintainer.
 
 ---
@@ -1568,7 +1570,7 @@ Per spec §7.4, on `main`:
 1. **Editor opens for both seed slugs** — verified by gate-closing local-test plan.
 2. **MANUAL edit round-trips through PUT; reload preserves state** — verified by gate-closing plan.
 3. **Bridge integration test green** — verified by `npm run test:integration`.
-4. **`editor_modes` cross-key invariant rejects malformed PUTs** — verified by `apps/admin/server/__tests__/resortUpsert.test.ts` ghost-path case + manual `curl`.
+4. **`editor_modes` cross-key invariant rejects malformed PUTs** — verified by `apps/admin/server/__tests__/resortUpsert.test.ts` (handler-layer reject with a valid MetricPath outside `resort.field_sources`, e.g., `snow_depth_cm` against `kotelnica`'s durable-only field_sources, per Codex round-10 P2-14 fold) + manual `curl`.
 
 **Spec deviations to flag in handoff:**
 
@@ -1698,5 +1700,11 @@ Two P2 findings on the v9 plan; both real correctness issues; both folded:
 One P2 finding on the v10 plan; folded:
 
 - **P2-13 — `prepopulateResortDetail(slug, Promise.resolve(response))` doesn't actually avoid the Suspense flicker.** v10 hoped that replacing the cached entry with `Promise.resolve(response)` (a synchronously-fulfilled Promise) would make the next `useResortDetail(slug)` render return synchronously through `use()`. Codex tested it: React 19's `use(Promise.resolve('ok'))` initially renders the Suspense fallback under the admin test setup. The thenable contract (`.then(resolve)`) enqueues resolution as a microtask — `use()` cannot synchronously observe the value. The post-PUT no-flicker guarantee in **D13** was wrong. **Fold:** decisions log **D3** updated to a **dual-cache** shape: `cachedPromises` (Promise-keyed; for first-mount `use()` reads) AND `cachedFulfilled` (data-keyed; synchronous returns). `useResortDetail(slug)` checks `cachedFulfilled` first; if a fulfilled entry exists, returns it synchronously (no `use()`, no Suspense). The `loadOnce` `.then` callback populates `cachedFulfilled` on resolution so subsequent renders take the sync path. `prepopulateResortDetail` populates BOTH caches; rejected promises only populate `cachedPromises` (cachedFulfilled stays empty per ADR-0010 pinning). PR 4.4a-2 Task 5 adds three new tests: prepopulate-no-flicker (assert Suspense fallback NEVER renders post-prepopulate), synchronous fast path (assert subsequent renders skip `use()`), and rejected-promise path skips sync cache (preserves ADR-0010 pinning).
+
+### Codex round 10 (PR #90 review by `chatgpt-codex-connector`, 2026-05-08)
+
+One P2 finding on the v11 plan; folded:
+
+- **P2-14 — `editor_modes` reject test cases didn't match the actual request pipeline.** v11's PR 4.4c Task 7 specified two reject cases: (a) `editor_modes: { ghost: 'manual' }` → `400 invalid-resort`, and (b) "PUT drops `field_sources.a` while keeping `editor_modes.a`" → reject. Both were wrong. (a): `ResortUpsertBody`'s schema (`packages/schema/api/resortUpsert.ts`) uses `z.partialRecord(z.enum(METRIC_FIELDS), ...)` — a non-`MetricPath` key like `'ghost'` fails Zod parse at the request layer and returns `400 invalid-request` (NOT `invalid-resort`); the handler never runs. (b): `ResortUpsertBody.resort` is `Partial<Resort>` and spec §4.3 deep-merges `field_sources` server-side; the PUT body cannot REPRESENT a removal — clients can ADD/UPDATE entries but not DELETE them. **Fold:** (a) replaced with a valid-MetricPath-not-in-field_sources case: `editor_modes: { snow_depth_cm: 'manual' }` against `kotelnica` (whose `resort.field_sources` covers only the 7 durable paths). The body parses cleanly through `ResortUpsertBody` (snow_depth_cm IS a `MetricPath`), but `WorkspaceFile.parse()`'s cross-key refinement post-merge rejects (snow_depth_cm in editor_modes but not in resort.field_sources). Handler throws `InvalidResortError`; dispatch maps to `400 invalid-resort`. (b) dropped — not representable through the public PUT API; the cross-key invariant against this state is already covered by `workspaceFile.test.ts` schema tests in PR 4.1a. PR 4.4c local-test `curl` step now verifies BOTH the request-layer (`ghost`) and handler-layer (`snow_depth_cm`) reject paths.
 
 **End of plan.**
