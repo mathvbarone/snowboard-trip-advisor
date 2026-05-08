@@ -43,6 +43,7 @@ Per spec §7.4 this plan must close, on `main`, after PR 4.4d merges:
 | **D9** (seed fixtures location) | The `tests/fixtures/admin-workspace/{kotelnica-bialczanska,spindleruv-mlyn}.json` files MISSING from `main` (declared as PR 4.1a §10.8 deliverable but not actually shipped). Recovered as part of PR 4.4a-1 (already a small schema PR; fixtures + projection function are conceptually adjacent). PR 4.4a-1 file count: 5 files (still ≤8). | Without the fixtures, every server-side and bridge-tier test in Tier 3 has nothing to load. |
 | **D10** (nested-path draft hydration — Codex round-4 P2-6 fold) | `DraftShape.resort` mirrors the **`Partial<Resort>`** shape (NOT a flat `Partial<Record<MetricPath, unknown>>`). When the user edits a nested path like `altitude_m.min`, `setFieldValue` decomposes the path into segments (`['altitude_m', 'min']`), and on first edit of a nested parent, **hydrates the parent from `useResortDetail(slug).resort.<parent>`** before patching the leaf — this preserves the sibling (`altitude_m.max`) so the server's shallow-merge of `Resort.altitude_m` doesn't drop it. The `SlugStore` carries a `canonical: ResortDetailResponse \| null` field synced by `useWorkspaceState` on every render; module-level `setFieldValue` reads `store.canonical` to do the hydration. `buildBodyFromDraft` then trivially emits `{ resort: draft.resort, live_signal: draft.live_signal, editor_modes: draft.editor_modes }` — the nested shape is already correct. | Flat-keyed `field_values` with reconstruction-at-PUT-time loses sibling values when shallow-merged on the server. Hydration-on-edit is the simpler invariant. PR 4.4d Task 2 adds a "nested-path edit preserves sibling" test (e.g., editing `altitude_m.min` from canonical 1500/2000 → draft has `altitude_m: { min: 1600, max: 2000 }`); PR 4.4d Task 7 bridge integration test asserts the nested-path round-trip on disk. |
 | **D11** (responsive read-only gate baseline — Codex round-4 P2-7 fold) | PR 4.4d ships a **minimal** responsive gate: below the `md` breakpoint, the new MANUAL `<input>` is not rendered AND the new interactive `<ModeToggle>` button degrades to the render-only `<span aria-disabled="true">` form (re-using the v4.4b inline render-only ModeToggle structure). Implementation: a co-located `useIsAboveMd()` hook in `FieldRow.tsx` reads `window.matchMedia('(min-width: 768px)')` (project breakpoint) and returns a boolean reactive to changes via `useSyncExternalStore`. PR 4.6a polishes this (proper UX, ARIA messaging, simulated-viewport regression test per spec §7.16). | AGENTS.md "Admin App Rules" says edit controls MUST be removed from the tab order below `md` — this is a baseline rule, not polish. Without the minimal gate in 4.4d, the 4.4d → 4.6a interim window violates AGENTS.md (a non-mechanical-but-discipline rule). 4.4d Task 6 covers both viewports; ModeToggle.test.tsx is dropped from 4.4d (file budget) and FieldRow's responsive branch is tested via FieldRow.test.tsx mods. |
+| **D12** (manual provenance on value edit — Codex round-5 P1-1 fold) | `setFieldValue(path, value)` MUST patch `draft.resort.field_sources[path]` alongside the value, with a fresh **manual** `FieldSource` entry: `{ source: 'manual', source_url: 'https://admin.local/manual', observed_at: <now ISO>, fetched_at: <now ISO>, upstream_hash: <SHA-256 of JSON.stringify({path, value, observed_at})>, attribution_block: { en: 'Manual entry by analyst.' } }`. A co-located helper `manualFieldSource(path, value): FieldSource` constructs the entry. The hash is deterministic per edit (so same value at different times produces different hashes — preserving provenance distinctness). `setMode(path, mode)` does NOT touch `field_sources` — only `editor_modes`. PR 4.4d Task 2 adds a "manual edit writes manual FieldSource" test. PR 4.4d Task 7 bridge integration test asserts the on-disk `resort.field_sources.slopes_km.source === 'manual'`. | Provenance is non-negotiable per the project's Core Principles ("Every metric field carries a matching `field_sources` entry... `validatePublishedDataset` enforces this at publish time"). Without writing the manual FieldSource on value edit, the merged WorkspaceFile keeps the OLD upstream provenance for the new manual value — published data attributes a manual override to the old upstream source. The mode-flag-only flow (toggle without edit) preserves the old upstream provenance because there's no override yet — that's the intended semantics; only an actual value change triggers the source switch. |
 
 ---
 
@@ -901,6 +902,8 @@ if (code !== undefined) {
   - **`__resetForTests()` clears `storesBySlug`**: setFieldValue → reset → next mount sees fresh draft.
   - **Nested-path edit preserves sibling** per **D10** + Codex round-4 P2-6 fold: canonical state has `resort.altitude_m: { min: 1500, max: 2000 }`. `setFieldValue('altitude_m.min', 1600)` → assert `draft.resort.altitude_m === { min: 1600, max: 2000 }` (NOT `{ min: 1600 }`). The hydration-on-first-edit reads the sibling from `store.canonical`. Without this, the PUT body's shallow `Resort.altitude_m` merge on the server replaces the whole object with `{ min: 1600 }` and silently drops `max`. Same test for `season.start_month` (sibling = `season.end_month`) and `lifts_open.count` (sibling = `lifts_open.total`, on the live_signal side).
   - **Canonical sync on render**: when `useResortDetail(slug)` re-projects (e.g., post-PUT response), the `store.canonical` reference updates so subsequent `setFieldValue` calls hydrate from the freshest canonical state.
+  - **Manual provenance written on value edit** per **D12** + Codex round-5 P1-1 fold: `setFieldValue('slopes_km', 150)` against canonical with `field_sources.slopes_km.source === 'opensnow'` → assert: (a) `draft.resort.slopes_km === 150`; (b) `draft.resort.field_sources.slopes_km.source === 'manual'`; (c) `draft.resort.field_sources.slopes_km.source_url === 'https://admin.local/manual'`; (d) `upstream_hash` matches `/^[a-f0-9]{64}$/`; (e) `observed_at` ≈ now. **And `field_sources` siblings preserved**: every other `field_sources[other_path]` entry from canonical is also in `draft.resort.field_sources` (so the PUT body's deep-merge on the server doesn't drop them — though spec §4.3 says deep merge for field_sources, defense-in-depth via sibling hydration matches the parent-hydration pattern).
+  - **`setMode` does NOT touch field_sources** per **D12**: `setMode('slopes_km', 'manual')` against canonical → assert `draft.resort?.field_sources` is undefined (or unchanged). Mode-flip-without-edit preserves old upstream provenance — only an actual value change triggers the source switch.
 - [ ] **Step 2:** Run. FAIL.
 
 ### Task 3 — Implement `useWorkspaceState`
@@ -913,7 +916,8 @@ if (code !== undefined) {
 import { useCallback } from 'react'
 import { useSyncExternalStore } from 'react'
 
-import type { MetricPath, Resort, ResortLiveSignal, ResortSlug } from '@snowboard-trip-advisor/schema'
+import { ISODateTimeString, UpstreamHash } from '@snowboard-trip-advisor/schema'
+import type { FieldSource, MetricPath, Resort, ResortLiveSignal, ResortSlug } from '@snowboard-trip-advisor/schema'
 import type { ResortDetailResponse, ResortUpsertBody } from '@snowboard-trip-advisor/schema/api'
 
 import { apiClient } from '../lib/apiClient'
@@ -1095,15 +1099,69 @@ function buildBodyFromDraft(draft: DraftShape): ResortUpsertBody {
   return body
 }
 
+// Per **D12** + Codex round-5 P1-1 fold: manual edits MUST write a manual
+// FieldSource entry alongside the value so provenance reflects the override.
+// `upstream_hash` is a 64-char hex string (UpstreamHash brand from
+// packages/schema/src/branded.ts:6 — regex `^[a-f0-9]{64}$`); we use 32 bytes
+// of crypto.getRandomValues (synchronous, available in both browser and node)
+// so each manual edit gets a unique provenance hash. Deterministic per edit
+// is unnecessary — uniqueness is what matters for provenance distinctness.
+function manualFieldSource(_path: MetricPath, _value: unknown): FieldSource {
+  const observed_at = new Date().toISOString()
+  const bytes = new Uint8Array(32)
+  crypto.getRandomValues(bytes)
+  const upstream_hash = Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('')
+  return {
+    source: 'manual',
+    source_url: 'https://admin.local/manual',  // sentinel; satisfies /^https:/ regex
+    observed_at: ISODateTimeString.parse(observed_at),
+    fetched_at: ISODateTimeString.parse(observed_at),
+    upstream_hash: UpstreamHash.parse(upstream_hash),
+    attribution_block: { en: 'Manual entry by analyst.' },
+  }
+}
+
 export function setFieldValue(slug: ResortSlug, path: MetricPath, value: unknown): void {
   const store = getOrCreateStore(slug)
   const side = sideFor(path)
-  patchState(store, (s) => ({
-    rev: s.rev + 1,
-    draft: patchDraftLeaf(s.draft, side, path, value, store.canonical),
-    status: { ...s.status, [path]: 'dirty' },
-  }))
+  // Compute manual provenance synchronously so the field_sources entry and
+  // the value land in the same draft revision.
+  const fs = manualFieldSource(path, value)
+  patchState(store, (s) => {
+    // Patch the value (with sibling hydration per **D10**)
+    const draftWithValue = patchDraftLeaf(s.draft, side, path, value, store.canonical)
+    // Patch field_sources[path] with the new manual source per **D12**.
+    const draftWithFs = patchFieldSource(draftWithValue, side, path, fs, store.canonical)
+    return {
+      rev: s.rev + 1,
+      draft: draftWithFs,
+      status: { ...s.status, [path]: 'dirty' },
+    }
+  })
   scheduleFlush(slug)
+}
+
+// Patch field_sources[path] in draft.resort.field_sources OR
+// draft.live_signal.field_sources, hydrating the field_sources object from
+// canonical on first edit (similar to patchDraftLeaf for value siblings).
+function patchFieldSource(
+  draft: DraftShape,
+  side: Side,
+  path: MetricPath,
+  fs: FieldSource,
+  canonical: ResortDetailResponse | null,
+): DraftShape {
+  if (side === 'resort') {
+    const existing = draft.resort?.field_sources
+    const canonicalFs = canonical?.resort?.field_sources ?? {}
+    const hydrated = existing ?? { ...canonicalFs }
+    return { ...draft, resort: { ...(draft.resort ?? {}), field_sources: { ...hydrated, [path]: fs } } }
+  }
+  const existing = draft.live_signal?.field_sources
+  const canonicalLive = canonical?.live_signal
+  const canonicalFs = canonicalLive?.field_sources ?? {}
+  const hydrated = existing ?? { ...canonicalFs }
+  return { ...draft, live_signal: { ...(draft.live_signal ?? {}), field_sources: { ...hydrated, [path]: fs } } }
 }
 
 export function setMode(slug: ResortSlug, path: MetricPath, mode: 'manual' | 'auto'): void {
@@ -1373,7 +1431,7 @@ function readDraftLeaf(draftResort: Partial<Resort> | undefined, path: MetricPat
   - Type `150` into the new MANUAL `<input type="number">`.
   - Fast-forward debounce (500ms via `vi.advanceTimersByTime` or `vi.useFakeTimers`).
   - Wait for PUT response.
-  - **Filesystem assertion**: `await readFile(join(tmpdir, 'data/admin-workspace/kotelnica-bialczanska.json'), 'utf-8')` → parses to `WorkspaceFile`; `editor_modes.slopes_km === 'manual'`; `resort.slopes_km === 150`.
+  - **Filesystem assertion**: `await readFile(join(tmpdir, 'data/admin-workspace/kotelnica-bialczanska.json'), 'utf-8')` → parses to `WorkspaceFile`; `editor_modes.slopes_km === 'manual'`; `resort.slopes_km === 150`; **`resort.field_sources.slopes_km.source === 'manual'` per **D12**** (provenance reflects the override, NOT the prior upstream `'opensnow'`/etc.); other `field_sources` entries unchanged.
   - **Reload simulation** (per fold §5): unmount; **call `useResortDetail.__resetForTests()` AND `useWorkspaceState.__resetForTests()`** to clear module-level caches; spy on `apiClient.getResort` to verify the next mount triggers a fresh fetch (cache miss); re-mount `<App />`; assert editor renders with `slopes_km` MANUAL + value `150` (read from the server's freshly-loaded canonical state, not from a stale cached promise).
 
 - [ ] **Step 3: Write test (nested-path: `season.start_month` — sibling preservation per D10 + Codex round-4 P2-6 fold):**
@@ -1507,5 +1565,11 @@ Two P2 findings on the v5 plan; both real correctness issues; both folded:
 
 - **P2-6 — Nested-path drafts drop sibling values on PUT.** v5's `DraftShape.field_values: Partial<Record<MetricPath, unknown>>` was flat-keyed by metric path. The server's `resortUpsert` does **shallow merge for top-level Resort fields** (per spec §4.3) — so PUT body `{ resort: { altitude_m: { min: 100 } } }` shallow-replaces `Resort.altitude_m` whole, dropping the canonical `max`. v5 had no mechanism to reconstruct sibling values. **Fold:** decisions log **D10** added: `DraftShape.resort` mirrors `Partial<Resort>` directly. `setFieldValue` decomposes dotted paths into segments; on first edit of a nested parent, `patchDraftLeaf` hydrates the parent from `store.canonical` (synced on every render via `useWorkspaceState`'s `useResortDetail` access). `buildBodyFromDraft` becomes trivial — just emits the non-empty `draft.resort` / `draft.live_signal` / `draft.editor_modes`. PR 4.4d Task 2 adds a "nested-path edit preserves sibling" test (`altitude_m.min` edit preserves `altitude_m.max`); PR 4.4d Task 7 bridge integration test adds a `season.start_month` round-trip with explicit on-disk sibling assertion.
 - **P2-7 — Edit controls violate AGENTS.md "Admin App Rules" below `md`.** AGENTS.md mandates "Admin UI is read-only below the `md` breakpoint; edit controls are removed from the tab order, not merely disabled." Spec §7.16 deferred this to PR 4.6a (polish), but the rule is baseline-mandatory — shipping 4.4d without the gate creates a 4.4d → 4.6a interim window of AGENTS.md non-compliance on `main`. **Fold:** decisions log **D11** added: PR 4.4d ships a **minimal** responsive gate via a co-located `useIsAboveMd()` hook (`window.matchMedia('(min-width: 768px)')` + `useSyncExternalStore`). Below md: input is absent, ModeToggle degrades to the v4.4b inline render-only `<span aria-disabled>` form. Tests for both viewport branches added to FieldRow.test.tsx. ModeToggle.test.tsx is dropped from PR 4.4d (file budget — coverage achieved through FieldRow.test.tsx + the integration test). 4.6a polishes UX (transitions, ARIA messaging, simulated-viewport regression test) per spec §7.16.
+
+### Codex round 5 (PR #90 review by `chatgpt-codex-connector`, 2026-05-08)
+
+One P1 finding on the v6 plan; folded:
+
+- **P1-1 — Manual edits leave provenance pointing at the prior upstream.** v6's `setFieldValue` only patched the value (and the nested parent) — it did NOT update `resort.field_sources[path]`. Server's `resortUpsert` deep-merges `field_sources` (per spec §4.3), so absent a replacement the canonical entry survives. Result: PUT lands `resort.slopes_km === 150` AND `field_sources.slopes_km.source === 'opensnow'` (or whatever upstream existed). The published dataset would attribute a manual override to the prior upstream — a provenance lie. **Fold:** decisions log **D12** added: `setFieldValue` patches `draft.resort.field_sources[path]` alongside the value with a fresh manual `FieldSource` (`source: 'manual'`, `source_url: 'https://admin.local/manual'`, current ISO timestamps, `crypto.getRandomValues`-derived 64-char hex `upstream_hash`, `attribution_block: { en: 'Manual entry by analyst.' }`). The `manualFieldSource(path, value)` helper is co-located in `useWorkspaceState.ts`. `setMode` does NOT touch `field_sources` — mode-flip-without-edit preserves prior upstream provenance, which is the intended semantics. PR 4.4d Task 2 adds "manual provenance written on value edit" + "setMode does not touch field_sources" tests; PR 4.4d Task 7 bridge integration test asserts on-disk `resort.field_sources.slopes_km.source === 'manual'` post-PUT.
 
 **End of plan.**
