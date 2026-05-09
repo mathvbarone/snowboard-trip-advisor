@@ -1588,12 +1588,18 @@ interface ModeToggleProps {
   readonly path: MetricPath
   readonly mode: 'manual' | 'auto'
   readonly onToggle: () => void
+  // Per Codex round-22 P2-30 fold: live paths can't be MANUAL-flagged
+  // (cross-key invariant); FieldRow passes disabled={true} for them so
+  // the toggle visibly indicates the constraint instead of silently
+  // no-op'ing on click.
+  readonly disabled?: boolean
 }
 
-export function ModeToggle({ path, mode, onToggle }: ModeToggleProps): JSX.Element {
+export function ModeToggle({ path, mode, onToggle, disabled }: ModeToggleProps): JSX.Element {
   return (
     <Button
       variant="ghost"
+      disabled={disabled}
       aria-label={`Mode for ${labelForPath(path)}`}
       aria-pressed={mode === 'manual'}
       onClick={onToggle}
@@ -1635,6 +1641,9 @@ afterEach(() => { vi.unstubAllGlobals() })
   - **Edit-then-clear cancels the pending PUT** per Codex round-20 P2-28 fold: above-md MANUAL on `lift_count`. Type `'7'` (valid) → setFieldValue fires; draft.resort.lift_count = 7 + draft.resort.field_sources.lift_count = manual; debounce timer set. BEFORE 500ms elapses, type `''` (clear) — `clearFieldValue('lift_count')` fires; draft.resort.lift_count is removed; draft.resort.field_sources.lift_count is removed; status reverts to no-edit-pending. Fast-forward debounce. **Assert: `apiClient.upsertResort` is NOT called** (the previously-pending value 7 was cleared; the next flush sees a sparse draft with no `lift_count`). Same flow for invalid intermediates (`'7'` → `'7e'` → cleared). Without `clearFieldValue`, the stale pending value would PUT despite the input being currently empty/invalid.
   - **Edit-then-clear preserves editor_modes** per Codex round-20 P2-28 fold: same flow as above, but assert that `draft.editor_modes['lift_count']` (or whatever was set via prior toggleMode) is **NOT** removed by `clearFieldValue`. Only the value + manual field_sources entry are dropped; the analyst's MANUAL flag persists.
   - **Edit-then-clear of a nested path drops the whole hydrated parent** per Codex round-21 P2-29 fold: above-md MANUAL on `season.start_month`. Canonical has `season: { start_month: 12, end_month: 4 }`. Type `'11'` (valid) → setFieldValue fires; `patchDraftLeaf` hydrates parent: `draft.resort.season = { start_month: 11, end_month: 4 }` (sibling preserved per round-4 P2-6). BEFORE debounce, type `''` (clear) → `clearFieldValue('season.start_month')` fires. **Assert: `draft.resort?.season` is `undefined`** (whole parent dropped — NOT `{ end_month: 4 }`). Fast-forward debounce → `apiClient.upsertResort` is NOT called. Without this fix, the next flush would PUT `resort: { season: { end_month: 4 } }`; server's shallow-merge of `Resort.season` would replace whole, leaving `season: { end_month: 4 }` missing `start_month` → fails `Resort.parse()` → `400 invalid-resort`. Repeat the same flow for `altitude_m.min` (canonical 1500/2000) — assert `draft.resort?.altitude_m` is `undefined` after clear.
+  - **Live-path ModeToggle is disabled** per Codex round-22 P2-30 fold: render FieldRow for `lift_pass_day` (live path, NOT in `MANUAL_EDITABLE_PATHS`) above md. Assert the ModeToggle button has `disabled` (DS Button passes through). Click → `toggleMode` is NOT called (DS Button disabled blocks onClick); `apiClient.upsertResort` NOT called. Repeat for `snow_depth_cm`, `lifts_open.count/total`, `lodging_sample.median_eur`. Without `disabled`, the toggle would silently no-op via `useModeToggle.validPaths` guard but the button would look interactive (analyst clicks, sees nothing happen — silent failure UX).
+  - **Live-path explanatory copy renders unconditionally** per Codex round-22 P2-30 fold: render FieldRow for `lift_pass_day` above md (mode AUTO, since toggle is disabled). Assert the explanatory `<span>MANUAL editing for lift_pass_day lands in PR 4.6a.</span>` IS present in the DOM (does NOT require the user to flip MANUAL — which they couldn't anyway). Below md: assert it's NOT rendered (responsive read-only).
+  - **Non-finite numeric input does NOT persist** per Codex round-22 P2-31 fold: above-md MANUAL on `slopes_km`. Type `'Infinity'` → `Number('Infinity') === Infinity` (NOT NaN); `Number.isNaN(Infinity)` is FALSE but `Number.isFinite(Infinity)` is FALSE → guard catches it via `!Number.isFinite(parsed)`. Assert `apiClient.upsertResort` is NOT called for `'Infinity'`, `'-Infinity'`, or `'1e999'` (which `Number()` parses to `Infinity`). Same `clearFieldValue` flow as the other transient branches. Without `Number.isFinite`, the previous `Number.isNaN`-only guard would let `Infinity` through, the PUT would fire, and the server's `z.number()` would reject as `400 invalid-resort`.
 - [ ] **Step 4:** The pre-existing 4.4b inline-span tests must each call `stubMatchMedia(false)` (or default to false in their `beforeEach`) so they exercise the below-md branch unambiguously after the responsive gate ships.
 - [ ] **Step 5:** Run failing.
 - [ ] **Step 6: Implement.** Replace the FieldRow body:
@@ -1707,10 +1716,22 @@ function FieldRow({ path, state }: FieldRowProps): JSX.Element {
     setLocalString(String(persistedValue ?? ''))
   }
 
-  // ModeToggle: above md → interactive <button>; below md → render-only <span>
-  // per **D11** + AGENTS.md "Admin App Rules".
+  // Per Codex round-22 P2-30 fold: live paths (snow_depth_cm, lifts_open.*,
+  // lift_pass_day, lodging_sample.median_eur) cannot be MANUAL-flagged
+  // because the WorkspaceFile cross-key invariant restricts editor_modes
+  // keys to resort.field_sources (durable subset). useModeToggle silently
+  // no-ops on toggleMode for these paths — but if the toggle button still
+  // looked interactive, the analyst would click and see no effect (silent
+  // failure). Disabling the toggle for live paths makes the constraint
+  // visible AT THE CONTROL, not buried in the explanatory copy below.
+  // MANUAL_EDITABLE_PATHS is the 7 durable numeric paths; its complement
+  // within METRIC_FIELDS is exactly the 5 live paths.
+  const isToggleable = MANUAL_EDITABLE_PATHS.has(path)
+
+  // ModeToggle: above md → interactive <button> (disabled for live paths);
+  // below md → render-only <span> per **D11** + AGENTS.md "Admin App Rules".
   const modeToggleEl = isAboveMd
-    ? <ModeToggle path={path} mode={modeFor(path)} onToggle={(): void => toggleMode(path)} />
+    ? <ModeToggle path={path} mode={modeFor(path)} disabled={!isToggleable} onToggle={(): void => toggleMode(path)} />
     : (
       <span role="switch" aria-checked={modeFor(path) === 'manual'} aria-disabled="true" aria-label={`Mode for ${labelForPath(path)}`}>
         {modeFor(path) === 'manual' ? 'MANUAL' : 'AUTO'}
@@ -1738,7 +1759,13 @@ function FieldRow({ path, state }: FieldRowProps): JSX.Element {
     // empty so spaces don't trigger spurious 0-persists.
     if (raw.trim() === '') { clearFieldValue(path); return }
     const parsed = Number(raw)
-    if (Number.isNaN(parsed)) { clearFieldValue(path); return }
+    // Per Codex round-22 P2-31 fold: Number.isFinite catches Infinity /
+    // -Infinity / NaN in one check. `Number('Infinity')` is `Infinity`
+    // (NOT NaN), and `z.number()` server-side rejects non-finite numbers
+    // — so a pasted 'Infinity' or '1e999' would otherwise PUT and fail
+    // with 400 invalid-resort. isFinite covers all of NaN + Infinity +
+    // -Infinity in one predicate.
+    if (!Number.isFinite(parsed)) { clearFieldValue(path); return }
     if (isMonth && (parsed < 1 || parsed > 12 || !Number.isInteger(parsed))) {
       clearFieldValue(path); return
     }
@@ -1752,21 +1779,27 @@ function FieldRow({ path, state }: FieldRowProps): JSX.Element {
     setFieldValue(path, parsed)
   }
 
-  // Input: above md AND MANUAL AND a durable numeric path → DS <Input type="text">
-  // (per Codex round-15 P2-20: raw <input> JSX banned in apps/admin/src/**);
-  // above md AND MANUAL AND non-durable → render explanatory copy;
-  // below md → absent from DOM (per **D11**).
-  const inputElement = (!isAboveMd || !isManual) ? null
-    : MANUAL_EDITABLE_PATHS.has(path)
-      ? (
-        <Input
-          label={labelForPath(path)}
-          type="text"
-          value={localString}
-          onChange={onLocalChange}
-        />
-      )
-      : <span>MANUAL editing for {path} lands in PR 4.6a.</span>
+  // Render-mode logic per Codex round-22 P2-30 fold:
+  //   - below md: no input element (responsive read-only per **D11**)
+  //   - above md AND live path: ALWAYS show the explanatory copy (does NOT
+  //     require MANUAL flip — the toggle is disabled, so MANUAL is unreachable
+  //     for live paths; showing the copy unconditionally makes the constraint
+  //     visible)
+  //   - above md AND durable AND MANUAL: DS <Input type="text"> (per round-15 P2-20)
+  //   - above md AND durable AND AUTO: no input
+  const inputElement = !isAboveMd ? null
+    : !isToggleable
+      ? <span>MANUAL editing for {path} lands in PR 4.6a.</span>
+      : isManual
+        ? (
+          <Input
+            label={labelForPath(path)}
+            type="text"
+            value={localString}
+            onChange={onLocalChange}
+          />
+        )
+        : null
 
   return (
     <div role="group" aria-label={labelForPath(path)}>
@@ -2056,5 +2089,12 @@ One P2 finding on the v21 plan; folded:
 One P2 follow-up to the round-20 fold; folded:
 
 - **P2-29 — Nested-leaf clears emitted incomplete-parent PUTs.** v22's `clearDraftLeaf` for nested paths (`season.start_month`, `altitude_m.min`) only deleted the edited leaf, leaving the sibling that `patchDraftLeaf` had hydrated from canonical (per round-4 P2-6 fold). The next flush would build `resort: { season: { end_month: 4 } }` — the server's shallow-merge for top-level `Resort` fields replaces `season` whole, leaving `season: { end_month: 4 }` missing `start_month` → fails `Resort.parse()` → `400 invalid-resort`. The "edit-then-clear cancels pending PUT" guarantee from round-20 didn't hold for nested fields. **Fold:** changed `clearDraftLeaf`'s nested-path branch to drop the WHOLE parent (`delete next[parent]`) instead of removing only the edited leaf. Tradeoff: if the user explicitly edited BOTH leaves of the same parent and then cleared one, the other edit is also dropped — acceptable Phase-1 behavior since clearing one leaf signals "starting over"; the user can re-edit either leaf. PR 4.4d Task 6 test list adds an "edit-then-clear of a nested path drops the whole hydrated parent" case covering `season.start_month` AND `altitude_m.min`.
+
+### Codex round 22 (PR #90 review by `chatgpt-codex-connector`, 2026-05-09)
+
+Two P2 findings on the v23 plan; both real correctness/UX issues; both folded:
+
+- **P2-30 — Live-path ModeToggle silently no-ops AND explanatory copy is unreachable.** v23 rendered an enabled `<ModeToggle>` for ALL paths; `useModeToggle.validPaths` (durable subset) silently no-op'd `toggleMode` on live paths. Visible failure mode: analyst clicks the AUTO toggle on `lift_pass_day`, nothing happens, no UI feedback. Hidden failure mode: the explanatory copy "MANUAL editing for `${path}` lands in PR 4.6a" was inside the `isManual` branch — but `isManual` can never be true for live paths (toggle no-ops), so the copy was dead code in practice. **Fold:** added a `disabled` prop to `<ModeToggle>` (passes through to DS `Button.disabled`); FieldRow passes `disabled={!MANUAL_EDITABLE_PATHS.has(path)}` so live-path toggles are visibly disabled. AND restructured the input-render logic so the explanatory copy ALWAYS renders for live paths (independent of `isManual`) — analyst sees the constraint without needing a (now-impossible) MANUAL flip. PR 4.4d Task 6 test list adds two cases: "live-path ModeToggle is disabled" + "live-path explanatory copy renders unconditionally".
+- **P2-31 — `Number.isNaN` doesn't catch `Infinity` / `-Infinity` / `1e999`.** `Number('Infinity') === Infinity`; `Number.isNaN(Infinity)` is `false`. v23's NaN-only guard let non-finite values through `setFieldValue`, the PUT fired, and server's `z.number()` rejected (since Zod's number rejects `Infinity` by default) → `400 invalid-resort` → field stuck in `save-failed`. **Fold:** replaced `if (Number.isNaN(parsed))` with `if (!Number.isFinite(parsed))` — `Number.isFinite` returns `false` for NaN, Infinity, -Infinity in one predicate. PR 4.4d Task 6 test list adds a "non-finite numeric input does not persist" case covering `'Infinity'`, `'-Infinity'`, `'1e999'`.
 
 **End of plan.**
