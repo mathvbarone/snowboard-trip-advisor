@@ -1,0 +1,152 @@
+{
+  "schema_version": 1,
+  "slug": "spindleruv-mlyn",
+  "resort": {
+    "schema_version": 1,
+    "slug": "spindleruv-mlyn",
+    "name": {
+      "en": "Špindlerův Mlýn",
+      "cs": "Špindlerův Mlýn"
+    },
+    "country": "CZ",
+    "region": {
+      "en": "Krkonoše Mountains",
+      "cs": "Krkonoše"
+    },
+    "altitude_m": { "min": 750, "max": 1310 },
+    "slopes_km": 25,
+    "lift_count": 12,
+    "skiable_terrain_ha": 100,
+    "season": { "start_month": 12, "end_month": 4 },
+    "publish_state": "published",
+    "field_sources": {
+      "altitude_m.min": {
+        "source": "resort-feed",
+        "source_url": "https://www.skiareal.cz/en/",
+        "observed_at": "2026-04-29T08:00:00Z",
+        "fetched_at": "2026-04-29T08:00:00Z",
+        "upstream_hash": "2222222222222222222222222222222222222222222222222222222222222201",
+        "attribution_block": { "en": "Source: Špindlerův Mlýn resort feed." }
+      },
+      "altitude_m.max": {
+        "source": "resort-feed",
+        "source_url": "https://www.skiareal.cz/en/",
+        "observed_at": "2026-04-29T08:00:00Z",
+        "fetched_at": "2026-04-29T08:00:00Z",
+        "upstream_hash": "2222222222222222222222222222222222222222222222222222222222222202",
+        "attribution_block": { "en": "Source: Špindlerův Mlýn resort feed." }
+      },
+      "slopes_km": {
+        "source": "resort-feed",
+        "source_url": "https://www.skiareal.cz/en/",
+        "observed_at": "2026-04-29T08:00:00Z",
+        "fetched_at": "2026-04-29T08:00:00Z",
+        "upstream_hash": "2222222222222222222222222222222222222222222222222222222222222203",
+        "attribution_block": { "en": "Source: Špindlerův Mlýn resort feed." }
+      },
+      "lift_count": {
+        "source": "resort-feed",
+        "source_url": "https://www.skiareal.cz/en/",
+        "observed_at": "2026-04-29T08:00:00Z",
+        "fetched_at": "2026-04-29T08:00:00Z",
+        "upstream_hash": "2222222222222222222222222222222222222222222222222222222222222204",
+        "attribution_block": { "en": "Source: Špindlerův Mlýn resort feed." }
+      },
+      "skiable_terrain_ha": {
+        "source": "resort-feed",
+        "source_url": "https://www.skiareal.cz/en/",
+        "observed_at": "2026-04-29T08:00:00Z",
+        "fetched_at": "2026-04-29T08:00:00Z",
+        "upstream_hash": "2222222222222222222222222222222222222222222222222222222222222205",
+        "attribution_block": { "en": "Source: Špindlerův Mlýn resort feed." }
+      },
+      "season.start_month": {
+        "source": "resort-feed",
+        "source_url": "https://www.skiareal.cz/en/",
+        "observed_at": "2026-04-29T08:00:00Z",
+        "fetched_at": "2026-04-29T08:00:00Z",
+        "upstream_hash": "2222222222222222222222222222222222222222222222222222222222222206",
+        "attribution_block": { "en": "Source: Špindlerův Mlýn resort feed." }
+      },
+      "season.end_month": {
+        "source": "resort-feed",
+        "source_url": "https://www.skiareal.cz/en/",
+        "observed_at": "2026-04-29T08:00:00Z",
+        "fetched_at": "2026-04-29T08:00:00Z",
+        "upstream_hash": "2222222222222222222222222222222222222222222222222222222222222207",
+        "attribution_block": { "en": "Source: Špindlerův Mlýn resort feed." }
+      }
+    }
+  },
+  "live_signal": {
+    "schema_version": 1,
+    "resort_slug": "spindleruv-mlyn",
+    "observed_at": "2026-04-29T08:00:00Z",
+    "fetched_at": "2026-04-29T08:00:00Z",
+    "snow_depth_cm": 90,
+    "lifts_open": { "count": 12, "total": 12 },
+    "lift_pass_day": { "amount": 62, "currency": "EUR" },
+    "lodging_sample": {
+      "median_eur": { "amount": 95, "currency": "EUR" },
+      "sample_size": 25
+    },
+    "field_sources": {
+      "snow_depth_cm": {
+        "source": "opensnow",
+        "source_url": "https://opensnow.com/location/spindleruv-mlyn",
+        "observed_at": "2026-04-29T08:00:00Z",
+        "fetched_at": "2026-04-29T08:00:00Z",
+        "upstream_hash": "2222222222222222222222222222222222222222222222222222222222222301",
+        "attribution_block": { "en": "Source: OpenSnow." }
+      },
+      "lifts_open.count": {
+        "source": "resort-feed",
+        "source_url": "https://www.skiareal.cz/en/lift-status",
+        "observed_at": "2026-04-29T08:00:00Z",
+        "fetched_at": "2026-04-29T08:00:00Z",
+        "upstream_hash": "2222222222222222222222222222222222222222222222222222222222222302",
+        "attribution_block": { "en": "Source: Špindlerův Mlýn resort feed." }
+      },
+      "lifts_open.total": {
+        "source": "resort-feed",
+        "source_url": "https://www.skiareal.cz/en/lift-status",
+        "observed_at": "2026-04-29T08:00:00Z",
+        "fetched_at": "2026-04-29T08:00:00Z",
+        "upstream_hash": "2222222222222222222222222222222222222222222222222222222222222303",
+        "attribution_block": { "en": "Source: Špindlerův Mlýn resort feed." }
+      },
+      "lift_pass_day": {
+        "source": "resort-feed",
+        "source_url": "https://www.skiareal.cz/en/lift-pass",
+        "observed_at": "2026-04-29T08:00:00Z",
+        "fetched_at": "2026-04-29T08:00:00Z",
+        "upstream_hash": "2222222222222222222222222222222222222222222222222222222222222304",
+        "attribution_block": { "en": "Source: Špindlerův Mlýn resort feed (CZK; converted to EUR via ECB reference rate)." },
+        "fx": {
+          "source": "ecb-reference-rate",
+          "observed_at": "2026-04-29T08:00:00Z",
+          "rate": 0.041,
+          "native_amount": 1490,
+          "native_currency": "CZK"
+        }
+      },
+      "lodging_sample.median_eur": {
+        "source": "booking",
+        "source_url": "https://www.booking.com/searchresults.html?ss=Spindleruv+Mlyn",
+        "observed_at": "2026-04-29T08:00:00Z",
+        "fetched_at": "2026-04-29T08:00:00Z",
+        "upstream_hash": "2222222222222222222222222222222222222222222222222222222222222305",
+        "attribution_block": { "en": "Source: Booking.com aggregate (CZK; converted to EUR via ECB reference rate)." },
+        "fx": {
+          "source": "ecb-reference-rate",
+          "observed_at": "2026-04-29T08:00:00Z",
+          "rate": 0.041,
+          "native_amount": 2317,
+          "native_currency": "CZK"
+        }
+      }
+    }
+  },
+  "modified_at": "2026-04-29T08:00:00Z",
+  "editor_modes": {}
+}

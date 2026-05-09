@@ -1,0 +1,152 @@
+{
+  "schema_version": 1,
+  "slug": "kotelnica-bialczanska",
+  "resort": {
+    "schema_version": 1,
+    "slug": "kotelnica-bialczanska",
+    "name": {
+      "en": "Kotelnica Białczańska",
+      "pl": "Kotelnica Białczańska"
+    },
+    "country": "PL",
+    "region": {
+      "en": "Białka Tatrzańska, Tatra Mountains",
+      "pl": "Białka Tatrzańska, Tatry"
+    },
+    "altitude_m": { "min": 770, "max": 920 },
+    "slopes_km": 8,
+    "lift_count": 7,
+    "skiable_terrain_ha": 40,
+    "season": { "start_month": 12, "end_month": 4 },
+    "publish_state": "published",
+    "field_sources": {
+      "altitude_m.min": {
+        "source": "resort-feed",
+        "source_url": "https://bialkatatrzanska.pl/en/",
+        "observed_at": "2026-04-29T08:00:00Z",
+        "fetched_at": "2026-04-29T08:00:00Z",
+        "upstream_hash": "1111111111111111111111111111111111111111111111111111111111111101",
+        "attribution_block": { "en": "Source: Kotelnica Białczańska resort feed." }
+      },
+      "altitude_m.max": {
+        "source": "resort-feed",
+        "source_url": "https://bialkatatrzanska.pl/en/",
+        "observed_at": "2026-04-29T08:00:00Z",
+        "fetched_at": "2026-04-29T08:00:00Z",
+        "upstream_hash": "1111111111111111111111111111111111111111111111111111111111111102",
+        "attribution_block": { "en": "Source: Kotelnica Białczańska resort feed." }
+      },
+      "slopes_km": {
+        "source": "resort-feed",
+        "source_url": "https://bialkatatrzanska.pl/en/",
+        "observed_at": "2026-04-29T08:00:00Z",
+        "fetched_at": "2026-04-29T08:00:00Z",
+        "upstream_hash": "1111111111111111111111111111111111111111111111111111111111111103",
+        "attribution_block": { "en": "Source: Kotelnica Białczańska resort feed." }
+      },
+      "lift_count": {
+        "source": "resort-feed",
+        "source_url": "https://bialkatatrzanska.pl/en/",
+        "observed_at": "2026-04-29T08:00:00Z",
+        "fetched_at": "2026-04-29T08:00:00Z",
+        "upstream_hash": "1111111111111111111111111111111111111111111111111111111111111104",
+        "attribution_block": { "en": "Source: Kotelnica Białczańska resort feed." }
+      },
+      "skiable_terrain_ha": {
+        "source": "resort-feed",
+        "source_url": "https://bialkatatrzanska.pl/en/",
+        "observed_at": "2026-04-29T08:00:00Z",
+        "fetched_at": "2026-04-29T08:00:00Z",
+        "upstream_hash": "1111111111111111111111111111111111111111111111111111111111111105",
+        "attribution_block": { "en": "Source: Kotelnica Białczańska resort feed." }
+      },
+      "season.start_month": {
+        "source": "resort-feed",
+        "source_url": "https://bialkatatrzanska.pl/en/",
+        "observed_at": "2026-04-29T08:00:00Z",
+        "fetched_at": "2026-04-29T08:00:00Z",
+        "upstream_hash": "1111111111111111111111111111111111111111111111111111111111111106",
+        "attribution_block": { "en": "Source: Kotelnica Białczańska resort feed." }
+      },
+      "season.end_month": {
+        "source": "resort-feed",
+        "source_url": "https://bialkatatrzanska.pl/en/",
+        "observed_at": "2026-04-29T08:00:00Z",
+        "fetched_at": "2026-04-29T08:00:00Z",
+        "upstream_hash": "1111111111111111111111111111111111111111111111111111111111111107",
+        "attribution_block": { "en": "Source: Kotelnica Białczańska resort feed." }
+      }
+    }
+  },
+  "live_signal": {
+    "schema_version": 1,
+    "resort_slug": "kotelnica-bialczanska",
+    "observed_at": "2026-04-29T08:00:00Z",
+    "fetched_at": "2026-04-29T08:00:00Z",
+    "snow_depth_cm": 145,
+    "lifts_open": { "count": 7, "total": 7 },
+    "lift_pass_day": { "amount": 50, "currency": "EUR" },
+    "lodging_sample": {
+      "median_eur": { "amount": 80, "currency": "EUR" },
+      "sample_size": 30
+    },
+    "field_sources": {
+      "snow_depth_cm": {
+        "source": "opensnow",
+        "source_url": "https://opensnow.com/location/kotelnica-bialczanska",
+        "observed_at": "2026-04-29T08:00:00Z",
+        "fetched_at": "2026-04-29T08:00:00Z",
+        "upstream_hash": "1111111111111111111111111111111111111111111111111111111111111201",
+        "attribution_block": { "en": "Source: OpenSnow." }
+      },
+      "lifts_open.count": {
+        "source": "resort-feed",
+        "source_url": "https://bialkatatrzanska.pl/en/lift-status",
+        "observed_at": "2026-04-29T08:00:00Z",
+        "fetched_at": "2026-04-29T08:00:00Z",
+        "upstream_hash": "1111111111111111111111111111111111111111111111111111111111111202",
+        "attribution_block": { "en": "Source: Kotelnica Białczańska resort feed." }
+      },
+      "lifts_open.total": {
+        "source": "resort-feed",
+        "source_url": "https://bialkatatrzanska.pl/en/lift-status",
+        "observed_at": "2026-04-29T08:00:00Z",
+        "fetched_at": "2026-04-29T08:00:00Z",
+        "upstream_hash": "1111111111111111111111111111111111111111111111111111111111111203",
+        "attribution_block": { "en": "Source: Kotelnica Białczańska resort feed." }
+      },
+      "lift_pass_day": {
+        "source": "resort-feed",
+        "source_url": "https://bialkatatrzanska.pl/en/lift-pass",
+        "observed_at": "2026-04-29T08:00:00Z",
+        "fetched_at": "2026-04-29T08:00:00Z",
+        "upstream_hash": "1111111111111111111111111111111111111111111111111111111111111204",
+        "attribution_block": { "en": "Source: Kotelnica Białczańska resort feed (PLN; converted to EUR via ECB reference rate)." },
+        "fx": {
+          "source": "ecb-reference-rate",
+          "observed_at": "2026-04-29T08:00:00Z",
+          "rate": 0.2381,
+          "native_amount": 210,
+          "native_currency": "PLN"
+        }
+      },
+      "lodging_sample.median_eur": {
+        "source": "booking",
+        "source_url": "https://www.booking.com/searchresults.html?ss=Bialka+Tatrzanska",
+        "observed_at": "2026-04-29T08:00:00Z",
+        "fetched_at": "2026-04-29T08:00:00Z",
+        "upstream_hash": "1111111111111111111111111111111111111111111111111111111111111205",
+        "attribution_block": { "en": "Source: Booking.com aggregate (PLN; converted to EUR via ECB reference rate)." },
+        "fx": {
+          "source": "ecb-reference-rate",
+          "observed_at": "2026-04-29T08:00:00Z",
+          "rate": 0.2381,
+          "native_amount": 336,
+          "native_currency": "PLN"
+        }
+      }
+    }
+  },
+  "modified_at": "2026-04-29T08:00:00Z",
+  "editor_modes": {}
+}
