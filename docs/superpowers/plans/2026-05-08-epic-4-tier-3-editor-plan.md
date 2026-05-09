@@ -1417,18 +1417,21 @@ function clearDraftLeaf(draft: DraftShape, side: Side, path: MetricPath): DraftS
   if (segments.length === 1) {
     delete next[segments[0]]
   } else {
-    const [parent, leaf] = segments
-    const parentObj = next[parent]
-    if (parentObj !== undefined && typeof parentObj === 'object' && parentObj !== null) {
-      const nextParent = { ...(parentObj as Record<string, unknown>) }
-      delete nextParent[leaf]
-      // Preserve other siblings; only drop the parent if it became empty.
-      if (Object.keys(nextParent).length === 0) {
-        delete next[parent]
-      } else {
-        next[parent] = nextParent
-      }
-    }
+    // Per Codex round-21 P2-29 fold: nested-leaf clears DROP THE WHOLE
+    // parent, not just the edited leaf. patchDraftLeaf had already hydrated
+    // the parent with siblings from canonical (per round-4 P2-6 fold); a
+    // partial-parent PUT body would be rejected by the server because the
+    // shallow-merge of top-level Resort fields replaces the parent whole
+    // (e.g., `resort: { season: { end_month: 4 } }` → merged Resort has
+    // `season = { end_month: 4 }` missing start_month → fails schema).
+    //
+    // Tradeoff: if the user explicitly edited BOTH leaves of the same
+    // parent and then cleared one, the other edit is also dropped. This
+    // is acceptable Phase-1 behavior — clearing one leaf signals "starting
+    // over"; the user can re-edit either leaf. PR 4.4d Task 6 test list
+    // adds nested-clear coverage to lock this in.
+    const [parent] = segments
+    delete next[parent]
   }
   // Also drop the field_sources entry for this path.
   const fs = next.field_sources as Record<string, unknown> | undefined
@@ -1631,6 +1634,7 @@ afterEach(() => { vi.unstubAllGlobals() })
   - **Fractional `lift_count` does NOT persist** per Codex round-19 P2-26 fold: above-md MANUAL on `lift_count`. Type `'7.5'` → `Number('7.5') === 7.5` (NOT NaN) — but `Resort.lift_count` is `z.number().int()` (`packages/schema/src/resort.ts:14`). Without the integer guard, the PUT would fire and the server would reject as `400 invalid-resort`, leaving the field in `save-failed` despite valid local intent. Assertion: `apiClient.upsertResort` is NOT called for `'7.5'`; local string updates to `'7.5'`. Then type `'7'` → PUT fires with `lift_count: 7`. (`slopes_km`, `altitude_m.*`, `skiable_terrain_ha` are NOT `.int()` — fractional values pass through. Test only `lift_count` for the integer guard.)
   - **Edit-then-clear cancels the pending PUT** per Codex round-20 P2-28 fold: above-md MANUAL on `lift_count`. Type `'7'` (valid) → setFieldValue fires; draft.resort.lift_count = 7 + draft.resort.field_sources.lift_count = manual; debounce timer set. BEFORE 500ms elapses, type `''` (clear) — `clearFieldValue('lift_count')` fires; draft.resort.lift_count is removed; draft.resort.field_sources.lift_count is removed; status reverts to no-edit-pending. Fast-forward debounce. **Assert: `apiClient.upsertResort` is NOT called** (the previously-pending value 7 was cleared; the next flush sees a sparse draft with no `lift_count`). Same flow for invalid intermediates (`'7'` → `'7e'` → cleared). Without `clearFieldValue`, the stale pending value would PUT despite the input being currently empty/invalid.
   - **Edit-then-clear preserves editor_modes** per Codex round-20 P2-28 fold: same flow as above, but assert that `draft.editor_modes['lift_count']` (or whatever was set via prior toggleMode) is **NOT** removed by `clearFieldValue`. Only the value + manual field_sources entry are dropped; the analyst's MANUAL flag persists.
+  - **Edit-then-clear of a nested path drops the whole hydrated parent** per Codex round-21 P2-29 fold: above-md MANUAL on `season.start_month`. Canonical has `season: { start_month: 12, end_month: 4 }`. Type `'11'` (valid) → setFieldValue fires; `patchDraftLeaf` hydrates parent: `draft.resort.season = { start_month: 11, end_month: 4 }` (sibling preserved per round-4 P2-6). BEFORE debounce, type `''` (clear) → `clearFieldValue('season.start_month')` fires. **Assert: `draft.resort?.season` is `undefined`** (whole parent dropped — NOT `{ end_month: 4 }`). Fast-forward debounce → `apiClient.upsertResort` is NOT called. Without this fix, the next flush would PUT `resort: { season: { end_month: 4 } }`; server's shallow-merge of `Resort.season` would replace whole, leaving `season: { end_month: 4 }` missing `start_month` → fails `Resort.parse()` → `400 invalid-resort`. Repeat the same flow for `altitude_m.min` (canonical 1500/2000) — assert `draft.resort?.altitude_m` is `undefined` after clear.
 - [ ] **Step 4:** The pre-existing 4.4b inline-span tests must each call `stubMatchMedia(false)` (or default to false in their `beforeEach`) so they exercise the below-md branch unambiguously after the responsive gate ships.
 - [ ] **Step 5:** Run failing.
 - [ ] **Step 6: Implement.** Replace the FieldRow body:
@@ -2046,5 +2050,11 @@ Two findings on the v20 plan (one P2, one P3); both folded:
 One P2 finding on the v21 plan; folded:
 
 - **P2-28 — Transient input branches don't clear pre-existing pending draft.** v21's `onLocalChange` had each transient/invalid branch (empty/whitespace/NaN/out-of-range/non-integer) update `localString` and `return` — but if the user had previously typed a valid value (which already wrote to draft + scheduled the 500ms debounce), the SUBSEQUENT clear/invalid input would only update the local string. Draft still held the prior valid value AND the debounce timer was still set; 500ms later the PUT would fire with the stale value despite the input currently being empty/invalid. **Fold:** added a module-level `clearFieldValue(slug, path)` function that removes both the value AND the field_sources manual entry from draft.resort/draft.live_signal (preserving `editor_modes[path]` since the MANUAL flag is independent of the value), bumps rev, and reschedules the flush (which then sees the cleared draft and either short-circuits via the round-18 P2-25 empty-diff branch OR sends a smaller body without the cleared path). Each transient branch in `onLocalChange` now calls `clearFieldValue(path)` before `return`. PR 4.4d Task 6 test list adds two new cases: (1) "edit-then-clear cancels the pending PUT" — assert `apiClient.upsertResort` is NOT called after type-then-clear sequence; (2) "edit-then-clear preserves editor_modes" — assert `draft.editor_modes[path]` is NOT removed by `clearFieldValue`.
+
+### Codex round 21 (PR #90 review by `chatgpt-codex-connector`, 2026-05-09)
+
+One P2 follow-up to the round-20 fold; folded:
+
+- **P2-29 — Nested-leaf clears emitted incomplete-parent PUTs.** v22's `clearDraftLeaf` for nested paths (`season.start_month`, `altitude_m.min`) only deleted the edited leaf, leaving the sibling that `patchDraftLeaf` had hydrated from canonical (per round-4 P2-6 fold). The next flush would build `resort: { season: { end_month: 4 } }` — the server's shallow-merge for top-level `Resort` fields replaces `season` whole, leaving `season: { end_month: 4 }` missing `start_month` → fails `Resort.parse()` → `400 invalid-resort`. The "edit-then-clear cancels pending PUT" guarantee from round-20 didn't hold for nested fields. **Fold:** changed `clearDraftLeaf`'s nested-path branch to drop the WHOLE parent (`delete next[parent]`) instead of removing only the edited leaf. Tradeoff: if the user explicitly edited BOTH leaves of the same parent and then cleared one, the other edit is also dropped — acceptable Phase-1 behavior since clearing one leaf signals "starting over"; the user can re-edit either leaf. PR 4.4d Task 6 test list adds an "edit-then-clear of a nested path drops the whole hydrated parent" case covering `season.start_month` AND `altitude_m.min`.
 
 **End of plan.**
