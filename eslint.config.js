@@ -314,10 +314,16 @@ export default tseslint.config(
                 'Use loadResortDatasetFromObject in apps/public to keep node:fs/promises out of the browser bundle. See spec §2.2.',
             },
             {
+              // Codex round-5 P2 fold (PR 4.4c): ban the whole '/node' subpath
+              // wholesale — not just `loadResortDataset` / `publishDataset` by
+              // name. PR 4.4c widened the subpath surface by exporting
+              // `atomicWriteText`; a name-list ban silently lets every future
+              // /node helper through. Wholesale subpath ban is symmetric with
+              // the existing dynamic-import selector below (line 348-350) and
+              // with the apps/admin/src/** ban in Block A above (line 405-409).
               name: '@snowboard-trip-advisor/schema/node',
-              importNames: ['loadResortDataset', 'publishDataset'],
               message:
-                "The '/node' subpath carries Node-only utilities (node:fs/promises). Use loadResortDatasetFromObject from '@snowboard-trip-advisor/schema' (the package root) instead — it's browser-safe and was designed for apps/public's runtime fetch path. See spec §2.2.",
+                "The '/node' subpath carries Node-only utilities (node:fs/promises, node:crypto, atomic-write helpers). The apps/public browser bundle MUST not import this subpath at all. Use the browser-safe '@snowboard-trip-advisor/schema' (package root) — it re-exports loadResortDatasetFromObject, all primitives, and all wire-shape types apps/public needs. See spec §2.2.",
             },
           ],
         },
