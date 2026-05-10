@@ -27,7 +27,18 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: ['src/**'],
-      exclude: ['src/main.tsx', 'src/test-setup.ts', '**/*.test.{ts,tsx}', '**/*.d.ts'],
+      exclude: [
+        'src/main.tsx',
+        'src/test-setup.ts',
+        '**/*.test.{ts,tsx}',
+        '**/*.d.ts',
+        // PR 4.4a-2: HMR side-effect module (useResortDetail.hmr.ts) is
+        // dead code under vitest — `import.meta.hot` is undefined in the
+        // test env so the entire module body is unreachable. Mirrors
+        // apps/public/vite.config.ts:143. CLAUDE.md "Coverage Rules" bans
+        // inline /* v8 ignore */ comments, so the exclusion is a path.
+        'src/state/useResortDetail.hmr.ts',
+      ],
       reporter: ['text', 'lcov'],
     },
   },

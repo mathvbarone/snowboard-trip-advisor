@@ -37,11 +37,14 @@ describe('dispatch (PR 4.1b §2.1, spec §10.1 + §7.6)', (): void => {
   })
 
   it('routes GET /api/resorts/:slug to resortDetailHandler with parsed slug', async (): Promise<void> => {
+    // Cold tmpdir has no workspace file and no published doc; the handler
+    // (real impl in PR 4.4a-2) throws NotFoundError → dispatch envelope 404.
     const r = await dispatch(
       { method: 'GET', pathname: '/api/resorts/kotelnica-bialczanska', search: '', body: undefined },
       { workspaceRoot },
     )
-    expect(r?.status).toBe(501)
+    expect(r?.status).toBe(404)
+    expect(r?.body).toMatchObject({ error: { code: 'not-found' } })
   })
 
   it('routes PUT /api/resorts/:slug to resortUpsertHandler with parsed slug + body', async (): Promise<void> => {

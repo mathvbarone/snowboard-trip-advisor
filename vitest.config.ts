@@ -106,6 +106,11 @@ export default defineConfig({
         // glob both here and in apps/public/vite.config.ts. See
         // useDataset.ts header for the cache-discipline rationale.
         'apps/public/src/state/useDataset.hmr.ts',
+        // `apps/admin/src/state/useResortDetail.hmr.ts` — same rationale as
+        // useDataset.hmr.ts above. PR 4.4a-2 (Decision D3 dual-cache + Codex
+        // round-8 P2-12 cycle-free HMR). Mirrored in apps/admin/vite.config.ts
+        // for the workspace-level coverage view.
+        'apps/admin/src/state/useResortDetail.hmr.ts',
         // `scripts/hooks/**` are shell scripts (test-hooks.sh, deny-dangerous-git.sh).
         'scripts/hooks/**',
         // `scripts/pre-commit` is a shell script installed into the worktree
