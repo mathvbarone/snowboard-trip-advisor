@@ -5,7 +5,6 @@ import {
   METRIC_FIELDS,
   WorkspaceFile,
   projectFieldStates,
-  type FieldSource,
   type MetricPath,
   type Resort,
   type ResortLiveSignal,
@@ -148,11 +147,12 @@ export async function resortUpsertHandler(
     throw new InvalidResortError(parsed.error.issues)
   }
 
-  // Codex round-3 P1 fold: provenance pairing — defense-in-depth for the
-  // wire schema's optional field_sources. See assertProvenancePairing.
+  // Codex round-3 P1 + round-4 P2 fold: provenance pairing — defense-in-depth
+  // for the wire schema's optional field_sources. See assertProvenancePairing.
   assertProvenancePairing(
     { resort: baseResort, live: baseLive },
     { resort: parsed.data.resort, live: parsed.data.live_signal },
+    input.body,
   )
 
   await atomicWriteWorkspaceFile(targetPath, JSON.stringify(parsed.data, null, 2))
@@ -233,19 +233,26 @@ function mergeLiveSignal(
   }
 }
 
-// Codex round-3 P1 fold — provenance pairing.
+// Codex round-3 P1 + round-4 P2 fold — provenance pairing.
 // The wire schema's ResortUpsertBody types `resort.field_sources` and
 // `live_signal.field_sources` as OPTIONAL (a value patch can ship without
-// provenance). On the server side, that's a misattribution risk: a PUT like
-// `{ resort: { slopes_km: 999 } }` would set the new value while leaving the
-// inherited `field_sources.slopes_km` (e.g., source: 'resort-feed') intact —
-// the workspace would then claim an analyst's manual edit was sourced from
-// the upstream adapter, violating the project's "Provenance is not optional"
-// core principle. Per Decision D12 the SPA pairs every value edit with a
-// fresh manual FieldSource; the server enforces the pairing as defense-in-
-// depth, rejecting any PUT that changes a metric-path value to a defined
-// state without a matching manual field_sources entry. Value REMOVAL
-// (afterValue undefined) is exempt — there's no value left to misattribute.
+// provenance). On the server side, that's a misattribution risk in two flavors:
+//   (a) base has upstream provenance (e.g., resort-feed); patch changes value
+//       without field_sources — workspace would claim the manual edit was
+//       sourced from the upstream adapter.
+//   (b) base ALREADY has manual provenance from a prior PUT; patch changes
+//       value without field_sources — workspace would silently keep the
+//       OLD observed_at / upstream_hash / attribution for the new value,
+//       claiming a manual edit at a different timestamp than reality.
+// Per Decision D12 the SPA pairs every value edit with a fresh manual
+// FieldSource. The server enforces the pairing as defense-in-depth: when a
+// metric-path value changes to a defined state, the PATCH must supply a
+// fresh field_sources entry for that path. Checking only the merged source
+// (Codex round-3 first attempt) misses case (b); checking patch presence
+// catches both. Value REMOVAL (afterValue undefined) is exempt — there's
+// no value left to misattribute. ManualOnlyFieldSource at the wire layer
+// guarantees any patch-supplied entry has source='manual', so patch
+// presence implies manual source automatically.
 const DURABLE_PATHS: ReadonlySet<MetricPath> = new Set<MetricPath>([
   'altitude_m.min', 'altitude_m.max', 'slopes_km', 'lift_count',
   'skiable_terrain_ha', 'season.start_month', 'season.end_month',
@@ -272,15 +279,11 @@ function readMetricValue(
   }
 }
 
-function readFieldSource(
-  resort: Resort,
-  live: ResortLiveSignal | null,
-  path: MetricPath,
-): FieldSource | undefined {
+function patchSuppliedFieldSourceFor(patch: ResortUpsertBody, path: MetricPath): boolean {
   if (DURABLE_PATHS.has(path)) {
-    return resort.field_sources[path]
+    return patch.resort?.field_sources?.[path] !== undefined
   }
-  return live?.field_sources[path]
+  return patch.live_signal?.field_sources?.[path] !== undefined
 }
 
 function valuesEqual(a: unknown, b: unknown): boolean {
@@ -299,6 +302,7 @@ function valuesEqual(a: unknown, b: unknown): boolean {
 function assertProvenancePairing(
   base: { readonly resort: Resort; readonly live: ResortLiveSignal | null },
   merged: { readonly resort: Resort; readonly live: ResortLiveSignal | null },
+  patch: ResortUpsertBody,
 ): void {
   for (const path of METRIC_FIELDS) {
     const beforeValue = readMetricValue(base.resort, base.live, path)
@@ -311,15 +315,16 @@ function assertProvenancePairing(
     if (valuesEqual(beforeValue, afterValue)) {
       continue
     }
-    const fs = readFieldSource(merged.resort, merged.live, path)
-    if (fs?.source !== 'manual') {
-      // Template-literal coercion renders `undefined` as "undefined" — same
-      // human-readable output as `?? 'undefined'` without the dead branch.
+    // Codex round-4 P2 fold: check the PATCH supplied a fresh entry, not the
+    // merged source. Inspecting only `merged.field_sources[path].source`
+    // missed case (b) above (base already manual; merged inherits manual;
+    // observed_at / upstream_hash silently stale).
+    if (!patchSuppliedFieldSourceFor(patch, path)) {
       throw new InvalidRequestError(
-        `value at metric path "${path}" changed but no manual field_sources entry was supplied — server would otherwise misattribute the edit to source "${String(fs?.source)}"`,
+        `value at metric path "${path}" changed but the patch did not supply a fresh manual field_sources entry — the merged file would carry stale provenance (observed_at / upstream_hash) for the new value`,
         [{
           path: ['field_sources', path],
-          message: `manual field_sources entry required when value at "${path}" changes`,
+          message: `fresh manual field_sources entry required in the same PUT body when value at "${path}" changes`,
         }],
       )
     }

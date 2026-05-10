@@ -428,7 +428,7 @@ describe('resortUpsertHandler — reject paths', (): void => {
       const err = e as { code: string; message: string; details: ReadonlyArray<{ path: ReadonlyArray<string>; message: string }> }
       expect(err.code).toBe('invalid-request')
       expect(err.message).toMatch(/slopes_km/)
-      expect(err.message).toMatch(/resort-feed/)   // names the misattribution source explicitly
+      expect(err.message).toMatch(/stale provenance/)
       expect(err.details[0]?.path).toEqual(['field_sources', 'slopes_km'])
     }
     // On-disk file is byte-equal to the seed — no partial overwrite.
@@ -450,6 +450,56 @@ describe('resortUpsertHandler — reject paths', (): void => {
         { workspaceRoot: root },
       ),
     ).rejects.toMatchObject({ code: 'invalid-request' })
+  })
+
+  it('rejects a follow-up value edit even when base ALREADY has manual provenance (Codex round-4 P2)', async (): Promise<void> => {
+    // Two-step PUT pattern: first PUT pairs slopes_km value + manual field_sources
+    // (correct); second PUT changes slopes_km value WITHOUT field_sources. A
+    // merged-source-only check would PASS the second PUT (merged source is
+    // still 'manual' from the inherited base entry), but the workspace would
+    // silently keep the FIRST PUT's observed_at / upstream_hash for the
+    // SECOND PUT's value — claiming a manual edit at a different timestamp.
+    // The patch-presence check catches it.
+    await seedWorkspace(workspaceDir, 'kotelnica-bialczanska')
+    await seedPublished(publishedPath, 'kotelnica-bialczanska')
+    // Step 1: paired manual value + provenance — accepted.
+    await resortUpsertHandler(
+      {
+        params: { slug: KOTELNICA },
+        body: {
+          resort: {
+            slopes_km: 100,
+            field_sources: {
+              slopes_km: {
+                source: 'manual',
+                source_url: 'https://admin.local/manual',
+                observed_at: ISODateTimeString.parse('2026-04-29T10:00:00Z'),
+                fetched_at: ISODateTimeString.parse('2026-04-29T10:00:00Z'),
+                upstream_hash: UpstreamHash.parse('a'.repeat(64)),
+                attribution_block: { en: 'Step 1.' },
+              },
+            },
+          },
+        },
+      },
+      { workspaceRoot: root },
+    )
+    // Step 2: value changes again, but patch omits field_sources — must reject.
+    await expect(
+      resortUpsertHandler(
+        {
+          params: { slug: KOTELNICA },
+          body: { resort: { slopes_km: 200 } },
+        },
+        { workspaceRoot: root },
+      ),
+    ).rejects.toMatchObject({ code: 'invalid-request' })
+    // On-disk: step 1's value (100) preserved, NOT step 2's 200.
+    const wf = WorkspaceFile.parse(
+      JSON.parse(await readFile(join(workspaceDir, 'kotelnica-bialczanska.json'), 'utf-8')),
+    )
+    expect(wf.resort.slopes_km).toBe(100)
+    expect(wf.resort.field_sources['slopes_km']?.upstream_hash).toBe('a'.repeat(64))
   })
 
   it('accepts a value edit when the patch carries a matching manual field_sources entry (positive control)', async (): Promise<void> => {
