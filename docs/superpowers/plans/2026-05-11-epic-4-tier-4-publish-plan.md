@@ -1,0 +1,1438 @@
+# Epic 4 Tier 4 — Admin Publish Workflow Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` to implement this plan PR-by-PR. Steps use checkbox (`- [ ]`) syntax for tracking. Each PR is its own atomic concern; do **not** bundle. Read the **Reviewer-fold log** at the bottom before starting Task 1 of any PR. Per memory `feedback_atomic_prs.md`: ≤8 files per PR; one concern per PR.
+
+**Goal:** Ship the admin publish workflow — server-side publish + listPublishes handlers, a Toast design-system primitive, the PublishDialog with pre-publish blocking-state gating, and the PublishHistory view — closing the Tier 4 → Tier 5 gate ([spec §7.4](../specs/2026-05-01-epic-4-admin-app-design.md)).
+
+**Architecture:** The publish handler reads `data/admin-workspace/**` ∪ `data/published/current.v1.json` (workspace overrides per slug), composes a `PublishedDataset` envelope, and delegates to `publishDataset()` from `@snowboard-trip-advisor/schema/node` — same library the Epic 2 CLI / `publishDataset.test.ts` exercises. listPublishes parses `data/published/history/${counter}-${isoTimestamp}.json` filenames. PublishDialog reads `GET /api/health` (no client-side `validatePublishedDataset` import per [spec §4.3.1](../specs/2026-05-01-epic-4-admin-app-design.md#431-pre-publish-blocking-state-surface)); confirm-button disabled gates on 4 health fields. Toast is a single-slot DS primitive with 3 variants. PublishHistory uses a Suspense-friendly hook mirroring `useResortList`'s pattern.
+
+**Tech Stack:** TypeScript strict, React 19, Zod v4, MSW tiered (canned + bridge), Vitest + jest-axe, `<div role="dialog" aria-modal="true">` for modal (raw `<dialog>` JSX banned by `eslint.config.js:19` `RAW_HTML_ELS`).
+
+---
+
+## Tier 4 → Tier 5 gate (what we are proving)
+
+Per [spec §7.4](../specs/2026-05-01-epic-4-admin-app-design.md), after PRs 4.5a/b/c/d merge:
+
+1. Publish dialog → POST → `data/published/history/` grows on disk (verified via bridge test); Toast renders on success/failure; PublishHistory shows the new version.
+2. Pre-publish blocking-state surface gates correctly on all four conditions: `resorts_with_failed_fields > 0`, `resorts_with_missing_provenance > 0`, `resorts_with_corrupt_workspace > 0`, `resorts_total === 0`. Each disabled-state's tooltip text verified per [spec §4.3.1](../specs/2026-05-01-epic-4-admin-app-design.md#431-pre-publish-blocking-state-surface).
+3. `npm run qa` green on `main` after each PR merges.
+
+---
+
+## Decisions log
+
+| ID | Decision | Why |
+|---|---|---|
+| **A1** | Tier 4 ships as **4 PRs**: 4.5a (server) → 4.5b (Toast DS primitive) → 4.5c (state hooks + PublishDialog + Shell wire-up; ships both `usePublish` AND `useListPublishes` so `usePublish.invalidateListPublishes()` resolves at compile time) → 4.5d (PublishHistory view + routing + bridge integration). Spec §7.15 bundled all UI in one PR (4.5b); execution splits for the ≤8-file-budget per `feedback_atomic_prs.md`. Same pattern as Tier 3's 4.4a split into 4.4a-1 + 4.4a-2. **Note on dependency ordering** (Codex-equivalent plan review P0-1 fold): `usePublish` (PR 4.5c) imports `invalidateListPublishes` from `useListPublishes`; therefore `useListPublishes.ts` ships in **PR 4.5c**, not 4.5d. PR 4.5d ships only the `PublishHistory` view + URL routing + integration test that consume the hook. | File budget + import-graph correctness. Each concern (server, DS primitive, action+state, history view) ships atomically. |
+| **B1** | Server handler does **NOT** pre-check the 4 blocking conditions from spec §4.3.1. The dialog uses `useHealth()` for pre-block; the server delegates validation to `publishDataset()`. Single source of truth on the server (publishDataset); client pre-block is a UX affordance. **No new `publish-blocked-*` error codes** — rely on the existing `publish-validation-failed` envelope (spec §4.6). | Locality + flat architecture. The post-Tier-3 handoff suggested distinct codes "as an option"; the spec text already locks `publish-validation-failed` as the validation-failure code. Adding new codes would be premature abstraction. |
+| **B2** | Publish handler still asserts `slug === '__all__'` in Phase 1 (per spec §4.6 "the handler asserts `slug === '__all__'` (catches accidental per-slug calls before Phase 2 widens the contract)"). Non-`'__all__'` slugs respond `400 invalid-request` with `details.reason: 'per-slug publish is Phase 2'`. | Defense in depth. The path-param schema accepts the union but the handler refuses per-slug in Phase 1. |
+| **B3** | Publish handler reads workspace ∪ published as documented in spec §4.6 (workspace overrides per slug; published-only resorts kept as-is). The composition function `composePublishInput(workspaceDir, publishedDoc): Resort[]` lives inline inside `apps/admin/server/publish.ts` (NOT a separate `composePublishInput.ts` file) — locality-of-behaviour per `ai-clean-code-adherence`. Tested through the handler's unit tests. | Locality. No "factored-out function for testability"; the test boundary is the handler. |
+| **C1** | Toast variants: `'info' \| 'success' \| 'error'` per spec §7.15 (line 644/653). ARIA: `info`/`success` → `role="status"` (polite), `error` → `role="alert"` (assertive). **Auto-dismiss defaults (P2-1 fold — per-variant for WCAG 2.2 SC 2.2.1 timing-adjustable):** `info` 5000 ms, `success` 5000 ms, `error` 8000 ms. The `dismissAfterMs` prop overrides per-call. **Pause-on-interaction (P2-5 fold — keyboard parity):** `onMouseEnter` / `onFocus` clear the timer + capture remaining time; `onMouseLeave` / `onBlur` reset the timer from the captured remainder. The Toast root carries `tabIndex={0}` so keyboard users can focus + pause. A visible "Dismiss" `<Button>` inside the Toast lets keyboard users clear the Toast without waiting (mirrors error-Toast convention). **Single Toast at a time** — Phase 1 doesn't need a queue/portal/stack; one slot at the top-right. Add fan-out when a second concurrent consumer exists. | YAGNI. Publish is the only consumer; one Toast suffices. WCAG 2.2 SC 2.2.1 satisfied via dismiss button + pause on hover/focus + per-variant timing. |
+| **C2** | `<ToastProvider>` is the host. Children opt-in via a `useToast()` hook returning `{ show(input): void }`. Provider stores `ToastInput \| null` in `useState`; show overwrites and starts the timer. **No queue.** If a second `show()` fires while one is visible, it replaces. **P2-2 fold — accepted risk:** in the publish flow, the user triggers the Toast (Publish click → success/error Toast); only that flow shows Toasts in Phase 1, so the user never sees a Toast they didn't trigger get replaced. When Phase 2 adds adapter actions (Test / Sync) that emit Toasts, revisit the queue decision then. | YAGNI for Phase 1; the user-triggered-only invariant makes replacement safe. |
+| **D1** | `usePublish` returns `{ submit, status, response, error, reset }`. `status` is `'idle' \| 'submitting' \| 'success' \| 'error'`. `submit(): Promise<void>` calls `apiClient.publish()` and updates state. `reset()` clears back to `'idle'` (used by the dialog to dismiss the error indicator before the user re-tries). **NOT** Suspense-based — publish is a mutation, not a render-time read. | Locality + ai-clean-code-adherence §2: Suspense for reads, callbacks for mutations. Don't reuse `useResortDetail`'s `use()` pattern for an action. |
+| **D2** | On successful publish, `usePublish` calls `invalidateHealth()` AND `invalidateListPublishes()` so the Dashboard's blocking counts and the PublishHistory list both reflect the new state. **NOT** `invalidateResortDetail()` — workspace files weren't mutated (publish reads them, writes `current.v1.json` + history). Per-resort detail caches stay valid. | Cache coherence. Only invalidate what the publish mutation actually affects. |
+| **D3** | `useHealth` is **extended** (one file MODIFY in PR 4.5c) with consumer subscription via `useSyncExternalStore` (mirroring `useResortDetail`'s round-2 P2-C fold from PR 4.4d). Adds `invalidateHealth(): void` module export. Without this, `invalidateHealth()` would re-fetch but mounted PublishDialog wouldn't re-render. | Mirrors Tier 3's pattern. Avoids the latent oversight the round-2 P2-C fold uncovered. |
+| **E1** | `useListPublishes` is Suspense-friendly via React 19 `use()` + a single-promise cache (`Map<string, Promise<...>>` keyed by serialised query string, mirroring `useResortList`'s pattern). Consumer subscription via `useSyncExternalStore` for `invalidateListPublishes()` (NEW module export). Rejected-promise pinning per [ADR-0010](../../adr/0010-usedataset-rejected-promise-pinning.md). | Consistency with `useResortList`. `__resetForTests()` exposed for test isolation. |
+| **F1** | `PublishDialog` is a `<div role="dialog" aria-modal="true" aria-labelledby="publish-dialog-title">` overlay (raw `<dialog>` JSX banned by `RAW_HTML_ELS`). Backdrop: sibling `<div className="publish-dialog__backdrop">` with `onClick` → close. **Focus management** (Phase 1, P1-6 fold — scope reduced from full trap to MVP):
+- `useEffect` on mount focuses the first focusable element via ref.
+- `Escape` key handler closes the dialog.
+- On close, focus restores to the opener button (Publish in HeaderBar) via a saved `previouslyFocused` ref captured on mount.
+- **NO Tab / Shift+Tab focus trap in Phase 1.** Tab from the Confirm button leaves the modal — acceptable because (i) `aria-modal="true"` signals modality to AT, (ii) the dialog has at most 3 focusable elements (Cancel, Confirm, backdrop is `aria-hidden`), and (iii) tab-leaving lands on the HeaderBar / Sidebar buttons, all of which are visually-occluded by the modal overlay (CSS pointer-events). Add a real trap in PR 4.6a Tier 5 polish if needed. **The 4.5c-6 PublishDialog test removes the "Tab/Shift+Tab cycles inside" assertion accordingly.**
+
+**ARIA tooltip wiring** (P2-4 fold):
+- The blocking-state copy renders inside `<p id="publish-dialog-blocker" className="publish-dialog__tooltip">…</p>` (no `role="status"` — the tooltip is not a live region; it's static descriptive text for a disabled button).
+- The Confirm button carries `aria-describedby="publish-dialog-blocker"` when `blocker !== null` so AT users hear the reason for the disabled state. When `blocker === null`, the `aria-describedby` attribute is omitted (no `<p>` rendered). | No DS Modal exists; building one would balloon scope. Inline the primitive with explicit focus management; promote to DS when a second modal consumer (with a real focus-trap need) exists. |
+| **F2** | PublishDialog **does NOT call `apiClient.publish()` directly** — it consumes `usePublish()` from `apps/admin/src/state/usePublish.ts`. Side effects live in the hook; render lives in the dialog. | Locality. Render-only component; state lives in hook. |
+| **G1** | Shell's HeaderBar gains a `<Button>Publish</Button>` (existing DS primitive, `variant="primary"` per design pattern). Click toggles `isPublishOpen` local Shell state. `<PublishDialog open={isPublishOpen} onClose={...} />` renders inside Shell's root div (NOT portal — Phase 1 admin has no z-index complexity). `<ToastProvider>` wraps Shell's main content. | Locality. Shell already coordinates HeaderBar + Sidebar + main; adding the dialog + toast slots fits cleanly. |
+| **H1** | PublishHistory route lives at `?route=publishes`. `urlState.ts` MODIFY adds `{ route: 'publishes'; page?: number }` variant; default page = 0. Sort: `published_at` descending (handler returns newest-first per spec §4.7). Pagination: `?route=publishes&page=N`. Page size: 20 (matches `ListPublishesQuery` default per spec §4.7). | Match existing URL-state pattern. |
+| **I1** | Bridge integration test `publish-flow.test.tsx` ships in PR **4.5d** (NOT a separate 4.5e). The integration test exercises the full flow (open Shell → click Publish → confirm → wait → see Toast → navigate to `?route=publishes` → see entry); PublishHistory is required for the "see entry" assertion. The PR 4.5d file budget (6 files post-A1 P0-1 fold) fits. | Test serves the user-facing flow; ship with the last UI piece. |
+| **J1** | Per spec §4.9 invariant 5 (`POST` carries `Idempotency-Key`; Phase 1 honors but does not enforce; Phase 2 enforces): the publish handler **accepts but does not act on** the header — it parses request bodies via Zod, and the header is request-metadata that the dispatcher passes through without rejecting. **Add a test** in `apps/admin/server/__tests__/publish.test.ts` asserting that a request carrying `Idempotency-Key: <opaque>` produces an identical response shape (handler ignores it). The wire schemas in `packages/schema/api/` already include the header in `PublishRequestMeta` if present; no schema change required for Phase 1. | Spec-compliance + Phase 2 readiness. Without an explicit test, a future refactor that 400s on unknown headers would silently regress the invariant. |
+
+---
+
+## What we are NOT building (anti-patterns avoided per ai-clean-code-adherence)
+
+- **No `createPublishClient({ fetcher })` factory.** `usePublish` calls `apiClient.publish()` directly; tests mock at the MSW boundary. (§2 anti-pattern: "inject the fetcher for testability".)
+- **No Toast queue / portal / stack.** Single Toast slot in Shell with replacement-on-second-show (Decision C2). Add a queue when Phase 2 adapter actions emit concurrent Toasts.
+- **No new `publish-blocked-*` error codes** as the post-Tier-3 handoff suggested as an option. Rely on the existing `publish-validation-failed` envelope. (§3 — premature error-code expansion.)
+- **No DS `Modal` primitive yet.** PublishDialog inlines the `<div role="dialog">` + focus-trap. Promote to DS when a second modal consumer exists.
+- **No PublishStatus discriminated union with explicit branch object types** (e.g., `{ kind: 'submitting' }`). `status: 'idle' | 'submitting' | 'success' | 'error'` enum string is sufficient; the `response` and `error` fields carry the payload.
+- **No PublishHistoryRow / PublishHistoryList component split.** One `PublishHistory.tsx` file until a second list view exists.
+- **No factored-out `composePublishInput.ts` module.** The union-merge function lives inline in `publish.ts`. Tested through the handler's unit tests.
+- **No "PublishButton" component split out of HeaderBar.** Inline the button + dialog open-state in Shell.
+- **No `useResortDetail()` invalidation on publish success.** Workspace files aren't mutated by publish; per-resort caches stay valid. Only invalidate `health` + `listPublishes`.
+- **No bridging-tier test for Toast in isolation.** Toast is a leaf DS primitive; canned-tier unit tests + jest-axe cover it.
+
+---
+
+## PR breakdown
+
+### PR 4.5a — Publish + listPublishes server handlers
+
+**Branch:** `epic-4/pr-4.5a-publish-handler`. **Depends on:** `main` (post-Tier-3 closeout merged). **README:** skip.
+
+**Subagent review trigger:** **YES** — `apps/admin/server/**` is the Phase 2 portability surface. Brief the reviewer to verify: (a) `composePublishInput` correctly merges workspace ∪ published (workspace overrides per slug; published-only resorts kept), (b) the handler calls `publishDataset()` from `@snowboard-trip-advisor/schema/node` (NOT a subprocess), (c) `slug === '__all__'` assertion catches per-slug calls in Phase 1, (d) listPublishes parses the `${counter}-${iso}.json` filename pattern (NOT `v_<iso>`) per `packages/schema/src/publishDataset.ts:81`, (e) `dispatch.ts` route registration uses the wire-schema's `PublishSlugParam` union.
+
+**File budget:** 6 files (within ≤8 budget).
+
+**Files (tests first):**
+
+1. **Create** `apps/admin/server/__tests__/publish.test.ts` — handler unit tests.
+2. **Create** `apps/admin/server/__tests__/listPublishes.test.ts` — handler unit tests.
+3. **Modify** `apps/admin/server/__tests__/dispatch.test.ts` — add bridge-routed positive controls for `POST /api/resorts/__all__/publish` and `GET /api/publishes`.
+4. **Modify** `apps/admin/server/publish.ts` — replace 4.1b's 501 stub with the real handler.
+5. **Modify** `apps/admin/server/listPublishes.ts` — replace 4.1b's 501 stub with the real handler.
+6. **Modify** `apps/admin/server/dispatch.ts` — add route entries; verify `STATUS_FOR_CODE` covers `publish-validation-failed` + `invalid-request`.
+
+#### Task 4.5a-1: `publish.test.ts` happy path + slug assertion
+
+**Files:** Create `apps/admin/server/__tests__/publish.test.ts`.
+
+- [ ] **Step 1: Write the failing tests.**
+
+```ts
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { mkdtemp, rm, writeFile, mkdir, readdir, readFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+import { publishHandler } from '../publish'
+import type { HandlerDeps } from '../listResorts'
+
+describe('publishHandler — happy path', (): void => {
+  let workspaceRoot: string
+  let deps: HandlerDeps
+
+  beforeEach(async (): Promise<void> => {
+    workspaceRoot = await mkdtemp(join(tmpdir(), 'snowboard-publish-'))
+    // Seed published doc with 2 resorts; seed 1 workspace file editing 1 of them.
+    // (Full fixture wiring inlined here — load from tests/fixtures/admin-workspace/.)
+    deps = { workspaceRoot, now: (): Date => new Date('2026-05-11T00:00:00Z') }
+  })
+
+  afterEach(async (): Promise<void> => {
+    await rm(workspaceRoot, { recursive: true, force: true })
+  })
+
+  it('publishes workspace ∪ published; returns version metadata', async (): Promise<void> => {
+    const response = await publishHandler(
+      { params: { slug: '__all__' }, body: { confirm: true } },
+      deps,
+    )
+    expect(response.resort_count).toBe(2)
+    expect(response.version_id).toMatch(/^\d+-/)
+    expect(response.archive_path).toContain('data/published/history/')
+    expect(response.published_at).toBeDefined()
+    // Verify on-disk: history dir grew + current.v1.json updated.
+    const historyDir = join(workspaceRoot, 'data/published/history')
+    const entries = await readdir(historyDir)
+    expect(entries.some((e): boolean => e.endsWith('.json'))).toBe(true)
+  })
+
+  it('rejects non-__all__ slugs as 400 invalid-request (Phase 1)', async (): Promise<void> => {
+    await expect(
+      publishHandler(
+        { params: { slug: 'kotelnica-bialczanska' }, body: { confirm: true } },
+        deps,
+      ),
+    ).rejects.toMatchObject({
+      code: 'invalid-request',
+      details: { reason: expect.stringMatching(/per-slug.*Phase 2/i) },
+    })
+  })
+})
+```
+
+- [ ] **Step 2: Run the tests — expect FAIL.**
+
+Run: `npx vitest run apps/admin/server/__tests__/publish.test.ts`
+Expected: failures pointing at the missing `publishHandler` real impl (still 501-stub from PR 4.1b).
+
+- [ ] **Step 3: Commit the failing tests.**
+
+```bash
+git add apps/admin/server/__tests__/publish.test.ts
+git commit -s -m "test(admin-server): failing publish-handler happy-path + slug-assertion tests (PR 4.5a §4.5a-1)"
+```
+
+#### Task 4.5a-2: `publish.ts` minimal impl to green Task 1's tests
+
+**Files:** Modify `apps/admin/server/publish.ts`.
+
+- [ ] **Step 1: Implement the handler.**
+
+```ts
+import { mkdir, readdir, readFile } from 'node:fs/promises'
+import { join } from 'node:path'
+
+import { publishDataset } from '@snowboard-trip-advisor/schema/node'
+import type {
+  PublishBody,
+  PublishResponse,
+  PublishSlugParam,
+  Resort,
+} from '@snowboard-trip-advisor/schema/api'
+import { WorkspaceFile } from '@snowboard-trip-advisor/schema'
+
+import type { HandlerDeps } from './listResorts'
+
+export interface PublishInput {
+  readonly params: PublishSlugParam
+  readonly body: PublishBody
+}
+
+export async function publishHandler(
+  input: PublishInput,
+  deps: HandlerDeps,
+): Promise<PublishResponse> {
+  if (input.params.slug !== '__all__') {
+    const err = new Error('per-slug publish is Phase 2')
+    ;(err as Error & { code: string; details: unknown }).code = 'invalid-request'
+    ;(err as Error & { code: string; details: unknown }).details = {
+      reason: 'per-slug publish is Phase 2 — Phase 1 publish is all-or-nothing.',
+    }
+    throw err
+  }
+
+  const resorts = await composePublishInput(deps.workspaceRoot)
+  const publishedAt = deps.now().toISOString()
+
+  const result = await publishDataset(
+    { schema_version: 1, generated_at: publishedAt, resorts },
+    { rootDir: join(deps.workspaceRoot, 'data', 'published') },
+  )
+
+  if (!result.ok) {
+    const err = new Error('publish-validation-failed')
+    ;(err as Error & { code: string; details: unknown }).code = 'publish-validation-failed'
+    ;(err as Error & { code: string; details: unknown }).details = { issues: result.issues }
+    throw err
+  }
+
+  return {
+    version_id: `${String(result.counter)}-${publishedAt}`,
+    archive_path: result.archive_path,
+    published_at: publishedAt,
+    resort_count: resorts.length,
+  }
+}
+
+async function composePublishInput(workspaceRoot: string): Promise<Resort[]> {
+  // Inline per Decision B3 — locality of behavior, not extracted to its own file.
+  const workspaceDir = join(workspaceRoot, 'data/admin-workspace')
+  const publishedPath = join(workspaceRoot, 'data/published/current.v1.json')
+
+  await mkdir(workspaceDir, { recursive: true })
+
+  const workspaceResorts = new Map<string, Resort>()
+  for (const entry of await readdir(workspaceDir)) {
+    if (!entry.endsWith('.json')) { continue }
+    const raw = await readFile(join(workspaceDir, entry), 'utf-8')
+    const parsed = WorkspaceFile.safeParse(JSON.parse(raw))
+    if (!parsed.success) { continue }  // Corrupt; skip (health surfaces via §10.3.1).
+    workspaceResorts.set(parsed.data.slug, parsed.data.resort)
+  }
+
+  let publishedResorts: Resort[] = []
+  try {
+    const raw = await readFile(publishedPath, 'utf-8')
+    publishedResorts = (JSON.parse(raw) as { resorts: Resort[] }).resorts ?? []
+  } catch { /* missing published doc — workspace-only publish per §10.9. */ }
+
+  const merged: Resort[] = []
+  for (const r of publishedResorts) {
+    merged.push(workspaceResorts.get(r.slug) ?? r)
+    workspaceResorts.delete(r.slug)
+  }
+  for (const r of workspaceResorts.values()) { merged.push(r) }
+  return merged
+}
+```
+
+- [ ] **Step 2: Run the tests — expect PASS.**
+
+Run: `npx vitest run apps/admin/server/__tests__/publish.test.ts`
+Expected: 2 passing.
+
+- [ ] **Step 3: Commit.**
+
+```bash
+git add apps/admin/server/publish.ts
+git commit -s -m "feat(admin-server): publish handler — workspace ∪ published union → publishDataset (PR 4.5a §4.5a-2)"
+```
+
+#### Task 4.5a-3: `publish.test.ts` — `publishDataset` failure path + corrupt workspace skip
+
+**Files:** Modify `apps/admin/server/__tests__/publish.test.ts`.
+
+- [ ] **Step 1: Add tests.**
+
+```ts
+it('returns 400 publish-validation-failed when validatePublishedDataset rejects', async (): Promise<void> => {
+  // Seed empty workspace + missing published → resorts.length === 0 → dataset_empty.
+  // P1-9 fold: match the issue's `message` field exactly against the canonical sentinel
+  // `EMPTY_DATASET_ZOD_MESSAGE = 'dataset_empty'` from `packages/schema/src/published.ts:15`.
+  await expect(
+    publishHandler({ params: { slug: '__all__' }, body: { confirm: true } }, deps),
+  ).rejects.toMatchObject({
+    code: 'publish-validation-failed',
+    details: { issues: expect.arrayContaining([
+      expect.objectContaining({ message: 'dataset_empty' }),
+    ]) },
+  })
+})
+
+it('skips corrupt workspace files; the survivor publishes', async (): Promise<void> => {
+  // Seed published with resort A; seed a corrupt workspace JSON (parse-fail);
+  // seed valid workspace edit for resort A.
+  // Expect: publish uses workspace's edit for A; corrupt file silently skipped.
+  // (Implementation per §10.3.1 — corrupt count surfaces via health, not publish.)
+  const response = await publishHandler(
+    { params: { slug: '__all__' }, body: { confirm: true } }, deps,
+  )
+  expect(response.resort_count).toBe(1)
+})
+```
+
+- [ ] **Step 2: Run — expect PASS** (`composePublishInput` already skips corrupt; `publishDataset` already rejects empty datasets).
+
+- [ ] **Step 3: Commit.**
+
+```bash
+git add apps/admin/server/__tests__/publish.test.ts
+git commit -s -m "test(admin-server): publishDataset failure + corrupt-skip coverage (PR 4.5a §4.5a-3)"
+```
+
+#### Task 4.5a-4: `listPublishes.test.ts` + impl
+
+**Files:** Create `apps/admin/server/__tests__/listPublishes.test.ts`; modify `apps/admin/server/listPublishes.ts`.
+
+- [ ] **Step 1: Write tests.**
+
+```ts
+import { describe, expect, it, beforeEach, afterEach } from 'vitest'
+import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+import { listPublishesHandler } from '../listPublishes'
+import type { HandlerDeps } from '../listResorts'
+
+describe('listPublishesHandler', (): void => {
+  let workspaceRoot: string
+  let deps: HandlerDeps
+
+  beforeEach(async (): Promise<void> => {
+    workspaceRoot = await mkdtemp(join(tmpdir(), 'snowboard-list-pub-'))
+    deps = { workspaceRoot, now: (): Date => new Date('2026-05-11T00:00:00Z') }
+  })
+
+  afterEach(async (): Promise<void> => {
+    await rm(workspaceRoot, { recursive: true, force: true })
+  })
+
+  it('returns empty items + page metadata for empty history', async (): Promise<void> => {
+    const r = await listPublishesHandler({ query: {} }, deps)
+    expect(r.items).toEqual([])
+    expect(r.page).toEqual({ offset: 0, limit: 20, total: 0 })
+  })
+
+  it('parses ${counter}-${iso}.json filenames; sorts newest-first', async (): Promise<void> => {
+    const dir = join(workspaceRoot, 'data/published/history')
+    await mkdir(dir, { recursive: true })
+    await writeFile(join(dir, '1-2026-05-09T00-00-00-000Z.json'), '{"schema_version":1,"generated_at":"2026-05-11T00:00:00.000Z","resorts":[]}')
+    await writeFile(join(dir, '2-2026-05-10T00-00-00-000Z.json'), '{"schema_version":1,"generated_at":"2026-05-11T00:00:00.000Z","resorts":[]}')
+
+    const r = await listPublishesHandler({ query: {} }, deps)
+    expect(r.items).toHaveLength(2)
+    expect(r.items[0]?.version_id).toBe('2-2026-05-10T00-00-00-000Z')
+    expect(r.items[1]?.version_id).toBe('1-2026-05-09T00-00-00-000Z')
+  })
+
+  it('respects page.offset + page.limit', async (): Promise<void> => {
+    const dir = join(workspaceRoot, 'data/published/history')
+    await mkdir(dir, { recursive: true })
+    for (let n = 1; n <= 25; n += 1) {
+      await writeFile(
+        join(dir, `${String(n)}-2026-05-${String(n).padStart(2, '0')}T00-00-00-000Z.json`),
+        '{"schema_version":1,"generated_at":"2026-05-11T00:00:00.000Z","resorts":[]}',
+      )
+    }
+    const r = await listPublishesHandler({ query: { page: { offset: 20, limit: 5 } } }, deps)
+    expect(r.items).toHaveLength(5)
+    expect(r.page).toEqual({ offset: 20, limit: 5, total: 25 })
+  })
+
+  it('skips files that do not match the version pattern', async (): Promise<void> => {
+    const dir = join(workspaceRoot, 'data/published/history')
+    await mkdir(dir, { recursive: true })
+    await writeFile(join(dir, '1-2026-05-09T00-00-00-000Z.json'), '{}')
+    await writeFile(join(dir, 'not-a-version.json'), '{}')
+    await writeFile(join(dir, 'README.txt'), 'unrelated')
+
+    const r = await listPublishesHandler({ query: {} }, deps)
+    expect(r.items).toHaveLength(1)
+  })
+})
+```
+
+- [ ] **Step 2: Run — expect FAIL** (still 501-stub).
+
+- [ ] **Step 3: Implement.**
+
+```ts
+// apps/admin/server/listPublishes.ts
+import { readdir, readFile } from 'node:fs/promises'
+import { join } from 'node:path'
+
+import type {
+  ListPublishesQuery,
+  ListPublishesResponse,
+  PublishMetadata,
+} from '@snowboard-trip-advisor/schema/api'
+
+import type { HandlerDeps } from './listResorts'
+
+// P1-8 fold: filename encoding is `${counter}-${sanitizeIsoForPath(iso)}.json` per
+// packages/schema/src/publishDataset.ts:80-86, where sanitizeIsoForPath at line 246
+// is `iso.replace(/[:.]/g, '-')`. Capturing the counter is straightforward; the iso
+// part is NOT a clean round-trip target via regex (the substitution is lossy with
+// respect to which `-` characters were originally `:` vs `.` vs `-`). Authoritative
+// `published_at` lives INSIDE each archived JSON file's `generated_at` (validated
+// by `validatePublishedDataset`). Read it from there.
+const VERSION_FILENAME = /^(\d+)-(.+)\.json$/
+const DEFAULT_LIMIT = 20
+
+export interface ListPublishesInput {
+  readonly query: ListPublishesQuery
+}
+
+export async function listPublishesHandler(
+  input: ListPublishesInput,
+  deps: HandlerDeps,
+): Promise<ListPublishesResponse> {
+  const historyDir = join(deps.workspaceRoot, 'data/published/history')
+  const offset = input.query.page?.offset ?? 0
+  const limit = input.query.page?.limit ?? DEFAULT_LIMIT
+
+  let entries: string[]
+  try {
+    entries = await readdir(historyDir)
+  } catch { entries = [] }
+
+  // Build version metadata; sort by counter desc (the lock-allocated counter IS
+  // the canonical newest-first ordering per `publishDataset.ts:74-86`).
+  const filtered: { counter: number; entry: string }[] = []
+  for (const entry of entries) {
+    const m = VERSION_FILENAME.exec(entry)
+    if (m === null) { continue }
+    const counterRaw = m[1]
+    if (counterRaw === undefined) { continue }
+    filtered.push({ counter: Number(counterRaw), entry })
+  }
+  filtered.sort((a, b): number => b.counter - a.counter)
+
+  const versions: PublishMetadata[] = []
+  for (const { counter, entry } of filtered.slice(offset, offset + limit)) {
+    const archivePath = join(historyDir, entry)
+    const body = JSON.parse(await readFile(archivePath, 'utf-8')) as {
+      generated_at: string
+      resorts: Array<{ slug: string }>
+    }
+    versions.push({
+      version_id: entry.replace(/\.json$/, ''),
+      published_at: body.generated_at,  // Authoritative — from inside the file.
+      archive_path: archivePath,
+      resort_count: body.resorts.length,
+      published_by: 'admin-workspace',  // Phase 1 fingerprint per spec §4.7.
+    })
+  }
+
+  return {
+    items: versions,
+    page: { offset, limit, total: filtered.length },
+  }
+}
+```
+
+- [ ] **Step 4: Run — expect PASS.**
+
+- [ ] **Step 5: Commit.**
+
+```bash
+git add apps/admin/server/__tests__/listPublishes.test.ts apps/admin/server/listPublishes.ts
+git commit -s -m "feat(admin-server): listPublishes handler — counter-prefixed history pagination (PR 4.5a §4.5a-4)"
+```
+
+#### Task 4.5a-5: dispatch.ts wire-up — failing bridge tests FIRST (per `feedback_tdd_in_plans_and_specs.md`)
+
+**Files:** Modify `apps/admin/server/__tests__/dispatch.test.ts`; modify `apps/admin/server/dispatch.ts`.
+
+- [ ] **Step 1: Add failing bridge-routed test cases to `dispatch.test.ts`.**
+
+```ts
+it('routes POST /api/resorts/__all__/publish → publishHandler (200 with PublishResponse)', /* ... */)
+it('routes POST /api/resorts/non-all-slug/publish → 400 invalid-request (Phase 1)', /* ... */)
+it('routes GET /api/publishes → listPublishesHandler (200 with ListPublishesResponse)', /* ... */)
+it('routes GET /api/publishes?page.offset=5&page.limit=10 → respects pagination', /* ... */)
+it('honors Idempotency-Key header on POST publish without rejecting (Phase 1, spec §4.9 invariant 5)', /* ... */)  // Decision J1.
+```
+
+- [ ] **Step 2: Run** `npx vitest run apps/admin/server/__tests__/dispatch.test.ts`. Expected: 5 new tests FAIL (routes not registered).
+
+- [ ] **Step 3: Modify dispatch.ts route table.** Add route entries:
+  - `POST /api/resorts/:slug/publish` → wrap `publishHandler` with `PublishSlugParam.parse` + `PublishBody.parse`.
+  - `GET /api/publishes` → wrap `listPublishesHandler` with `ListPublishesQuery.parse`.
+  - Verify `STATUS_FOR_CODE` maps `publish-validation-failed` → 400 (existing from PR 4.1b's groundwork) and `invalid-request` → 400 (existing).
+
+- [ ] **Step 4: Run** `npx vitest run apps/admin/server/__tests__/dispatch.test.ts`. Expected: 5 new tests PASS.
+
+- [ ] **Step 5: Run** `npm run qa` — expect green (full chain since `apps/admin/server/**` triggers scope-detector → `full`).
+
+- [ ] **Step 6: Commit + push.**
+
+```bash
+git add apps/admin/server/__tests__/dispatch.test.ts apps/admin/server/dispatch.ts
+git commit -s -m "feat(admin-server): wire publish + listPublishes routes in dispatch (PR 4.5a §4.5a-5)"
+git push -u origin epic-4/pr-4.5a-publish-handler
+```
+
+#### Task 4.5a-6: PR creation + subagent review + Codex review
+
+- [ ] Open the PR (`gh pr create`) with subagent-review brief in the body (per Decision 4.5a subagent trigger above).
+- [ ] Dispatch subagent reviewer with the brief from the §7.14 trigger justification.
+- [ ] Post `@codex review`.
+- [ ] Fold round-by-round per memory `feedback_codex_review_per_pr.md` (reply with fix SHA; resolve thread via GraphQL).
+- [ ] Generate AND execute a tailored local-test plan per memory `feedback_local_test_per_pr.md` (qa, build smoke, dev probe, Playwright if applicable).
+- [ ] After merge: `git fetch origin main && git rebase origin/main` on the next PR's branch.
+
+**Acceptance gate (PR 4.5a):** `npm run qa` green; handler unit tests + bridge-routed dispatch tests pass; manual smoke via `npm run dev:admin` followed by `curl -X POST http://127.0.0.1:5174/api/resorts/__all__/publish -d '{"confirm":true}'` writes `data/published/history/<entry>.json` on disk.
+
+---
+
+### PR 4.5b — Toast design-system primitive
+
+**Branch:** `epic-4/pr-4.5b-toast`. **Depends on:** PR 4.5a merged. **README:** skip.
+
+**Subagent review trigger:** **YES** — `packages/design-system/**` (per spec §7.15 line 659). Brief the reviewer to verify: (a) ARIA roles per variant (`info`/`success` → `role="status"`; `error` → `role="alert"`), (b) auto-dismiss timing prop respected, (c) hover-to-pause works via timer clear/reset, (d) jest-axe clean in all 3 variants, (e) single-Toast semantics (no queue/stack — Decision C1).
+
+**File budget:** 4 files (well within ≤8 budget).
+
+**Files (tests first):**
+
+1. **Create** `packages/design-system/src/components/Toast.test.tsx`.
+2. **Create** `packages/design-system/src/components/Toast.tsx`.
+3. **Modify** `packages/design-system/src/index.ts` — re-export `Toast` + `ToastProvider` + `useToast`.
+4. **Modify** `packages/design-system/src/index.test.ts` — barrel test (verified at `packages/design-system/src/index.test.ts:1`); add assertions that `Toast`, `ToastProvider`, `useToast` exports are re-exported from the package root.
+
+#### Task 4.5b-1: Toast.test.tsx — 3 variants + ARIA + axe
+
+**Files:** Create `packages/design-system/src/components/Toast.test.tsx`.
+
+- [ ] **Step 1: Write tests.**
+
+```tsx
+import { describe, expect, it, vi } from 'vitest'
+import { render, screen, act } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { axe, toHaveNoViolations } from 'jest-axe'
+
+import { Toast, ToastProvider, useToast } from './Toast'
+
+expect.extend(toHaveNoViolations)
+
+describe('Toast — variants + ARIA', (): void => {
+  it('info renders role="status"; success renders role="status"; error renders role="alert"', (): void => {
+    const { rerender } = render(<Toast variant="info" message="Hello" onDismiss={(): void => {}} />)
+    expect(screen.getByRole('status')).toHaveTextContent('Hello')
+    rerender(<Toast variant="success" message="Done" onDismiss={(): void => {}} />)
+    expect(screen.getByRole('status')).toHaveTextContent('Done')
+    rerender(<Toast variant="error" message="Oops" onDismiss={(): void => {}} />)
+    expect(screen.getByRole('alert')).toHaveTextContent('Oops')
+  })
+
+  it('is axe-clean in all 3 variants', async (): Promise<void> => {
+    for (const variant of ['info', 'success', 'error'] as const) {
+      const { container } = render(<Toast variant={variant} message="X" onDismiss={(): void => {}} />)
+      expect(await axe(container)).toHaveNoViolations()
+    }
+  })
+
+  it('auto-dismisses after dismissAfterMs', (): void => {
+    vi.useFakeTimers()
+    const onDismiss = vi.fn()
+    render(<Toast variant="info" message="X" onDismiss={onDismiss} dismissAfterMs={5000} />)
+    expect(onDismiss).not.toHaveBeenCalled()
+    act((): void => { vi.advanceTimersByTime(5000) })
+    expect(onDismiss).toHaveBeenCalledOnce()
+    vi.useRealTimers()
+  })
+
+  it('hover pauses the timer; mouse-leave resumes', async (): Promise<void> => {
+    vi.useFakeTimers()
+    const onDismiss = vi.fn()
+    const { container } = render(
+      <Toast variant="info" message="X" onDismiss={onDismiss} dismissAfterMs={5000} />,
+    )
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    act((): void => { vi.advanceTimersByTime(2000) })
+    await user.hover(container.firstChild as HTMLElement)
+    act((): void => { vi.advanceTimersByTime(10_000) })
+    expect(onDismiss).not.toHaveBeenCalled()  // Paused.
+    await user.unhover(container.firstChild as HTMLElement)
+    act((): void => { vi.advanceTimersByTime(5000) })
+    expect(onDismiss).toHaveBeenCalledOnce()
+    vi.useRealTimers()
+  })
+
+  // P2-5 fold: keyboard parity for pause/resume.
+  it('focus pauses the timer; blur resumes (keyboard parity)', async (): Promise<void> => {
+    vi.useFakeTimers()
+    const onDismiss = vi.fn()
+    const { container } = render(
+      <Toast variant="info" message="X" onDismiss={onDismiss} dismissAfterMs={5000} />,
+    )
+    act((): void => { vi.advanceTimersByTime(2000) })
+    ;(container.firstChild as HTMLElement).focus()
+    act((): void => { vi.advanceTimersByTime(10_000) })
+    expect(onDismiss).not.toHaveBeenCalled()  // Paused via focus.
+    ;(container.firstChild as HTMLElement).blur()
+    act((): void => { vi.advanceTimersByTime(5000) })
+    expect(onDismiss).toHaveBeenCalledOnce()
+    vi.useRealTimers()
+  })
+
+  // P2-5 fold: dismiss button for keyboard users / impatient mouse users.
+  it('clicking the Dismiss button calls onDismiss immediately', async (): Promise<void> => {
+    const user = userEvent.setup()
+    const onDismiss = vi.fn()
+    render(<Toast variant="error" message="X" onDismiss={onDismiss} />)
+    await user.click(screen.getByRole('button', { name: 'Dismiss notification' }))
+    expect(onDismiss).toHaveBeenCalledOnce()
+  })
+
+  // P2-1 fold: per-variant default timing (error 8s; others 5s).
+  it.each([
+    ['info', 5000],
+    ['success', 5000],
+    ['error', 8000],
+  ])('variant %s default-dismisses at %i ms when dismissAfterMs is unspecified', (variant, expectedMs): void => {
+    vi.useFakeTimers()
+    const onDismiss = vi.fn()
+    render(<Toast variant={variant as ToastVariant} message="X" onDismiss={onDismiss} />)
+    act((): void => { vi.advanceTimersByTime(expectedMs - 1) })
+    expect(onDismiss).not.toHaveBeenCalled()
+    act((): void => { vi.advanceTimersByTime(1) })
+    expect(onDismiss).toHaveBeenCalledOnce()
+    vi.useRealTimers()
+  })
+})
+
+describe('ToastProvider + useToast', (): void => {
+  function Probe(): React.ReactElement {
+    const { show } = useToast()
+    return <button onClick={(): void => { show({ variant: 'success', message: 'Yay' }) }}>fire</button>
+  }
+  it('shows a Toast when useToast().show is called; clears after onDismiss', async (): Promise<void> => {
+    const user = userEvent.setup()
+    render(<ToastProvider><Probe /></ToastProvider>)
+    expect(screen.queryByRole('status')).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'fire' }))
+    expect(screen.getByRole('status')).toHaveTextContent('Yay')
+  })
+})
+```
+
+- [ ] **Step 2: Run — expect FAIL.** (`Toast` does not exist yet.)
+
+- [ ] **Step 3: Commit failing tests.**
+
+#### Task 4.5b-2: Toast.tsx impl
+
+**Files:** Create `packages/design-system/src/components/Toast.tsx`.
+
+- [ ] **Step 1: Implement.**
+
+```tsx
+import { createContext, useContext, useEffect, useRef, useState } from 'react'
+import type { JSX, ReactNode } from 'react'
+
+import { Button } from './Button'
+
+export type ToastVariant = 'info' | 'success' | 'error'
+
+export interface ToastProps {
+  readonly variant: ToastVariant
+  readonly message: string
+  readonly onDismiss: () => void
+  readonly dismissAfterMs?: number
+}
+
+// Per-variant defaults per Decision C1 P2-1 fold (WCAG 2.2 SC 2.2.1).
+const DEFAULT_DISMISS_MS: Record<ToastVariant, number> = {
+  info: 5000,
+  success: 5000,
+  error: 8000,
+}
+
+export function Toast(props: ToastProps): JSX.Element {
+  const { variant, message, onDismiss } = props
+  const dismissAfterMs = props.dismissAfterMs ?? DEFAULT_DISMISS_MS[variant]
+  const remainingRef = useRef<number>(dismissAfterMs)
+  const startedAtRef = useRef<number>(Date.now())
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect((): (() => void) => {
+    startedAtRef.current = Date.now()
+    timerRef.current = setTimeout(onDismiss, remainingRef.current)
+    return (): void => {
+      if (timerRef.current !== null) { clearTimeout(timerRef.current) }
+    }
+  }, [onDismiss])
+
+  function pauseTimer(): void {
+    if (timerRef.current !== null) {
+      clearTimeout(timerRef.current)
+      timerRef.current = null
+      remainingRef.current = Math.max(0, remainingRef.current - (Date.now() - startedAtRef.current))
+    }
+  }
+
+  function resumeTimer(): void {
+    if (timerRef.current !== null) { return }
+    startedAtRef.current = Date.now()
+    timerRef.current = setTimeout(onDismiss, remainingRef.current)
+  }
+
+  // ARIA per Decision C1: info/success → polite status; error → assertive alert.
+  const role = variant === 'error' ? 'alert' : 'status'
+  return (
+    <div
+      role={role}
+      tabIndex={0}
+      className={`sta-toast sta-toast--${variant}`}
+      onMouseEnter={pauseTimer}
+      onMouseLeave={resumeTimer}
+      onFocus={pauseTimer}
+      onBlur={resumeTimer}
+    >
+      <span>{message}</span>
+      <Button variant="ghost" onClick={onDismiss} aria-label="Dismiss notification">×</Button>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// ToastProvider + useToast — single-slot per Decision C2.
+// ---------------------------------------------------------------------------
+
+export interface ToastInput {
+  readonly variant: ToastVariant
+  readonly message: string
+  readonly dismissAfterMs?: number
+}
+
+interface ToastContextValue {
+  readonly show: (input: ToastInput) => void
+}
+
+const ToastContext = createContext<ToastContextValue | null>(null)
+
+export function ToastProvider({ children }: { children: ReactNode }): JSX.Element {
+  const [current, setCurrent] = useState<ToastInput | null>(null)
+  return (
+    <ToastContext.Provider value={{ show: setCurrent }}>
+      {children}
+      {current !== null && (
+        <Toast
+          variant={current.variant}
+          message={current.message}
+          dismissAfterMs={current.dismissAfterMs}
+          onDismiss={(): void => { setCurrent(null) }}
+        />
+      )}
+    </ToastContext.Provider>
+  )
+}
+
+export function useToast(): ToastContextValue {
+  const ctx = useContext(ToastContext)
+  if (ctx === null) { throw new Error('useToast() called outside <ToastProvider>') }
+  return ctx
+}
+```
+
+- [ ] **Step 2: Run — expect PASS.**
+
+- [ ] **Step 3: Commit.**
+
+#### Task 4.5b-3: barrel re-export
+
+**Files:** Modify `packages/design-system/src/index.ts`.
+
+- [ ] **Step 1: Add re-exports.**
+
+```ts
+export { Toast, ToastProvider, useToast } from './components/Toast'
+export type { ToastProps, ToastVariant, ToastInput } from './components/Toast'
+```
+
+- [ ] **Step 2: Update the exports test to assert presence; run `npm run qa`.**
+
+- [ ] **Step 3: Commit + push + open PR + post `@codex review` + section-review subagent (Toast component is a user-facing UX surface per `feedback_section_review_workflow.md` — brief: verify dismiss timing copy, error-vs-status semantics, hover-pause feel).**
+
+**Acceptance gate (PR 4.5b):** `npm run qa` green; coverage 100% on Toast.tsx; jest-axe clean in all 3 variants; subagent + Codex round both 👍.
+
+---
+
+### PR 4.5c — PublishDialog + usePublish + Shell wire-up
+
+**Branch:** `epic-4/pr-4.5c-publish-dialog`. **Depends on:** PR 4.5b merged. **README:** skip.
+
+**Subagent review trigger:** **NO** (UI components; schema + server + DS shipped under review in PRs 4.5a + 4.5b). **Section review (`feedback_section_review_workflow.md`):** PublishDialog 4-state blocking UX is user-facing — dispatch a domain-specialist subagent reviewer with the blocking tooltip copy from spec §4.3.1 BEFORE asking the user for section approval.
+
+**File budget:** 8 files (at ≤8 budget — Decision A1 P0-1 fold moves `useListPublishes.ts` + its test into 4.5c so `usePublish` imports resolve).
+
+**Files (tests first):**
+
+1. **Create** `apps/admin/src/state/usePublish.test.ts` — hook tests.
+2. **Create** `apps/admin/src/state/usePublish.ts` — submit + state machine + on-success invalidations.
+3. **Create** `apps/admin/src/state/useListPublishes.test.ts` — Suspense + invalidation tests (moved from PR 4.5d per A1 P0-1 fold).
+4. **Create** `apps/admin/src/state/useListPublishes.ts` — single-promise cache + consumer subscription per Decision E1 (moved from PR 4.5d per A1 P0-1 fold).
+5. **Create** `apps/admin/src/views/PublishDialog.test.tsx` — render + 4 blocking states + interaction.
+6. **Create** `apps/admin/src/views/PublishDialog.tsx` — modal overlay; reads `useHealth()`; uses `usePublish()`.
+7. **Modify** `apps/admin/src/state/useHealth.ts` — add `invalidateHealth()` + consumer subscription via `useSyncExternalStore` per Decision D3. Co-located `useHealth.test.ts` MODIFY counts as part of this file (single concern).
+8. **Modify** `apps/admin/src/views/Shell.tsx` — add `<Button>Publish</Button>` in header; wrap children in `<ToastProvider>`; render `<PublishDialog open onClose />` conditionally.
+
+**MSW handlers** for the new `getHealth` blocker fixtures live inline in `PublishDialog.test.tsx` (via `server.use(...)` per the existing apps/admin test-setup convention); no global `test-setup.ts` modification needed.
+
+#### Task 4.5c-1: `useListPublishes.test.ts` — Suspense + cache + invalidation (ships BEFORE usePublish per A1 P0-1 fold)
+
+**Files:** Create `apps/admin/src/state/useListPublishes.test.ts`.
+
+- [ ] **Step 1: Write failing tests.** Test cases per Decision E1:
+  - First read suspends; second read for same query key returns synchronously from `cachedFulfilled`.
+  - Different `page` → different cache key → different promise.
+  - `invalidateListPublishes()` clears both maps; consumers re-fetch (verify via mounted-component re-render assertion using `useSyncExternalStore`).
+  - Rejected promise stays pinned in `cachedPromises` per ADR-0010; retry mounts re-throw the same rejection.
+  - `__resetForTests()` clears all maps + subscribers + revisions.
+
+- [ ] **Step 2: Run — expect FAIL** (`useListPublishes.ts` does not yet exist).
+
+- [ ] **Step 3: Commit failing tests.**
+
+#### Task 4.5c-2: `useListPublishes.ts` impl per Decision E1
+
+**Files:** Create `apps/admin/src/state/useListPublishes.ts` (impl shown in PR 4.5d section below — full code there; ship the impl with this task).
+
+- [ ] **Step 1: Implement** the dual-cache + subscriber-set pattern (`cachedPromises`, `cachedFulfilled`, `subscribers`, `revisions`, `loadOnce`, exported `useListPublishes`, `invalidateListPublishes`, `__resetForTests`).
+- [ ] **Step 2: Run tests — expect PASS.**
+- [ ] **Step 3: Commit** (`feat(admin-state): useListPublishes Suspense hook with consumer subscription (PR 4.5c §4.5c-2)`).
+
+#### Task 4.5c-3: `usePublish.test.ts` — state machine + invalidations
+
+```ts
+import { describe, expect, it, beforeEach, vi } from 'vitest'
+import { renderHook, act, waitFor } from '@testing-library/react'
+
+import { usePublish, __resetForTests } from './usePublish'
+import * as listPublishesModule from './useListPublishes'  // ships in §4.5c-2 above; import resolves.
+import * as healthModule from './useHealth'
+
+// MSW: success-mock for happy path; error-mock for failure path.
+
+describe('usePublish', (): void => {
+  beforeEach((): void => { __resetForTests() })
+
+  it('starts idle', (): void => {
+    const { result } = renderHook((): ReturnType<typeof usePublish> => usePublish())
+    expect(result.current.status).toBe('idle')
+  })
+
+  it('happy path: idle → submitting → success; calls invalidateHealth + invalidateListPublishes', async (): Promise<void> => {
+    const invalidateH = vi.spyOn(healthModule, 'invalidateHealth')
+    const invalidateP = vi.spyOn(listPublishesModule, 'invalidateListPublishes')
+    const { result } = renderHook((): ReturnType<typeof usePublish> => usePublish())
+
+    await act(async (): Promise<void> => { await result.current.submit() })
+    expect(result.current.status).toBe('success')
+    expect(result.current.response).toMatchObject({ resort_count: expect.any(Number) })
+    expect(invalidateH).toHaveBeenCalledOnce()
+    expect(invalidateP).toHaveBeenCalledOnce()
+  })
+
+  it('failure path: idle → submitting → error; error carries message', async (): Promise<void> => {
+    // MSW handler responds 400 publish-validation-failed.
+    const { result } = renderHook((): ReturnType<typeof usePublish> => usePublish())
+    await act(async (): Promise<void> => { await result.current.submit() })
+    expect(result.current.status).toBe('error')
+    expect(result.current.error?.message).toMatch(/publish-validation-failed/)
+  })
+
+  it('reset() returns to idle from error state', async (): Promise<void> => {
+    const { result } = renderHook((): ReturnType<typeof usePublish> => usePublish())
+    await act(async (): Promise<void> => { await result.current.submit() })  // assume error path mocked
+    act((): void => { result.current.reset() })
+    expect(result.current.status).toBe('idle')
+    expect(result.current.error).toBeNull()
+  })
+})
+```
+
+#### Task 4.5c-4: `usePublish.ts` impl per Decision D1 + D2
+
+```ts
+import { useState } from 'react'
+
+import type { PublishResponse } from '@snowboard-trip-advisor/schema/api'
+
+import { apiClient } from '../lib/apiClient'
+import { invalidateHealth } from './useHealth'
+import { invalidateListPublishes } from './useListPublishes'
+
+export type PublishStatus = 'idle' | 'submitting' | 'success' | 'error'
+
+export interface UsePublishResult {
+  readonly status: PublishStatus
+  readonly response: PublishResponse | null
+  readonly error: Error | null
+  readonly submit: () => Promise<void>
+  readonly reset: () => void
+}
+
+export function usePublish(): UsePublishResult {
+  const [status, setStatus] = useState<PublishStatus>('idle')
+  const [response, setResponse] = useState<PublishResponse | null>(null)
+  const [error, setError] = useState<Error | null>(null)
+
+  async function submit(): Promise<void> {
+    setStatus('submitting')
+    setError(null)
+    try {
+      const r = await apiClient.publish()
+      setResponse(r)
+      setStatus('success')
+      invalidateHealth()
+      invalidateListPublishes()
+    } catch (e) {
+      setError(e instanceof Error ? e : new Error(String(e)))
+      setStatus('error')
+    }
+  }
+
+  function reset(): void {
+    setStatus('idle')
+    setResponse(null)
+    setError(null)
+  }
+
+  return { status, response, error, submit, reset }
+}
+
+export function __resetForTests(): void { /* no module-level state */ }
+```
+
+#### Task 4.5c-5: `useHealth.ts` MODIFY — add `invalidateHealth` + subscription per Decision D3
+
+**Files:** Modify `apps/admin/src/state/useHealth.ts` + `useHealth.test.ts` (same single-concern file pair counts as one in the budget).
+
+- [ ] **Step 1: Write failing tests** at the end of the existing `useHealth.test.ts` block, mirroring `useResortDetail`'s round-2 P2-C tests:
+  - **`invalidateHealth()` is exported and is a function.**
+  - **Subscribed consumer re-renders on `invalidateHealth()`.** Mount a probe component using `useHealth`; after the initial promise resolves, call `invalidateHealth()` from a sibling. Assert the probe re-fetches (new MSW handler returns a different `resorts_total`) and re-renders with the new value via `useSyncExternalStore`.
+  - **Unsubscribed consumer does NOT re-render on `invalidateHealth()`** (sanity check for the subscriber-set cleanup on unmount).
+
+- [ ] **Step 2: Run** — `npx vitest run apps/admin/src/state/useHealth.test.ts`. Expected: FAIL (the new tests reference `invalidateHealth` which does not exist).
+
+- [ ] **Step 3: Modify `useHealth.ts`** following `useResortDetail.ts`'s round-2 P2-C pattern:
+  - Add module-level `subscribers: Set<() => void>` and `revision: number` (singleton; useHealth has one key per Decision D3).
+  - Replace the current `useState`/`useEffect` body with a `useSyncExternalStore` snapshot driven by `revision`; the `useEffect` still kicks the fetch on first mount but the result lands in a module-level cache (or a singleton state) read by the subscribe-snapshot.
+  - Export `invalidateHealth(): void` that clears the cache + in-flight map and notifies every subscriber.
+  - **Do NOT** introduce a per-key Map here (Decision D3: useHealth is singleton; no key parameter); avoid copy-pasting `useResortDetail.ts`'s per-slug Map shape.
+
+- [ ] **Step 4: Run** — `npx vitest run apps/admin/src/state/useHealth.test.ts`. Expected: PASS.
+
+- [ ] **Step 5: Commit** (`feat(admin-state): useHealth invalidation + consumer subscription (PR 4.5c §4.5c-5)`).
+
+#### Task 4.5c-6: `PublishDialog.test.tsx` — 4 blocking states
+
+**The 4 blocking conditions + tooltip copy from spec §4.3.1.** Section-reviewer subagent must verify the copy before user approval.
+
+```tsx
+it.each([
+  ['resorts_with_failed_fields', 1, 'fix failures or switch fields to MANUAL before publishing.'],
+  ['resorts_with_missing_provenance', 1, 'every metric field needs a matching `field_sources` entry; check the editor\'s StatusPill column for missing-provenance markers.'],
+  ['resorts_with_corrupt_workspace', 1, '1 workspace file is corrupt. Inspect `data/admin-workspace/` and either repair or `rm` the file before publishing. See server logs for the failing slug + Zod issue list.'],
+  ['resorts_total', 0, 'no resorts staged for publish. Add resorts in the editor before publishing.'],
+])('disables confirm + shows tooltip when %s = %i', async (field, value, tooltip): Promise<void> => {
+  // Seed MSW health response with the blocking field; render <PublishDialog open onClose=…/>.
+  // Assert confirm button has aria-disabled="true" and tooltip element renders the exact copy.
+})
+
+it('confirm button enabled when health is clean; click → submit; on success → onClose called + Toast surfaces', /* ... */)
+it('Escape closes dialog; backdrop click closes dialog; first focusable element is auto-focused', /* ... */)
+it('Confirm button has aria-describedby pointing at the blocker tooltip id when a blocker is active', /* P2-4 fold */)
+// P1-6 fold: dropped the "Tab / Shift+Tab cycles inside (focus trap)" assertion. Phase 1 relies
+// on aria-modal="true" + minimal focusable surface; full trap deferred to PR 4.6a Tier 5 polish.
+```
+
+#### Task 4.5c-7: `PublishDialog.tsx` impl
+
+```tsx
+import { useEffect, useRef } from 'react'
+import type { JSX } from 'react'
+import { Button, useToast } from '@snowboard-trip-advisor/design-system'
+
+import { useHealth } from '../state/useHealth'
+import { usePublish } from '../state/usePublish'
+
+const TOOLTIP_BY_BLOCKER = {
+  failed_fields:
+    'fix failures or switch fields to MANUAL before publishing.',
+  missing_provenance:
+    'every metric field needs a matching `field_sources` entry; check the editor\'s StatusPill column for missing-provenance markers.',
+  corrupt_workspace:
+    '1 workspace file is corrupt. Inspect `data/admin-workspace/` and either repair or `rm` the file before publishing. See server logs for the failing slug + Zod issue list.',
+  empty:
+    'no resorts staged for publish. Add resorts in the editor before publishing.',
+} as const
+type Blocker = keyof typeof TOOLTIP_BY_BLOCKER
+
+export interface PublishDialogProps {
+  readonly open: boolean
+  readonly onClose: () => void
+}
+
+export function PublishDialog({ open, onClose }: PublishDialogProps): JSX.Element | null {
+  const dialogRef = useRef<HTMLDivElement | null>(null)
+  const health = useHealth()
+  const publish = usePublish()
+  const toast = useToast()
+
+  useEffect((): (() => void) | undefined => {
+    if (!open) { return }
+    const previouslyFocused = document.activeElement as HTMLElement | null
+    const firstFocusable = dialogRef.current?.querySelector<HTMLElement>(
+      'button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    )
+    firstFocusable?.focus()
+    function onKey(e: KeyboardEvent): void {
+      if (e.key === 'Escape') { onClose() }
+      // P1-6 fold: NO Tab trap in Phase 1. aria-modal="true" + minimal focusable surface
+      // (Cancel + Confirm) suffices; PR 4.6a Tier 5 polish adds a real trap if needed.
+    }
+    document.addEventListener('keydown', onKey)
+    return (): void => {
+      document.removeEventListener('keydown', onKey)
+      previouslyFocused?.focus()
+    }
+  }, [open, onClose])
+
+  useEffect((): void => {
+    if (publish.status === 'success') {
+      toast.show({ variant: 'success', message: `Published version ${publish.response?.version_id ?? ''}` })
+      onClose()
+    } else if (publish.status === 'error') {
+      toast.show({ variant: 'error', message: `Publish failed: ${publish.error?.message ?? 'unknown'}` })
+    }
+  }, [publish.status, publish.response, publish.error, onClose, toast])
+
+  if (!open) { return null }
+
+  const blocker: Blocker | null =
+    health.value === null ? null  // Loading or error — treat as not-blocked-yet.
+      : health.value.resorts_with_failed_fields > 0 ? 'failed_fields'
+      : health.value.resorts_with_missing_provenance > 0 ? 'missing_provenance'
+      : health.value.resorts_with_corrupt_workspace > 0 ? 'corrupt_workspace'
+      : health.value.resorts_total === 0 ? 'empty'
+      : null
+
+  const disabled = blocker !== null || publish.status === 'submitting'
+
+  return (
+    <>
+      <div className="publish-dialog__backdrop" onClick={onClose} aria-hidden="true" />
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="publish-dialog-title"
+        className="publish-dialog"
+      >
+        <h2 id="publish-dialog-title">Publish</h2>
+        {blocker !== null && (
+          <p id="publish-dialog-blocker" className="publish-dialog__tooltip">
+            {TOOLTIP_BY_BLOCKER[blocker]}
+          </p>
+        )}
+        <div className="publish-dialog__actions">
+          <Button onClick={onClose} variant="ghost">Cancel</Button>
+          <Button
+            onClick={(): void => { void publish.submit() }}
+            disabled={disabled}
+            aria-disabled={disabled}
+            aria-describedby={blocker !== null ? 'publish-dialog-blocker' : undefined}
+          >
+            {publish.status === 'submitting' ? 'Publishing…' : 'Confirm'}
+          </Button>
+        </div>
+      </div>
+    </>
+  )
+}
+```
+
+#### Task 4.5c-8: Shell.tsx MODIFY — Publish button + ToastProvider + dialog
+
+```tsx
+import { Button, DropdownMenu, Sidebar, ToastProvider } from '@snowboard-trip-advisor/design-system'
+import { useState } from 'react'
+import type { JSX, ReactNode } from 'react'
+
+import { PublishDialog } from './PublishDialog'
+
+export function Shell({ children }: { children: ReactNode }): JSX.Element {
+  const [publishOpen, setPublishOpen] = useState(false)
+  return (
+    <ToastProvider>
+      <div className="app-shell">
+        <header role="banner" className="app-shell__header">
+          <span className="app-shell__brand">Admin</span>
+          <Button onClick={(): void => { setPublishOpen(true) }}>Publish</Button>
+          <DropdownMenu /* …existing… */ />
+        </header>
+        {/* …existing nav + main… */}
+        {children}
+        <PublishDialog open={publishOpen} onClose={(): void => { setPublishOpen(false) }} />
+      </div>
+    </ToastProvider>
+  )
+}
+```
+
+#### Task 4.5c-9: Section-review + PR + Codex
+
+- [ ] Before user approval of the PublishDialog tooltip copy, **dispatch a section-review subagent** with the §4.3.1 tooltip strings as load-bearing claims to verify against the spec. Findings folded before opening the PR.
+- [ ] Commit, push, open PR (no subagent review trigger for the PR itself per Decision A1 / PR-level trigger matrix — only the section copy gets reviewed).
+- [ ] Post `@codex review`; fold; re-request until 👍.
+
+**Acceptance gate (PR 4.5c):** all 4 blocker states render correct tooltip copy; confirm enabled iff none of the 4 blockers; submit happy path emits success Toast + closes dialog; failure path emits error Toast + keeps dialog open; ESC + backdrop close the dialog; focus restored to opener button.
+
+---
+
+### PR 4.5d — PublishHistory view + routing + bridge integration
+
+**Branch:** `epic-4/pr-4.5d-publish-history`. **Depends on:** PR 4.5c merged. **README:** consider mentioning admin app's `npm run dev:admin` entrypoint (Epic 4 is now end-to-end functional through publish).
+
+**Subagent review trigger:** **NO** (no CODEOWNERS-protected paths; integration test is in `tests/integration/**`).
+
+**File budget:** 6 files (within ≤8 budget — `useListPublishes` moved to PR 4.5c per A1 P0-1 fold).
+
+**Files (tests first):**
+
+1. **Create** `apps/admin/src/views/PublishHistory.test.tsx` — render, empty state (offset = 0 + paginated-past-total branch per P1-7 fold), pagination, accessibility (`<time dateTime>` + pluralized resort count per P2-3 fold).
+2. **Create** `apps/admin/src/views/PublishHistory.tsx` — list view + page nav. Reads `useListPublishes` shipped in 4.5c.
+3. **Modify** `apps/admin/src/lib/urlState.ts` — add `{ route: 'publishes'; page?: number }` variant.
+4. **Modify** `apps/admin/src/lib/urlState.test.ts` — round-trip case for `?route=publishes&page=2`.
+5. **Modify** `apps/admin/src/App.tsx` — mount `<PublishHistory />` on `publishes` route.
+6. **Create** `tests/integration/apps/admin/publish-flow.test.tsx` — bridge-tier end-to-end (per Decision I1).
+
+#### Reference — `useListPublishes.ts` impl
+
+> `useListPublishes.ts` ships in PR 4.5c per Decision A1's P0-1 fold; full impl block kept here for executing-agent reference (the implementation move is captured in the reviewer-fold log).
+
+```ts
+// apps/admin/src/state/useListPublishes.ts (shipped in PR 4.5c, kept here as reference)
+import { use, useSyncExternalStore } from 'react'
+
+import type { ListPublishesQuery, ListPublishesResponse } from '@snowboard-trip-advisor/schema/api'
+
+import { apiClient } from '../lib/apiClient'
+
+const cachedPromises = new Map<string, Promise<ListPublishesResponse>>()
+const cachedFulfilled = new Map<string, ListPublishesResponse>()
+const subscribers = new Map<string, Set<() => void>>()
+const revisions = new Map<string, number>()
+
+function keyOf(q: ListPublishesQuery): string {
+  return JSON.stringify(q.page ?? { offset: 0, limit: 20 })
+}
+
+function loadOnce(q: ListPublishesQuery): Promise<ListPublishesResponse> {
+  const key = keyOf(q)
+  let p = cachedPromises.get(key)
+  if (p !== undefined) { return p }
+  p = apiClient.listPublishes(q).then((r): ListPublishesResponse => {
+    cachedFulfilled.set(key, r)
+    return r
+  })
+  cachedPromises.set(key, p)
+  return p
+}
+
+export function useListPublishes(q: ListPublishesQuery): ListPublishesResponse {
+  const key = keyOf(q)
+  useSyncExternalStore(
+    (cb): (() => void) => {
+      let set = subscribers.get(key)
+      if (set === undefined) { set = new Set(); subscribers.set(key, set) }
+      set.add(cb)
+      return (): void => { set!.delete(cb) }
+    },
+    (): number => revisions.get(key) ?? 0,
+    (): number => revisions.get(key) ?? 0,
+  )
+  const fulfilled = cachedFulfilled.get(key)
+  if (fulfilled !== undefined) { return fulfilled }
+  return use(loadOnce(q))
+}
+
+export function invalidateListPublishes(): void {
+  cachedPromises.clear()
+  cachedFulfilled.clear()
+  for (const [key, set] of subscribers.entries()) {
+    revisions.set(key, (revisions.get(key) ?? 0) + 1)
+    for (const cb of set) { cb() }
+  }
+}
+
+export function __resetForTests(): void {
+  cachedPromises.clear()
+  cachedFulfilled.clear()
+  subscribers.clear()
+  revisions.clear()
+}
+```
+
+#### Task 4.5d-1: `PublishHistory.test.tsx` + impl
+
+```tsx
+// Test cases:
+//   - Renders empty state when ListPublishesResponse.items is [].
+//   - Renders N rows for N items; each shows version_id + published_at + resort_count + file_size_bytes.
+//   - Sorted desc by published_at (handler returns newest-first; component just renders).
+//   - Pagination: Next button → setRoute({ route: 'publishes', page: page + 1 }); disabled when offset + limit >= total.
+//   - Previous button → setRoute({ route: 'publishes', page: page - 1 }); disabled when page === 0.
+```
+
+```tsx
+// apps/admin/src/views/PublishHistory.tsx
+import { Button } from '@snowboard-trip-advisor/design-system'
+import type { JSX } from 'react'
+
+import { useURLState, setRoute } from '../state/useURLState'
+import { useListPublishes } from '../state/useListPublishes'
+
+const PAGE_SIZE = 20
+
+export function PublishHistory(): JSX.Element {
+  const route = useURLState()
+  if (route.route !== 'publishes') { throw new Error('PublishHistory mounted outside publishes route') }
+  const page = route.page ?? 0
+  const offset = page * PAGE_SIZE
+
+  const r = useListPublishes({ page: { offset, limit: PAGE_SIZE } })
+
+  // P1-7 fold: split the empty-state branches.
+  if (r.items.length === 0 && offset === 0) {
+    return (
+      <main>
+        <h1>Publish history</h1>
+        <p>No publishes yet. Use the Publish button in the header to publish for the first time.</p>
+      </main>
+    )
+  }
+  if (r.items.length === 0 && offset > 0) {
+    return (
+      <main>
+        <h1>Publish history</h1>
+        <p>No publishes on this page.</p>
+        <Button onClick={(): void => { setRoute({ route: 'publishes' }) }}>Back to first page</Button>
+      </main>
+    )
+  }
+
+  return (
+    <main>
+      <h1>Publish history</h1>
+      <ul className="publish-history">
+        {r.items.map((item): JSX.Element => (
+          <li key={item.version_id}>
+            <span>{item.version_id}</span>
+            <time dateTime={item.published_at}>{item.published_at}</time>
+            {/* P2-3 fold: pluralize + drop the file_size_bytes column (not in
+                PublishMetadata schema per packages/schema/api/listPublishes.ts:15-21). */}
+            <span>{item.resort_count} {item.resort_count === 1 ? 'resort' : 'resorts'}</span>
+            <span>by {item.published_by}</span>
+          </li>
+        ))}
+      </ul>
+      <nav aria-label="Publish history pagination">
+        <Button
+          variant="ghost"
+          disabled={page === 0}
+          onClick={(): void => { setRoute({ route: 'publishes', page: page - 1 }) }}
+        >Previous</Button>
+        <Button
+          variant="ghost"
+          disabled={offset + PAGE_SIZE >= r.page.total}
+          onClick={(): void => { setRoute({ route: 'publishes', page: page + 1 }) }}
+        >Next</Button>
+      </nav>
+    </main>
+  )
+}
+```
+
+#### Task 4.5d-2: `urlState.ts` MODIFY + `urlState.test.ts` round-trip
+
+```ts
+// urlState.ts: extend AdminRoute union:
+export type AdminRoute =
+  | { route: 'dashboard' }
+  | { route: 'resorts'; country?: ISOCountryCode; hasFailures?: boolean }
+  | { route: 'editor'; slug: ResortSlug }
+  | { route: 'publishes'; page?: number }
+
+// In parseURL: add the 'publishes' branch:
+if (route === 'publishes') {
+  const pageRaw = params.get('page')
+  const page = pageRaw !== null && /^\d+$/.test(pageRaw) ? Number(pageRaw) : undefined
+  return page === undefined ? { route: 'publishes' } : { route: 'publishes', page }
+}
+
+// In serializeURL: add the 'publishes' branch with optional page.
+```
+
+```ts
+// urlState.test.ts: round-trip cases for ?route=publishes (page=0 default) and ?route=publishes&page=2.
+```
+
+#### Task 4.5d-3: `App.tsx` MODIFY — mount PublishHistory on `publishes` route
+
+```tsx
+if (route.route === 'publishes') {
+  return <Shell><PublishHistory /></Shell>
+}
+```
+
+#### Task 4.5d-4: `publish-flow.test.tsx` bridge integration
+
+```tsx
+// tests/integration/apps/admin/publish-flow.test.tsx
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { mkdtemp, rm, readdir } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+
+import { server } from '../../../apps/admin/src/mocks/server'
+import { bridgeHandlers } from '../../../apps/admin/src/mocks/realHandlers'
+import { App } from '../../../apps/admin/src/App'
+
+describe('publish flow — bridge tier', (): void => {
+  let workspaceRoot: string
+  beforeEach(async (): Promise<void> => {
+    workspaceRoot = await mkdtemp(join(tmpdir(), 'snowboard-publish-flow-'))
+    // Seed both seed fixtures into workspaceRoot/data/admin-workspace/.
+    server.use(...bridgeHandlers(workspaceRoot))
+  })
+  afterEach(async (): Promise<void> => {
+    await rm(workspaceRoot, { recursive: true, force: true })
+  })
+
+  it('open Shell → click Publish → confirm → Toast → navigate to publishes → see entry', async (): Promise<void> => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(await screen.findByRole('button', { name: 'Publish' }))
+    expect(await screen.findByRole('dialog')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Confirm' }))
+
+    // Success Toast appears.
+    expect(await screen.findByRole('status', { name: /Published version/ })).toBeInTheDocument()
+
+    // History dir grew.
+    const dir = join(workspaceRoot, 'data/published/history')
+    const entries = await readdir(dir)
+    expect(entries.some((e): boolean => /^\d+-.+\.json$/.test(e))).toBe(true)
+
+    // Navigate to publishes.
+    window.history.replaceState({}, '', '/?route=publishes')
+    render(<App />)
+    await waitFor((): void => {
+      expect(screen.getByText(/2 resorts/)).toBeInTheDocument()  // or version_id, depending on render.
+    })
+  })
+
+  it('blocked state: empty workspace + empty published → cold-start tooltip; confirm disabled', async (): Promise<void> => {
+    // Clear workspace fixtures; render; click Publish; assert tooltip.
+  })
+})
+```
+
+#### Task 4.5d-5: Section-review + PR + Codex
+
+- [ ] PublishHistory empty-state copy + pagination labels are user-facing — dispatch section-review subagent before user approval.
+- [ ] Commit, push, open PR + Codex review + fold + Tier 4 → 5 gate sign-off.
+
+**Acceptance gate (PR 4.5d):** `npm run qa` green; bridge integration covers happy path + at least one blocked state; PublishHistory shows the version published in the integration test; URL state round-trip on `?route=publishes&page=N` is reversible.
+
+---
+
+## Per-PR workflow (every PR; saved memory checklist — apply ALL)
+
+From `~/.claude/projects/.../memory/MEMORY.md`:
+
+- **`feedback_atomic_prs.md`** — one concern per PR; ≤300 LOC / ≤5 commits / ≤8 files. Fold commits exceeding ≤5 are expected per the Codex per-PR memory.
+- **`feedback_codex_review_per_pr.md`** — `@codex review` on every PR; fold reply with fix SHA; resolve thread via GraphQL.
+- **`feedback_local_test_per_pr.md`** — generate AND execute a tailored local-test plan before surfacing to the maintainer.
+- **`feedback_section_review_workflow.md`** — for user-facing UX (PublishDialog tooltips, Toast variants, PublishHistory copy), dispatch a domain-specialist subagent reviewer BEFORE asking the user for section approval.
+- **`feedback_tdd_in_plans_and_specs.md`** — file lists in this plan order tests before implementation per Tasks N.M-1 (test) → N.M-2 (impl) → N.M-3 (more tests / commit).
+- **`feedback_edit_tool_in_worktrees.md`** — prefix paths with the worktree dir; verify with `git status` IN the worktree.
+
+After implementation completes on a PR's branch:
+
+1. `npm run qa` green locally before pushing. Do NOT bypass with `--no-verify` (the PreToolUse:Bash hook blocks it).
+2. Subagent review for PRs flagged YES (PR 4.5a server + PR 4.5b DS).
+3. `git push -u origin <branch>` with auto-DCO sign-off.
+4. `gh pr create` with PR body listing spec section + decisions log IDs touched + file budget + verification commands.
+5. Post `@codex review` as a PR comment. Wait 2–5 min.
+6. Fold P0/P1/P2 findings on the same branch. For each fold: re-run `npm run qa`; reply to the thread with the fix SHA AND resolve the thread via GraphQL.
+7. Re-request `@codex review` after each fold round; iterate until 👍 OR re-flagged duplicates (architectural concerns at different anchors count as "nothing new").
+8. Generate + EXECUTE a tailored local-test plan (qa, build smoke, dev probe, browser smoke via Playwright MCP for UI PRs).
+9. Report findings to the maintainer; maintainer merges.
+10. After merge, on the next PR's branch: `git fetch origin main && git rebase origin/main`.
+
+---
+
+## Reviewer-fold log
+
+_Populate as Codex / subagent / maintainer / user findings land per round. Carry only **load-bearing** facts forward; everything else is in `git log`._
+
+| Round | PR | Source | Finding | Resolution |
+|---|---|---|---|---|
+| 0 | — | plan author | — | initial draft |
+| 1 | — | plan-document-reviewer subagent | **P0-1** usePublish → useListPublishes import cycle (4.5c → 4.5d) | Move `useListPublishes.ts`/`.test.ts` from PR 4.5d into PR 4.5c (Decision A1 amended); PR 4.5d ships PublishHistory view only. |
+| 1 | 4.5b | plan-document-reviewer subagent | **P0-2** barrel test path `__tests__/exports.test.ts` does not exist | Use the verified path `packages/design-system/src/index.test.ts`. |
+| 1 | 4.5a | plan-document-reviewer subagent | **P0-3** `Idempotency-Key` invariant (spec §4.9 #5) unaddressed | Add Decision J1; add `dispatch.test.ts` case asserting header is honored without rejection. |
+| 1 | 4.5a | plan-document-reviewer subagent | **P1-4** Task 4.5a-5 had impl before tests | Rewrote with explicit Step 1 (failing tests) → Step 2 (expect FAIL) → Step 3 (impl) → Step 4 (expect PASS) → Step 5 (qa) → Step 6 (commit). |
+| 1 | 4.5c | plan-document-reviewer subagent | **P1-5** `useHealth` MODIFY task had no Step-1/2/3 structure | Rewrote Task 4.5c-5 with explicit failing-tests-first ordering mirroring `useResortDetail`'s round-2 P2-C fold pattern. |
+| 1 | 4.5c | plan-document-reviewer subagent | **P1-6** Focus-trap impl underspec'd; test asserted Tab cycling | Dropped the Tab-cycle test (Decision F1 amended); rely on `aria-modal="true"` + minimal focusable surface for Phase 1. Real trap deferred to PR 4.6a Tier 5 polish. |
+| 1 | 4.5d | plan-document-reviewer subagent | **P1-7** PublishHistory empty state misses paginated-past-total | Added second empty-state branch with "Back to first page" button. |
+| 1 | 4.5a | plan-document-reviewer subagent | **P1-8** listPublishes filename reverse-regex is fragile | Refactored impl to read authoritative `generated_at` from inside each archived JSON; updated test fixtures to include a real `generated_at` field. |
+| 1 | 4.5a | plan-document-reviewer subagent | **P1-9** `dataset_empty` matcher was substring-match | Tightened to exact `message: 'dataset_empty'` against the canonical `EMPTY_DATASET_ZOD_MESSAGE` constant in `packages/schema/src/published.ts:15`. |
+| 1 | 4.5b | plan-document-reviewer subagent | **P2-1** Toast 5 s default too short for error variant (WCAG 2.2 SC 2.2.1) | Decision C1 amended to per-variant defaults: info/success 5 s, error 8 s. |
+| 1 | 4.5b | plan-document-reviewer subagent | **P2-2** Single-Toast replacement risk | Documented in Decision C2 — accepted for Phase 1 (publish flow is user-triggered only). |
+| 1 | 4.5d | plan-document-reviewer subagent | **P2-3** PublishHistory row lacked `<time dateTime>`, pluralization, and used a `file_size_bytes` field NOT in `PublishMetadata` schema | Added `dateTime` attribute, pluralized resort count, dropped `file_size_bytes` (not in schema; replaced with `published_by` display). |
+| 1 | 4.5c | plan-document-reviewer subagent | **P2-4** PublishDialog tooltip used `role="status"`; Confirm button lacked `aria-describedby` | Tooltip now uses `id="publish-dialog-blocker"`; Confirm button carries `aria-describedby` when a blocker is active. Decision F1 amended. |
+| 1 | 4.5b | plan-document-reviewer subagent | **P2-5** Toast pause was mouse-only (WCAG 2.2 SC 2.2.1 keyboard parity) | Added `onFocus`/`onBlur` parity + `tabIndex={0}` + visible "Dismiss" `<Button>` for keyboard users. |
+
+---
+
+## Sub-skill handoffs
+
+- **Execution skill:** [`superpowers:subagent-driven-development`](../../../.claude/plugins/cache/claude-plugins-official/superpowers/5.0.5/skills/subagent-driven-development/) — one PR at a time, fresh subagent per task.
+- **Plan-review skill:** [`superpowers:writing-plans`](../../../.claude/plugins/cache/claude-plugins-official/superpowers/5.0.5/skills/writing-plans/) — re-invoke if a new decision adds significant scope.
+- **Worktree skill:** [`superpowers:using-git-worktrees`](../../../.claude/plugins/cache/claude-plugins-official/superpowers/5.0.5/skills/using-git-worktrees/) — fresh worktree per PR.
