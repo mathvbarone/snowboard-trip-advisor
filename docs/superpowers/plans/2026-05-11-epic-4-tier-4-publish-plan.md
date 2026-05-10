@@ -113,7 +113,10 @@ describe('publishHandler — happy path', (): void => {
     workspaceRoot = await mkdtemp(join(tmpdir(), 'snowboard-publish-'))
     // Seed published doc with 2 resorts; seed 1 workspace file editing 1 of them.
     // (Full fixture wiring inlined here — load from tests/fixtures/admin-workspace/.)
-    deps = { workspaceRoot, now: (): Date => new Date('2026-05-11T00:00:00Z') }
+    // Codex round 6 PR #97 P2 fold: no clock seam in HandlerDeps — use
+    // vi.setSystemTime() to make `new Date()` deterministic inside the handler.
+    vi.setSystemTime(new Date('2026-05-11T00:00:00Z'))
+    deps = { workspaceRoot }
   })
 
   afterEach(async (): Promise<void> => {
@@ -209,7 +212,11 @@ export async function publishHandler(
   // packages/schema/src/published.ts:12-22 (schema_version, published_at,
   // resorts, live_signals, manifest).
   const { resorts, live_signals } = await composePublishInput(deps.workspaceRoot)
-  const publishedAt = deps.now().toISOString()
+  // Codex round 6 PR #97 P2 fold: existing handlers (listResorts.ts:57,
+  // health.ts:63) use `new Date()` directly — `HandlerDeps` has no clock
+  // seam. Match the existing pattern; tests stub via `vi.useFakeTimers()`
+  // + `vi.setSystemTime()` per Vitest convention.
+  const publishedAt = new Date().toISOString()
 
   const result = await publishDataset(
     {
@@ -264,6 +271,13 @@ async function composePublishInput(workspaceRoot: string): Promise<ComposeResult
 
   const workspaceResorts = new Map<string, Resort>()
   const workspaceLive = new Map<string, ResortLiveSignal>()
+  // Codex round 6 PR #97 P2 fold: track which slugs have a workspace entry
+  // SEPARATELY from which workspace entries had a non-null live_signal.
+  // A workspace file with explicit `live_signal: null` is intentional
+  // (the upsert handler at apps/admin/server/resortUpsert.ts supports it);
+  // without this set, the merge would fall back to the published live_signal
+  // for that slug and silently resurrect data the analyst cleared.
+  const workspaceSlugsWithEntry = new Set<string>()
   for (const entry of await readdir(workspaceDir)) {
     if (!entry.endsWith('.json')) { continue }
     const filePath = join(workspaceDir, entry)
@@ -295,9 +309,13 @@ async function composePublishInput(workspaceRoot: string): Promise<ComposeResult
       throw err
     }
     workspaceResorts.set(parsed.data.slug, parsed.data.resort)
+    workspaceSlugsWithEntry.add(parsed.data.slug)
     if (parsed.data.live_signal !== null) {
       workspaceLive.set(parsed.data.slug, parsed.data.live_signal)
     }
+    // If parsed.data.live_signal === null, intentionally do NOT populate
+    // workspaceLive; the merge below uses workspaceSlugsWithEntry to detect
+    // the explicit-clear case and skip the published fallback.
   }
 
   let publishedResorts: Resort[] = []
@@ -320,12 +338,22 @@ async function composePublishInput(workspaceRoot: string): Promise<ComposeResult
     if (!consumedSlugs.has(slug)) { mergedResorts.push(r) }
   }
 
-  // Merge live_signals: same union semantics, keyed on resort_slug.
+  // Merge live_signals: workspace's intent wins. If a slug has a workspace
+  // entry (per workspaceSlugsWithEntry), use its live_signal value (which may
+  // be null → omit from merged list; explicit clear). Only fall back to the
+  // published live_signal when the slug has NO workspace entry at all.
+  // (Codex round 6 PR #97 P2 fold.)
   const publishedLiveBySlug = new Map(publishedLive.map((ls): [string, ResortLiveSignal] => [ls.resort_slug, ls]))
   const mergedLive: ResortLiveSignal[] = []
   for (const r of mergedResorts) {
-    const ls = workspaceLive.get(r.slug) ?? publishedLiveBySlug.get(r.slug)
-    if (ls !== undefined) { mergedLive.push(ls) }
+    if (workspaceSlugsWithEntry.has(r.slug)) {
+      const ws = workspaceLive.get(r.slug)
+      if (ws !== undefined) { mergedLive.push(ws) }
+      // else: workspace had this slug but with live_signal: null → cleared.
+    } else {
+      const pub = publishedLiveBySlug.get(r.slug)
+      if (pub !== undefined) { mergedLive.push(pub) }
+    }
   }
 
   return { resorts: mergedResorts, live_signals: mergedLive }
@@ -363,6 +391,21 @@ it('returns 400 publish-validation-failed when validatePublishedDataset rejects'
       expect.objectContaining({ message: 'dataset_empty' }),
     ]) },
   })
+})
+
+// Codex round 6 PR #97 P2 fold: explicit-null override semantics.
+it('preserves explicit `live_signal: null` overrides — workspace null wins over published value', async (): Promise<void> => {
+  // Seed published with a live_signal for slug A; seed workspace file for A
+  // with live_signal: null (the upsert handler supports this clear semantic).
+  // Assert: published live_signal for A is NOT in the merged published set.
+  const response = await publishHandler(
+    { params: { slug: '__all__' }, body: { confirm: true } }, deps,
+  )
+  // Filesystem assertion: the archived current.v1.json should contain
+  // resorts: [A] and live_signals: [] (A's published live_signal was cleared).
+  const archive = JSON.parse(await readFile(response.archive_path, 'utf-8'))
+  expect(archive.live_signals).toEqual([])
+  expect(archive.resorts).toHaveLength(1)
 })
 
 it('rejects publish with 500 workspace-corrupt when any workspace file is corrupt (spec §10.3.1)', async (): Promise<void> => {
@@ -410,7 +453,10 @@ describe('listPublishesHandler', (): void => {
 
   beforeEach(async (): Promise<void> => {
     workspaceRoot = await mkdtemp(join(tmpdir(), 'snowboard-list-pub-'))
-    deps = { workspaceRoot, now: (): Date => new Date('2026-05-11T00:00:00Z') }
+    // Codex round 6 PR #97 P2 fold: no clock seam in HandlerDeps — use
+    // vi.setSystemTime() to make `new Date()` deterministic inside the handler.
+    vi.setSystemTime(new Date('2026-05-11T00:00:00Z'))
+    deps = { workspaceRoot }
   })
 
   afterEach(async (): Promise<void> => {
@@ -1716,6 +1762,8 @@ _Populate as Codex / subagent / maintainer / user findings land per round. Carry
 | 6 | 4.5a | Codex round 5 PR #97 | **P2** `publish.ts` imported `Resort` + `ResortLiveSignal` from `@snowboard-trip-advisor/schema/api`; the API barrel exports only endpoint schemas (`packages/schema/api/index.ts:1-9` — `ListResortsQuery`, `PublishBody`, `HealthResponse`, etc.). Domain types live at the schema root. Plan would fail typecheck. | Split imports: endpoint shapes from `/api`, domain types (`Resort`, `ResortLiveSignal`) from the schema root. |
 | 6 | 4.5a | Codex round 5 PR #97 | **P2** `listPublishes.test.ts` "skips non-matching files" case seeded the matching `1-...json` as `'{}'`. The handler reads `body.published_at` + `body.resorts.length` for every filename matching `VERSION_FILENAME`, so the matching file would crash before the non-matching assertion could fire. | Replaced the matching-file fixture with a valid archive-shape body. Non-matching fixture stays as `'{}'` (irrelevant to the read path). |
 | 6 | 4.5b | Codex round 5 PR #97 | **P2** DS `Button` only declared `aria-label` + `aria-pressed` props (`packages/design-system/src/components/Button.tsx:21-34`). PR 4.5c's PublishDialog passes `aria-describedby` (and `aria-disabled`). Plan would fail typecheck. | Added Task 4.5b-3: extend `ButtonProps` with `aria-describedby?: string` (the `aria-disabled` prop dropped from PublishDialog — `disabled` covers the same AT semantic). PR 4.5b file count now 6 (well under ≤8). |
+| 7 | 4.5a | Codex round 6 PR #97 | **P2** `composePublishInput` skipped workspace `live_signal: null` entries; the merge then fell back to published live_signal for that slug — silently resurrecting data the analyst explicitly cleared via the upsert handler. | Track `workspaceSlugsWithEntry: Set<string>` separately from the value `Map`. Merge logic: if slug ∈ set → use workspace's value (which may be `null` → omit); else → fall back to published. Added a test case asserting that workspace null + published-non-null yields an empty `live_signals` array in the archived snapshot. |
+| 7 | 4.5a | Codex round 6 PR #97 | **P2** Plan called `deps.now()` but `HandlerDeps` (`apps/admin/server/listResorts.ts:16-18`) only contains `workspaceRoot`; `dispatch()` passes only `{ workspaceRoot }`. Existing handlers (`listResorts.ts:57`, `health.ts:63`) use `Date.now()` / `new Date()` directly. Plan as-written would fail typecheck. | Switched to `new Date()` directly inside the handler (matches existing pattern). Tests now use `vi.setSystemTime()` for deterministic clock (Vitest convention) instead of injecting a `now` dep. |
 
 ---
 
