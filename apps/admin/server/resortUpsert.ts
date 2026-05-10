@@ -107,10 +107,10 @@ export async function resortUpsertHandler(
 
   // Apply merge per spec §4.3:
   //   - resort: shallow top-level merge, deep field_sources merge per-path
-  //   - live_signal: shallow merge OR explicit-null clear OR cold-start replace
+  //   - live_signal: shallow merge OR explicit-null clear OR cold-start hydrate
   //   - editor_modes: shallow per-key override
   const mergedResort = mergeResort(baseResort, input.body.resort)
-  const mergedLive = mergeLiveSignal(baseLive, input.body.live_signal)
+  const mergedLive = mergeLiveSignal(baseLive, input.body.live_signal, slug)
   const mergedModes = { ...baseModes, ...(input.body.editor_modes ?? {}) }
 
   const candidate: unknown = {
@@ -155,6 +155,7 @@ function mergeResort(base: Resort, patch: ResortUpsertBody['resort']): unknown {
 function mergeLiveSignal(
   base: ResortLiveSignal | null,
   patch: ResortUpsertBody['live_signal'],
+  slug: string,
 ): unknown {
   if (patch === undefined) {
     return base
@@ -163,9 +164,22 @@ function mergeLiveSignal(
     return null
   }
   if (base === null) {
-    // Cold-start live_signal — patch must satisfy ResortLiveSignal in full.
-    // WorkspaceFile.safeParse below will reject if not (→ InvalidResortError).
-    return patch
+    // Codex round-1 P2 fold: ResortUpsertBody strips schema_version + resort_slug
+    // for forging prevention (the URL is the authoritative slug source). The
+    // handler is the trusted authority for these identity fields, so it must
+    // hydrate them on cold-start before WorkspaceFile.safeParse runs — without
+    // this seed even a complete client patch (observed_at + fetched_at + value
+    // fields + field_sources) can never satisfy ResortLiveSignal because the
+    // identity fields are unreachable through the wire schema. Default
+    // field_sources to {} so a patch without provenance still produces a
+    // shape-valid candidate (subsequent value-field validation rejects on its
+    // own merits).
+    return {
+      schema_version: 1,
+      resort_slug: slug,
+      field_sources: {},
+      ...patch,
+    }
   }
   const patchFs = patch.field_sources ?? {}
   return {

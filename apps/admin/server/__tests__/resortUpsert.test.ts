@@ -161,6 +161,47 @@ describe('resortUpsertHandler — happy paths (PR 4.4c spec §7.12)', (): void =
     })
   })
 
+  it('cold-start live_signal: complete patch succeeds; handler hydrates schema_version + resort_slug (Codex round-1 P2)', async (): Promise<void> => {
+    // ResortUpsertBody.parse strips schema_version + resort_slug for forging
+    // prevention (URL is the authoritative slug source). The handler is the
+    // trusted authority for these identity fields and seeds them on cold-start
+    // (existing live_signal === null). Without the seed, even a complete client
+    // patch (observed_at + fetched_at + value fields + field_sources) would
+    // fail post-merge WorkspaceFile.parse — making cleared/missing live_signals
+    // impossible to restore through PUT.
+    await seedPublished(publishedPath, 'kotelnica-bialczanska', { withLiveSignal: false })
+    await resortUpsertHandler(
+      {
+        params: { slug: KOTELNICA },
+        body: {
+          live_signal: {
+            observed_at: ISODateTimeString.parse('2026-04-29T10:00:00Z'),
+            fetched_at: ISODateTimeString.parse('2026-04-29T10:00:00Z'),
+            snow_depth_cm: 100,
+            field_sources: {
+              snow_depth_cm: {
+                source: 'manual',
+                source_url: 'https://admin.local/manual',
+                observed_at: ISODateTimeString.parse('2026-04-29T10:00:00Z'),
+                fetched_at: ISODateTimeString.parse('2026-04-29T10:00:00Z'),
+                upstream_hash: UpstreamHash.parse('c'.repeat(64)),
+                attribution_block: { en: 'Manual entry.' },
+              },
+            },
+          },
+        },
+      },
+      { workspaceRoot: root },
+    )
+    const wf = WorkspaceFile.parse(
+      JSON.parse(await readFile(join(workspaceDir, 'kotelnica-bialczanska.json'), 'utf-8')),
+    )
+    expect(wf.live_signal?.schema_version).toBe(1)
+    expect(wf.live_signal?.resort_slug).toBe('kotelnica-bialczanska')
+    expect(wf.live_signal?.snow_depth_cm).toBe(100)
+    expect(wf.live_signal?.field_sources['snow_depth_cm']?.source).toBe('manual')
+  })
+
   it('cold-start: workspace absent + slug present in published doc → 200 first edit (workspace file written)', async (): Promise<void> => {
     await seedPublished(publishedPath, 'kotelnica-bialczanska')
     const response = await resortUpsertHandler(
