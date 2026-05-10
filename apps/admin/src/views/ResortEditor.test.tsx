@@ -365,6 +365,13 @@ describe('EditorErrorBoundary (PR 4.4b §D1)', (): void => {
     const { rerender } = await renderAsync(<ResortEditor slug={KOTELNICA} />)
     expect(screen.getByText('Resort not found.')).toBeInTheDocument()
 
+    // Per Decision D7 (PR 4.4d): useWorkspaceState / useModeToggle derive the
+    // slug from useURLState, so a slug-prop change without a URL change would
+    // leave the inner FieldRow stuck loading the old slug (and re-tripping the
+    // boundary). Production code drives both together via setRoute(...); the
+    // test mirrors that flow.
+    window.history.replaceState({}, '', '/?route=editor&slug=spindleruv-mlyn')
+
     await act(async (): Promise<void> => {
       rerender(<ResortEditor slug={SPINDLERUV} />)
       for (let i = 0; i < 20; i += 1) {

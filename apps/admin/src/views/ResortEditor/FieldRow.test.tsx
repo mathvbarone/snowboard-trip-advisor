@@ -1,11 +1,30 @@
-import { ISODateTimeString, type FieldStateFor } from '@snowboard-trip-advisor/schema'
-import { render, screen, within } from '@testing-library/react'
+import {
+  ISODateTimeString,
+  ResortSlug,
+  UpstreamHash,
+  type FieldStateFor,
+} from '@snowboard-trip-advisor/schema'
+import { ResortDetailResponse, type ResortUpsertBody } from '@snowboard-trip-advisor/schema/api'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { axe } from 'jest-axe'
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { apiClient } from '../../lib/apiClient'
+import {
+  __resetForTests as resetResortDetail,
+  prepopulateResortDetail,
+} from '../../state/useResortDetail'
+import { __resetForTests as resetURLState } from '../../state/useURLState'
+import {
+  __resetForTests as resetWorkspaceState,
+  setFieldValue as workspaceSetFieldValue,
+} from '../../state/useWorkspaceState'
 
 import { FieldRow, formatMetricValue, labelForPath } from './FieldRow'
 
 const OBS_AT = ISODateTimeString.parse('2026-04-29T08:00:00Z')
+const KOTELNICA = ResortSlug.parse('kotelnica-bialczanska')
+const HASH = UpstreamHash.parse('1'.repeat(64))
 
 function liveState(value: unknown): FieldStateFor<unknown> {
   return { state: 'live', value, source: 'resort-feed', observed_at: OBS_AT }
@@ -23,13 +42,119 @@ function manualState(value: unknown): FieldStateFor<unknown> {
   return { state: 'manual', value, observed_at: OBS_AT }
 }
 
-// PR 4.4b Task 1 — formatMetricValue + labelForPath tests.
-// Per Decision D2 (formatters): exhaustive switch on MetricPath; out-of-range
-// or missing parts → '—'; never throws. Money formatting uses Intl.NumberFormat
-// with `currency: 'EUR'` (Money.currency is z.literal('EUR') in
-// packages/schema/src/primitives.ts:5-9; non-EUR upstream prices live on
-// field_sources.<path>.fx.native_currency per ADR-0003 — Codex round-8 P2-11
-// fold corrected the v9 plan's `currency: 'PLN'` test to EUR).
+function fs(source: 'resort-feed' | 'manual' | 'opensnow'): {
+  source: 'resort-feed' | 'manual' | 'opensnow'
+  source_url: string
+  observed_at: ISODateTimeString
+  fetched_at: ISODateTimeString
+  upstream_hash: UpstreamHash
+  attribution_block: { en: string }
+} {
+  return {
+    source,
+    source_url: 'https://example.local/probe',
+    observed_at: OBS_AT,
+    fetched_at: OBS_AT,
+    upstream_hash: HASH,
+    attribution_block: { en: `Source ${source}.` },
+  }
+}
+
+function syntheticResponse(opts?: {
+  slopesState?: 'live' | 'manual'
+  liftCountState?: 'live' | 'manual'
+}): ResortDetailResponse {
+  const slopesState = opts?.slopesState ?? 'live'
+  const liftCountState = opts?.liftCountState ?? 'live'
+  return ResortDetailResponse.parse({
+    resort: {
+      schema_version: 1,
+      slug: 'kotelnica-bialczanska',
+      name: { en: 'Kotelnica' },
+      country: 'PL',
+      region: { en: 'Lesser Poland' },
+      altitude_m: { min: 770, max: 920 },
+      slopes_km: 8,
+      lift_count: 7,
+      skiable_terrain_ha: 40,
+      season: { start_month: 12, end_month: 4 },
+      publish_state: 'published',
+      field_sources: {
+        'altitude_m.min': fs('resort-feed'),
+        'altitude_m.max': fs('resort-feed'),
+        'slopes_km': slopesState === 'manual' ? fs('manual') : fs('resort-feed'),
+        'lift_count': liftCountState === 'manual' ? fs('manual') : fs('resort-feed'),
+        'skiable_terrain_ha': fs('resort-feed'),
+        'season.start_month': fs('resort-feed'),
+        'season.end_month': fs('resort-feed'),
+      },
+    },
+    live_signal: {
+      schema_version: 1,
+      resort_slug: 'kotelnica-bialczanska',
+      observed_at: OBS_AT,
+      fetched_at: OBS_AT,
+      snow_depth_cm: 145,
+      lifts_open: { count: 7, total: 7 },
+      field_sources: {
+        snow_depth_cm: fs('opensnow'),
+        'lifts_open.count': fs('resort-feed'),
+        'lifts_open.total': fs('resort-feed'),
+      },
+    },
+    field_states: {
+      slopes_km:
+        slopesState === 'manual'
+          ? { state: 'manual', value: 8, observed_at: OBS_AT }
+          : { state: 'live', value: 8, source: 'resort-feed', observed_at: OBS_AT },
+      lift_count:
+        liftCountState === 'manual'
+          ? { state: 'manual', value: 7, observed_at: OBS_AT }
+          : { state: 'live', value: 7, source: 'resort-feed', observed_at: OBS_AT },
+      'altitude_m.min': { state: 'live', value: 770, source: 'resort-feed', observed_at: OBS_AT },
+      'altitude_m.max': { state: 'live', value: 920, source: 'resort-feed', observed_at: OBS_AT },
+      'season.start_month': { state: 'live', value: 12, source: 'resort-feed', observed_at: OBS_AT },
+      'season.end_month': { state: 'live', value: 4, source: 'resort-feed', observed_at: OBS_AT },
+    },
+  })
+}
+
+// Per Codex round-6 P2-8: jsdom doesn't implement window.matchMedia so
+// useIsAboveMd() throws TypeError without this stub. Each test calls it
+// with the appropriate viewport intent (or relies on the default below).
+function stubMatchMedia(matches: boolean): void {
+  vi.stubGlobal(
+    'matchMedia',
+    vi.fn().mockImplementation((query: string) => ({
+      matches,
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  )
+}
+
+beforeEach((): void => {
+  resetURLState()
+  resetWorkspaceState()
+  resetResortDetail()
+  window.history.replaceState({}, '', '/?route=editor&slug=kotelnica-bialczanska')
+  prepopulateResortDetail(KOTELNICA, syntheticResponse())
+  stubMatchMedia(true)
+})
+
+afterEach((): void => {
+  vi.unstubAllGlobals()
+  vi.useRealTimers()
+  vi.restoreAllMocks()
+  resetWorkspaceState()
+  resetResortDetail()
+  resetURLState()
+})
 
 describe('formatMetricValue (PR 4.4b §D2)', (): void => {
   it('formats slopes_km with the km unit', (): void => {
@@ -81,8 +206,6 @@ describe('formatMetricValue (PR 4.4b §D2)', (): void => {
   })
 
   it('formats lift_pass_day Money via Intl.NumberFormat with EUR currency', (): void => {
-    // Per D2: locale undefined uses runtime default; assert via the same
-    // construction so the test stays portable across runners.
     const expected = new Intl.NumberFormat(undefined, {
       style: 'currency',
       currency: 'EUR',
@@ -114,15 +237,11 @@ describe('formatMetricValue (PR 4.4b §D2)', (): void => {
   })
 
   it('returns "—" for shape mismatches (e.g. number where Money is expected)', (): void => {
-    // Defensive — formatter never throws.
     expect(formatMetricValue('lift_pass_day', 50)).toBe('—')
     expect(formatMetricValue('slopes_km', { amount: 1, currency: 'EUR' })).toBe('—')
   })
 
   it('returns "—" for Money objects whose currency is not the EUR literal', (): void => {
-    // Defends against upstream wire mistakes; the schema rejects non-EUR Money
-    // before the formatter sees it (per ADR-0003 + Codex round-8 P2-11), but
-    // the formatter still falls back rather than rendering bogus output.
     expect(formatMetricValue('lift_pass_day', { amount: 50, currency: 'USD' })).toBe('—')
   })
 
@@ -154,7 +273,6 @@ describe('FieldRow render-only (PR 4.4b Tasks 3+4)', (): void => {
     const row = screen.getByLabelText('Lift pass (per day)')
     expect(within(row).getByText('Failed')).toBeInTheDocument()
     expect(within(row).getByText('—')).toBeInTheDocument()
-    // No source badge for the failed state — failed has no provenance to show.
     expect(within(row).queryByText('OpenSnow')).toBeNull()
     expect(within(row).queryByText('Resort Feed')).toBeNull()
     expect(within(row).queryByText('Manual')).toBeNull()
@@ -164,20 +282,23 @@ describe('FieldRow render-only (PR 4.4b Tasks 3+4)', (): void => {
     render(<FieldRow path="lift_count" state={manualState(7)} />)
     const row = screen.getByLabelText('Lift count')
     expect(within(row).getByText('7')).toBeInTheDocument()
-    // "Manual" appears three times in this state (StatusPill, SourceBadge,
-    // ModeToggle); use the typed data attributes the DS primitives expose to
-    // assert each one independently of DOM-text count.
     expect(row.querySelector('[data-variant="manual"]')).not.toBeNull()
     expect(row.querySelector('[data-source="manual"]')).not.toBeNull()
   })
 
-  it('renders an inline render-only ModeToggle (span role="switch" aria-disabled) — aria-checked tracks the manual state', (): void => {
+  // Below-md responsive branch (Decision D11): the inline render-only span
+  // is now the FALLBACK below the md breakpoint. The pre-existing 4.4b
+  // assertion is preserved by switching the matchMedia stub to false.
+  it('below md (matchMedia=false): ModeToggle degrades to span role="switch" aria-disabled', (): void => {
+    stubMatchMedia(false)
     const { rerender } = render(<FieldRow path="slopes_km" state={liveState(10)} />)
     const liveToggle = screen.getByRole('switch')
     expect(liveToggle.tagName).toBe('SPAN')
     expect(liveToggle).toHaveAttribute('aria-disabled', 'true')
     expect(liveToggle).toHaveAttribute('aria-checked', 'false')
 
+    // For the manual canonical projection, the inline span renders aria-checked=true.
+    prepopulateResortDetail(KOTELNICA, syntheticResponse({ slopesState: 'manual' }))
     rerender(<FieldRow path="slopes_km" state={manualState(15)} />)
     const manualToggle = screen.getByRole('switch')
     expect(manualToggle).toHaveAttribute('aria-disabled', 'true')
@@ -213,5 +334,293 @@ describe('labelForPath (PR 4.4b §D2)', (): void => {
     expect(labelForPath('lifts_open.total')).toBe('Lifts open (total)')
     expect(labelForPath('lift_pass_day')).toBe('Lift pass (per day)')
     expect(labelForPath('lodging_sample.median_eur')).toBe('Lodging median')
+  })
+})
+
+// PR 4.4d Task 6 — above-md interactive branches (Decision D11, F1).
+describe('FieldRow above-md: interactive ModeToggle + MANUAL input (PR 4.4d)', (): void => {
+  it('above md + MANUAL on slopes_km (durable): renders DS Input AND DS Button ModeToggle', (): void => {
+    prepopulateResortDetail(KOTELNICA, syntheticResponse({ slopesState: 'manual' }))
+    render(<FieldRow path="slopes_km" state={manualState(8)} />)
+
+    const input = screen.getByRole('textbox', { name: 'Slopes (km)' })
+    expect(input.tagName).toBe('INPUT')
+
+    const toggle = screen.getByRole('button', { name: /Mode for Slopes \(km\)/ })
+    expect(toggle.tagName).toBe('BUTTON')
+    expect(toggle).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('above md + AUTO on slopes_km: no MANUAL Input rendered; ModeToggle button visible with aria-pressed=false', (): void => {
+    render(<FieldRow path="slopes_km" state={liveState(8)} />)
+    expect(screen.queryByRole('textbox', { name: 'Slopes (km)' })).toBeNull()
+    const toggle = screen.getByRole('button', { name: /Mode for Slopes \(km\)/ })
+    expect(toggle).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('above md + live-only path (lift_pass_day): ModeToggle is disabled AND explanatory copy renders unconditionally (Codex round-22 P2-30)', (): void => {
+    render(<FieldRow path="lift_pass_day" state={liveState({ amount: 50, currency: 'EUR' })} />)
+    const toggle = screen.getByRole('button', { name: /Mode for Lift pass/ })
+    expect(toggle).toBeDisabled()
+    expect(screen.getByText(/MANUAL editing for lift_pass_day lands in PR 4.6a/)).toBeInTheDocument()
+    // No MANUAL Input rendered for the live path (it's not in MANUAL_EDITABLE_PATHS).
+    expect(screen.queryByRole('textbox')).toBeNull()
+  })
+
+  it('above md + live-only paths: all 5 (snow_depth_cm, lifts_open.{count,total}, lift_pass_day, lodging_sample.median_eur) show disabled toggle', (): void => {
+    const livePaths = [
+      'snow_depth_cm', 'lifts_open.count', 'lifts_open.total',
+      'lift_pass_day', 'lodging_sample.median_eur',
+    ] as const
+    for (const path of livePaths) {
+      const { unmount } = render(<FieldRow path={path} state={liveState(1)} />)
+      const toggle = screen.getByRole('button', { name: `Mode for ${labelForPath(path)}` })
+      expect(toggle).toBeDisabled()
+      unmount()
+    }
+  })
+
+  it('above md + MANUAL + typing a valid number: setFieldValue fires after debounce, PUT body carries the new value', async (): Promise<void> => {
+    vi.useFakeTimers()
+    prepopulateResortDetail(KOTELNICA, syntheticResponse({ slopesState: 'manual' }))
+    const spy = vi
+      .spyOn(apiClient, 'upsertResort')
+      .mockResolvedValue(syntheticResponse({ slopesState: 'manual' }))
+
+    render(<FieldRow path="slopes_km" state={manualState(8)} />)
+    const input = screen.getByRole('textbox', { name: 'Slopes (km)' })
+    await act(async (): Promise<void> => {
+      fireEvent.change(input, { target: { value: '150' } })
+      await vi.advanceTimersByTimeAsync(600)
+    })
+
+    expect(spy).toHaveBeenCalled()
+    const body = spy.mock.calls[0]?.[1] as ResortUpsertBody
+    expect(body.resort?.slopes_km).toBe(150)
+    expect(body.resort?.field_sources?.['slopes_km']?.source).toBe('manual')
+  })
+
+  it('above md + MANUAL + empty input: no PUT fires (Codex round-11 P2-15 + round-17 P2-24)', async (): Promise<void> => {
+    vi.useFakeTimers()
+    prepopulateResortDetail(KOTELNICA, syntheticResponse({ slopesState: 'manual' }))
+    const spy = vi.spyOn(apiClient, 'upsertResort').mockResolvedValue(syntheticResponse())
+
+    render(<FieldRow path="slopes_km" state={manualState(8)} />)
+    const input = screen.getByRole('textbox', { name: 'Slopes (km)' })
+    await act(async (): Promise<void> => {
+      fireEvent.change(input, { target: { value: '' } })
+      await vi.advanceTimersByTimeAsync(600)
+    })
+
+    expect(spy).not.toHaveBeenCalled()
+    expect(input).toHaveValue('')
+  })
+
+  it('above md + MANUAL + whitespace-only input: no PUT fires (Codex round-17 P2-23)', async (): Promise<void> => {
+    vi.useFakeTimers()
+    prepopulateResortDetail(KOTELNICA, syntheticResponse({ slopesState: 'manual' }))
+    const spy = vi.spyOn(apiClient, 'upsertResort').mockResolvedValue(syntheticResponse())
+
+    render(<FieldRow path="slopes_km" state={manualState(8)} />)
+    const input = screen.getByRole('textbox', { name: 'Slopes (km)' })
+    await act(async (): Promise<void> => {
+      fireEvent.change(input, { target: { value: '   ' } })
+      await vi.advanceTimersByTimeAsync(600)
+    })
+
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it('above md + MANUAL + invalid intermediates (-, ., 1e): no PUT fires', async (): Promise<void> => {
+    vi.useFakeTimers()
+    prepopulateResortDetail(KOTELNICA, syntheticResponse({ slopesState: 'manual' }))
+    const spy = vi.spyOn(apiClient, 'upsertResort').mockResolvedValue(syntheticResponse())
+
+    render(<FieldRow path="slopes_km" state={manualState(8)} />)
+    const input = screen.getByRole('textbox', { name: 'Slopes (km)' })
+    for (const raw of ['-', '.', '1e']) {
+      await act(async (): Promise<void> => {
+        fireEvent.change(input, { target: { value: raw } })
+        await vi.advanceTimersByTimeAsync(600)
+      })
+    }
+
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it('above md + MANUAL on lift_count + fractional input (7.5): no PUT fires (Codex round-19 P2-26)', async (): Promise<void> => {
+    vi.useFakeTimers()
+    prepopulateResortDetail(KOTELNICA, syntheticResponse({ liftCountState: 'manual' }))
+    const spy = vi.spyOn(apiClient, 'upsertResort').mockResolvedValue(syntheticResponse())
+
+    render(<FieldRow path="lift_count" state={manualState(7)} />)
+    const input = screen.getByRole('textbox', { name: 'Lift count' })
+    await act(async (): Promise<void> => {
+      fireEvent.change(input, { target: { value: '7.5' } })
+      await vi.advanceTimersByTimeAsync(600)
+    })
+    expect(spy).not.toHaveBeenCalled()
+
+    // Then valid integer → PUT fires.
+    await act(async (): Promise<void> => {
+      fireEvent.change(input, { target: { value: '8' } })
+      await vi.advanceTimersByTimeAsync(600)
+    })
+    expect(spy).toHaveBeenCalled()
+    const body = spy.mock.calls[0]?.[1] as ResortUpsertBody
+    expect(body.resort?.lift_count).toBe(8)
+  })
+
+  it('above md + MANUAL on season.start_month + out-of-range / non-integer input: no PUT fires', async (): Promise<void> => {
+    vi.useFakeTimers()
+    prepopulateResortDetail(KOTELNICA, syntheticResponse())
+    const spy = vi.spyOn(apiClient, 'upsertResort').mockResolvedValue(syntheticResponse())
+
+    // Flip MANUAL via the toggle so the Input renders.
+    render(<FieldRow path="season.start_month" state={liveState(12)} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Mode for Season start' }))
+    const input = screen.getByRole('textbox', { name: 'Season start' })
+
+    // 13 is out of range; 5.5 is non-integer; both must short-circuit.
+    for (const raw of ['13', '0', '5.5']) {
+      fireEvent.change(input, { target: { value: raw } })
+      await act(async (): Promise<void> => { await vi.advanceTimersByTimeAsync(600) })
+    }
+
+    // Only the initial mode-toggle PUT fires (one body containing only editor_modes).
+    for (const call of spy.mock.calls) {
+      const body = call[1]
+      expect(body.resort?.season).toBeUndefined()
+    }
+  })
+
+  it('above md + MANUAL + non-finite input (Infinity, -Infinity, 1e999): no PUT fires (Codex round-22 P2-31)', async (): Promise<void> => {
+    vi.useFakeTimers()
+    prepopulateResortDetail(KOTELNICA, syntheticResponse({ slopesState: 'manual' }))
+    const spy = vi.spyOn(apiClient, 'upsertResort').mockResolvedValue(syntheticResponse())
+
+    render(<FieldRow path="slopes_km" state={manualState(8)} />)
+    const input = screen.getByRole('textbox', { name: 'Slopes (km)' })
+    for (const raw of ['Infinity', '-Infinity', '1e999']) {
+      await act(async (): Promise<void> => {
+        fireEvent.change(input, { target: { value: raw } })
+        await vi.advanceTimersByTimeAsync(600)
+      })
+    }
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it('above md + ModeToggle click invokes toggleMode (durable path)', async (): Promise<void> => {
+    vi.useFakeTimers()
+    const spy = vi
+      .spyOn(apiClient, 'upsertResort')
+      .mockResolvedValue(syntheticResponse({ slopesState: 'manual' }))
+
+    render(<FieldRow path="slopes_km" state={liveState(8)} />)
+    const toggle = screen.getByRole('button', { name: /Mode for Slopes \(km\)/ })
+    await act(async (): Promise<void> => {
+      fireEvent.click(toggle)
+      await vi.advanceTimersByTimeAsync(600)
+    })
+
+    expect(spy).toHaveBeenCalled()
+    const body = spy.mock.calls[0]?.[1] as ResortUpsertBody
+    expect(body.editor_modes?.['slopes_km']).toBe('manual')
+  })
+})
+
+// Coverage: readDraftLeaf's live-path switch case (returns undefined for the
+// 5 live paths even when draft.resort is populated by a durable edit).
+describe('FieldRow live-path render with draft.resort populated', (): void => {
+  it('renders the live-path FieldRow correctly when an unrelated durable field has been edited', (): void => {
+    workspaceSetFieldValue(KOTELNICA, 'slopes_km', 100)
+    // Now draft.resort is defined; readDraftLeaf for a live path hits the
+    // switch's live-path return-undefined arm.
+    render(<FieldRow path="snow_depth_cm" state={liveState(145)} />)
+    // The display falls back to the canonical FieldState value via valueOfState.
+    const row = screen.getByLabelText('Snow depth (cm)')
+    expect(within(row).getByText('145 cm')).toBeInTheDocument()
+  })
+})
+
+// PR 4.4d Task 6 — below-md responsive read-only gate (Decision D11 +
+// AGENTS.md "Admin App Rules"). Edit controls REMOVED from the tab order
+// — not merely disabled.
+describe('FieldRow below-md responsive gate (Decision D11)', (): void => {
+  beforeEach((): void => { stubMatchMedia(false) })
+
+  it('below md + MANUAL on slopes_km (durable): no Input rendered AND no interactive Button ModeToggle', (): void => {
+    prepopulateResortDetail(KOTELNICA, syntheticResponse({ slopesState: 'manual' }))
+    render(<FieldRow path="slopes_km" state={manualState(8)} />)
+
+    // No MANUAL Input present below md.
+    expect(screen.queryByRole('textbox')).toBeNull()
+    // No interactive DS Button ModeToggle either — the span fallback is not a button.
+    expect(screen.queryByRole('button')).toBeNull()
+    // The render-only span IS still there.
+    const fallback = screen.getByRole('switch')
+    expect(fallback.tagName).toBe('SPAN')
+    expect(fallback).toHaveAttribute('aria-disabled', 'true')
+  })
+
+  it('below md + live path: no explanatory copy, no Input', (): void => {
+    render(<FieldRow path="lift_pass_day" state={liveState({ amount: 50, currency: 'EUR' })} />)
+    expect(screen.queryByRole('textbox')).toBeNull()
+    expect(screen.queryByText(/MANUAL editing for/)).toBeNull()
+  })
+
+  it('below md: the render-only span has no tabindex (not in tab order per AGENTS.md "Admin App Rules")', (): void => {
+    render(<FieldRow path="slopes_km" state={liveState(8)} />)
+    const span = screen.getByRole('switch')
+    // Spans have no default tabindex — assert it's not made focusable.
+    expect(span).not.toHaveAttribute('tabindex')
+  })
+})
+
+// PR 4.4d Task 6 — edit-then-clear scenarios (Codex rounds 20/21/24).
+describe('FieldRow MANUAL clear scenarios (Codex rounds 20/21/24)', (): void => {
+  it('edit-then-clear of a top-level path drops value/provenance but preserves editor_modes (round-20 P2-28 + round-24 P2-35 no-mode variant)', async (): Promise<void> => {
+    vi.useFakeTimers()
+    prepopulateResortDetail(KOTELNICA, syntheticResponse({ slopesState: 'manual' }))
+    const spy = vi.spyOn(apiClient, 'upsertResort').mockResolvedValue(syntheticResponse())
+
+    render(<FieldRow path="slopes_km" state={manualState(8)} />)
+    const input = screen.getByRole('textbox', { name: 'Slopes (km)' })
+    fireEvent.change(input, { target: { value: '150' } })
+    // Before debounce fires: clear input.
+    fireEvent.change(input, { target: { value: '' } })
+    await act(async (): Promise<void> => {
+      await vi.advanceTimersByTimeAsync(600)
+    })
+
+    // No editor_modes was toggled in this test → empty-diff short-circuit → no PUT.
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it('edit-then-clear of a nested path (season.start_month) drops the WHOLE parent — no incomplete-parent PUT (round-21 P2-29)', async (): Promise<void> => {
+    vi.useFakeTimers()
+    prepopulateResortDetail(KOTELNICA, syntheticResponse())
+    const spy = vi.spyOn(apiClient, 'upsertResort').mockResolvedValue(syntheticResponse())
+
+    // First, toggle MANUAL above-md so the Input renders.
+    render(<FieldRow path="season.start_month" state={liveState(12)} />)
+    const toggle = screen.getByRole('button', { name: 'Mode for Season start' })
+    fireEvent.click(toggle)
+
+    // After the click flush, modeFor='manual' and the Input is in the DOM.
+    const input = screen.getByRole('textbox', { name: 'Season start' })
+    fireEvent.change(input, { target: { value: '11' } })
+    // Before debounce: clear.
+    fireEvent.change(input, { target: { value: '' } })
+    await act(async (): Promise<void> => {
+      await vi.advanceTimersByTimeAsync(600)
+    })
+
+    // The pending PUT (if it fires) carries ONLY editor_modes; no resort.season patch.
+    // Empty-diff for resort is OK since season was cleared from draft.
+    for (const call of spy.mock.calls) {
+      const body = call[1]
+      expect(body.resort?.season).toBeUndefined()
+    }
   })
 })
