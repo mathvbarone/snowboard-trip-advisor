@@ -44,7 +44,7 @@ Per [spec §7.4](../specs/2026-05-01-epic-4-admin-app-design.md), after PRs 4.5a
 - The blocking-state copy renders inside `<p id="publish-dialog-blocker" className="publish-dialog__tooltip">…</p>` (no `role="status"` — the tooltip is not a live region; it's static descriptive text for a disabled button).
 - The Confirm button carries `aria-describedby="publish-dialog-blocker"` when `blocker !== null` so AT users hear the reason for the disabled state. When `blocker === null`, the `aria-describedby` attribute is omitted (no `<p>` rendered). | No DS Modal exists; building one would balloon scope. Inline the primitive with explicit focus management; promote to DS when a second modal consumer (with a real focus-trap need) exists. |
 | **F2** | PublishDialog **does NOT call `apiClient.publish()` directly** — it consumes `usePublish()` from `apps/admin/src/state/usePublish.ts`. Side effects live in the hook; render lives in the dialog. | Locality. Render-only component; state lives in hook. |
-| **G1** | Shell's HeaderBar gains a `<Button>Publish</Button>` (existing DS primitive, `variant="primary"` per design pattern). Click toggles `isPublishOpen` local Shell state. `<PublishDialog open={isPublishOpen} onClose={...} />` renders inside Shell's root div (NOT portal — Phase 1 admin has no z-index complexity). `<ToastProvider>` wraps Shell's main content. | Locality. Shell already coordinates HeaderBar + Sidebar + main; adding the dialog + toast slots fits cleanly. |
+| **G1** | Shell's HeaderBar gains a `<Button>Publish</Button>` (existing DS primitive, `variant="primary"` per design pattern). Click toggles `isPublishOpen` local Shell state. `<ToastProvider>` wraps Shell's main content. **Codex round 3 PR #97 P1 fold:** PublishDialog is **conditionally mounted** — `{isPublishOpen && <PublishDialog onClose={...} />}` — so each open is a fresh mount that re-runs `useHealth()`'s effect against the latest health snapshot. The original `<PublishDialog open={...} onClose={...} />` pattern with internal `if (!open) return null` left the component mounted for the app lifetime, and `useHealth`'s effect has an empty dep array so it would never re-fetch; the dialog would open against stale health (possibly with confirm enabled when corrupt-workspace state newly appeared). PublishDialog no longer accepts an `open` prop; presence ↔ open. | Locality + freshness. Conditional mount is the cleanest way to retrigger an existing useEffect; no plumbing changes to `useHealth`. |
 | **H1** | PublishHistory route lives at `?route=publishes`. `urlState.ts` MODIFY adds `{ route: 'publishes'; page?: number }` variant; default page = 0. Sort: `published_at` descending (handler returns newest-first per spec §4.7). Pagination: `?route=publishes&page=N`. Page size: 20 (matches `ListPublishesQuery` default per spec §4.7). | Match existing URL-state pattern. |
 | **I1** | Bridge integration test `publish-flow.test.tsx` ships in PR **4.5d** (NOT a separate 4.5e). The integration test exercises the full flow (open Shell → click Publish → confirm → wait → see Toast → navigate to `?route=publishes` → see entry); PublishHistory is required for the "see entry" assertion. The PR 4.5d file budget (6 files post-A1 P0-1 fold) fits. | Test serves the user-facing flow; ship with the last UI piece. |
 | **J1** | Per spec §4.9 invariant 5 (`POST` carries `Idempotency-Key`; Phase 1 honors but does not enforce; Phase 2 enforces): build the real Phase 1 client→server header path (Codex round 1 PR #97 fold — corrects the original J1 which assumed nonexistent `PublishRequestMeta` scaffolding):
@@ -177,6 +177,7 @@ import type {
   PublishResponse,
   PublishSlugParam,
   Resort,
+  ResortLiveSignal,
 } from '@snowboard-trip-advisor/schema/api'
 import { WorkspaceFile } from '@snowboard-trip-advisor/schema'
 
@@ -200,11 +201,25 @@ export async function publishHandler(
     throw err
   }
 
-  const resorts = await composePublishInput(deps.workspaceRoot)
+  // Codex round 3 PR #97 P1 fold: compose BOTH resorts AND live_signals from
+  // workspace ∪ published, then build the full PublishedDataset envelope per
+  // packages/schema/src/published.ts:12-22 (schema_version, published_at,
+  // resorts, live_signals, manifest).
+  const { resorts, live_signals } = await composePublishInput(deps.workspaceRoot)
   const publishedAt = deps.now().toISOString()
 
   const result = await publishDataset(
-    { schema_version: 1, generated_at: publishedAt, resorts },
+    {
+      schema_version: 1,
+      published_at: publishedAt,
+      resorts,
+      live_signals,
+      manifest: {
+        resort_count: resorts.length,
+        generated_by: 'admin-workspace',  // Phase 1 fingerprint per spec §4.7.
+        validator_version: '1',
+      },
+    },
     { rootDir: join(deps.workspaceRoot, 'data', 'published') },
   )
 
@@ -223,14 +238,22 @@ export async function publishHandler(
   }
 }
 
-async function composePublishInput(workspaceRoot: string): Promise<Resort[]> {
+interface ComposeResult {
+  readonly resorts: Resort[]
+  readonly live_signals: ResortLiveSignal[]
+}
+
+async function composePublishInput(workspaceRoot: string): Promise<ComposeResult> {
   // Inline per Decision B3 — locality of behavior, not extracted to its own file.
+  // Codex round 3 PR #97 P1 fold: also composes live_signals from workspace ∪
+  // published — PublishedDataset.live_signals is a required array per the schema.
   const workspaceDir = join(workspaceRoot, 'data/admin-workspace')
   const publishedPath = join(workspaceRoot, 'data/published/current.v1.json')
 
   await mkdir(workspaceDir, { recursive: true })
 
   const workspaceResorts = new Map<string, Resort>()
+  const workspaceLive = new Map<string, ResortLiveSignal>()
   for (const entry of await readdir(workspaceDir)) {
     if (!entry.endsWith('.json')) { continue }
     const filePath = join(workspaceDir, entry)
@@ -262,21 +285,40 @@ async function composePublishInput(workspaceRoot: string): Promise<Resort[]> {
       throw err
     }
     workspaceResorts.set(parsed.data.slug, parsed.data.resort)
+    if (parsed.data.live_signal !== null) {
+      workspaceLive.set(parsed.data.slug, parsed.data.live_signal)
+    }
   }
 
   let publishedResorts: Resort[] = []
+  let publishedLive: ResortLiveSignal[] = []
   try {
     const raw = await readFile(publishedPath, 'utf-8')
-    publishedResorts = (JSON.parse(raw) as { resorts: Resort[] }).resorts ?? []
+    const doc = JSON.parse(raw) as { resorts?: Resort[]; live_signals?: ResortLiveSignal[] }
+    publishedResorts = doc.resorts ?? []
+    publishedLive = doc.live_signals ?? []
   } catch { /* missing published doc — workspace-only publish per §10.9. */ }
 
-  const merged: Resort[] = []
+  // Merge resorts: workspace overrides per slug; published-only kept.
+  const mergedResorts: Resort[] = []
+  const consumedSlugs = new Set<string>()
   for (const r of publishedResorts) {
-    merged.push(workspaceResorts.get(r.slug) ?? r)
-    workspaceResorts.delete(r.slug)
+    mergedResorts.push(workspaceResorts.get(r.slug) ?? r)
+    consumedSlugs.add(r.slug)
   }
-  for (const r of workspaceResorts.values()) { merged.push(r) }
-  return merged
+  for (const [slug, r] of workspaceResorts.entries()) {
+    if (!consumedSlugs.has(slug)) { mergedResorts.push(r) }
+  }
+
+  // Merge live_signals: same union semantics, keyed on resort_slug.
+  const publishedLiveBySlug = new Map(publishedLive.map((ls): [string, ResortLiveSignal] => [ls.resort_slug, ls]))
+  const mergedLive: ResortLiveSignal[] = []
+  for (const r of mergedResorts) {
+    const ls = workspaceLive.get(r.slug) ?? publishedLiveBySlug.get(r.slug)
+    if (ls !== undefined) { mergedLive.push(ls) }
+  }
+
+  return { resorts: mergedResorts, live_signals: mergedLive }
 }
 ```
 
@@ -374,8 +416,8 @@ describe('listPublishesHandler', (): void => {
   it('parses ${counter}-${iso}.json filenames; sorts newest-first', async (): Promise<void> => {
     const dir = join(workspaceRoot, 'data/published/history')
     await mkdir(dir, { recursive: true })
-    await writeFile(join(dir, '1-2026-05-09T00-00-00-000Z.json'), '{"schema_version":1,"generated_at":"2026-05-11T00:00:00.000Z","resorts":[]}')
-    await writeFile(join(dir, '2-2026-05-10T00-00-00-000Z.json'), '{"schema_version":1,"generated_at":"2026-05-11T00:00:00.000Z","resorts":[]}')
+    await writeFile(join(dir, '1-2026-05-09T00-00-00-000Z.json'), '{"schema_version":1,"published_at":"2026-05-11T00:00:00.000Z","resorts":[],"live_signals":[],"manifest":{"resort_count":0,"generated_by":"test","validator_version":"1"}}')
+    await writeFile(join(dir, '2-2026-05-10T00-00-00-000Z.json'), '{"schema_version":1,"published_at":"2026-05-11T00:00:00.000Z","resorts":[],"live_signals":[],"manifest":{"resort_count":0,"generated_by":"test","validator_version":"1"}}')
 
     const r = await listPublishesHandler({ query: {} }, deps)
     expect(r.items).toHaveLength(2)
@@ -389,7 +431,7 @@ describe('listPublishesHandler', (): void => {
     for (let n = 1; n <= 25; n += 1) {
       await writeFile(
         join(dir, `${String(n)}-2026-05-${String(n).padStart(2, '0')}T00-00-00-000Z.json`),
-        '{"schema_version":1,"generated_at":"2026-05-11T00:00:00.000Z","resorts":[]}',
+        '{"schema_version":1,"published_at":"2026-05-11T00:00:00.000Z","resorts":[],"live_signals":[],"manifest":{"resort_count":0,"generated_by":"test","validator_version":"1"}}',
       )
     }
     const r = await listPublishesHandler({ query: { page: { offset: 20, limit: 5 } } }, deps)
@@ -432,8 +474,10 @@ import type { HandlerDeps } from './listResorts'
 // is `iso.replace(/[:.]/g, '-')`. Capturing the counter is straightforward; the iso
 // part is NOT a clean round-trip target via regex (the substitution is lossy with
 // respect to which `-` characters were originally `:` vs `.` vs `-`). Authoritative
-// `published_at` lives INSIDE each archived JSON file's `generated_at` (validated
-// by `validatePublishedDataset`). Read it from there.
+// `published_at` lives INSIDE each archived JSON file (validated by
+// `validatePublishedDataset` against `packages/schema/src/published.ts:14`). Read
+// from `body.published_at` (NOT `generated_at` — Codex round 3 PR #97 P1 fold:
+// the schema field is `published_at`; `generated_at` does not exist).
 const VERSION_FILENAME = /^(\d+)-(.+)\.json$/
 const DEFAULT_LIMIT = 20
 
@@ -470,15 +514,16 @@ export async function listPublishesHandler(
   for (const { counter, entry } of filtered.slice(offset, offset + limit)) {
     const archivePath = join(historyDir, entry)
     const body = JSON.parse(await readFile(archivePath, 'utf-8')) as {
-      generated_at: string
+      published_at: string
       resorts: Array<{ slug: string }>
+      manifest?: { generated_by?: string }
     }
     versions.push({
       version_id: entry.replace(/\.json$/, ''),
-      published_at: body.generated_at,  // Authoritative — from inside the file.
+      published_at: body.published_at,  // Authoritative — from inside the file (spec §4.7).
       archive_path: archivePath,
       resort_count: body.resorts.length,
-      published_by: 'admin-workspace',  // Phase 1 fingerprint per spec §4.7.
+      published_by: body.manifest?.generated_by ?? 'admin-workspace',  // Phase 1 fingerprint.
     })
   }
 
@@ -1132,18 +1177,19 @@ const TOOLTIP_BY_BLOCKER = {
 type Blocker = keyof typeof TOOLTIP_BY_BLOCKER
 
 export interface PublishDialogProps {
-  readonly open: boolean
   readonly onClose: () => void
 }
 
-export function PublishDialog({ open, onClose }: PublishDialogProps): JSX.Element | null {
+// Codex round 3 PR #97 P1 fold: no `open` prop. Shell mounts the dialog
+// conditionally (`{isPublishOpen && <PublishDialog onClose={...} />}`) so
+// each open re-runs `useHealth()`'s mount effect against fresh health.
+export function PublishDialog({ onClose }: PublishDialogProps): JSX.Element {
   const dialogRef = useRef<HTMLDivElement | null>(null)
   const health = useHealth()
   const publish = usePublish()
   const toast = useToast()
 
-  useEffect((): (() => void) | undefined => {
-    if (!open) { return }
+  useEffect((): (() => void) => {
     const previouslyFocused = document.activeElement as HTMLElement | null
     const firstFocusable = dialogRef.current?.querySelector<HTMLElement>(
       'button:not([disabled]), [tabindex]:not([tabindex="-1"])',
@@ -1159,7 +1205,7 @@ export function PublishDialog({ open, onClose }: PublishDialogProps): JSX.Elemen
       document.removeEventListener('keydown', onKey)
       previouslyFocused?.focus()
     }
-  }, [open, onClose])
+  }, [onClose])
 
   useEffect((): void => {
     // Codex round 2 PR #97 P1 fold: after handling terminal status, call
@@ -1177,8 +1223,6 @@ export function PublishDialog({ open, onClose }: PublishDialogProps): JSX.Elemen
       publish.reset()
     }
   }, [publish, onClose, toast])
-
-  if (!open) { return null }
 
   // Codex round 1 PR #97 P2 fold: fail-CLOSED while health is unknown.
   // Original logic enabled the confirm button when `health.value === null`
@@ -1254,7 +1298,10 @@ export function Shell({ children }: { children: ReactNode }): JSX.Element {
         </header>
         {/* …existing nav + main… */}
         {children}
-        <PublishDialog open={publishOpen} onClose={(): void => { setPublishOpen(false) }} />
+        {/* Codex round 3 PR #97 P1 fold: conditionally mount so each open re-runs useHealth on mount. */}
+        {publishOpen && (
+          <PublishDialog onClose={(): void => { setPublishOpen(false) }} />
+        )}
       </div>
     </ToastProvider>
   )
@@ -1585,6 +1632,9 @@ _Populate as Codex / subagent / maintainer / user findings land per round. Carry
 | 3 | 4.5b/4.5c | Codex round 2 PR #97 | **P1** `ToastProvider`'s inline `value={{ show: setCurrent }}` creates a new context object every render; `PublishDialog`'s effect with `toast` in deps would infinite-loop firing Toasts while `publish.status === 'success'` until React's max-update-depth fired. | (a) `ToastProvider` memoizes the context value via `useMemo`. (b) `PublishDialog` calls `publish.reset()` after handling terminal status so subsequent re-renders see `'idle'` and the effect body is a no-op (defense-in-depth). New tests assert context-value stability across re-renders + dialog fires Toast exactly once per terminal status. |
 | 3 | 4.5b | Codex round 2 PR #97 | **P2** Replacement Toast inherits prior Toast's `remainingRef.current` because `useRef(dismissAfterMs)` only captures initial-mount value; the same instance stays mounted across replacement. | `ToastProvider` keys `<Toast>` by a per-show counter (`keyRef.current += 1` inside `show`) so React remounts on replacement → fresh refs → correct timing. Added a "replacement remounts with fresh timing" test that first triggers a 100s Toast then replaces with a 1s Toast and asserts the 1s timing is honored. |
 | 3 | 4.5c | Codex round 2 PR #97 | **P2** PR 4.5c file count was 8 only by counting `useHealth.ts` + `useHealth.test.ts` as one budget item; AGENTS.md PR-sizing rule counts paths, not concerns — true count was 9 (over the ≤8 ceiling). | **Dropped Decision D3 entirely.** `useHealth.ts` is NOT extended in PR 4.5c. PublishDialog re-fetches health via `useEffect`-on-mount each time the modal opens (existing pattern). Dashboard health-card staleness post-publish is a documented Phase-1 limitation tagged for PR 4.6a Tier 5 polish. Decision D2 amended (no `invalidateHealth()` call). PR 4.5c is now 7 files. |
+| 4 | 4.5a | Codex round 3 PR #97 | **P1** `publish.ts` envelope was incomplete: `PublishedDataset` schema (`packages/schema/src/published.ts:12-22`) requires `schema_version`, `published_at`, `resorts`, `live_signals`, `manifest{resort_count,generated_by,validator_version}` — the plan used `generated_at` (wrong field name) and was missing `live_signals` + `manifest`. Every non-empty publish would fail `validatePublishedDataset` before any archive write. | Rewrote `publish.ts` envelope construction to include all required fields. `composePublishInput` now returns `{ resorts, live_signals }` — merging `WorkspaceFile.live_signal` (non-null) ∪ `published.live_signals` keyed on `resort_slug`. Manifest uses `generated_by: 'admin-workspace'` per spec §4.7 + `validator_version: '1'`. |
+| 4 | 4.5a | Codex round 3 PR #97 | **P1** `listPublishes.ts` read `body.generated_at`; the archived `PublishedDataset` schema has `published_at` (no `generated_at` field). Real archives would assign `undefined` → `apiClient.listPublishes()` rejects the response → PublishHistory unusable. | `listPublishes.ts` now reads `body.published_at`. Test fixtures updated to use the real schema shape `{schema_version, published_at, resorts, live_signals, manifest}`. Also pulls `published_by` from `body.manifest.generated_by` (falling back to `'admin-workspace'`). |
+| 4 | 4.5c | Codex round 3 PR #97 | **P1** `<PublishDialog open={open} onClose={...} />` left the component mounted for the app lifetime; the internal `if (!open) return null` returns null but does NOT unmount → `useHealth`'s once-on-mount effect fires only at app boot → dialog always opens against stale health. Confirm could be enabled after corrupt-workspace state newly appeared. | Removed the `open` prop. Shell mounts the dialog conditionally: `{isPublishOpen && <PublishDialog onClose={...} />}`. Each open is a fresh mount → fresh `useHealth` fetch. Decision G1 amended. |
 
 ---
 
