@@ -287,6 +287,59 @@ describe('useResortDetail (PR 4.4a-2, decisions log D3 / D6 / D13)', (): void =>
     spy.mockRestore()
   })
 
+  it('Codex P2 fold: stale in-flight GET that resolves AFTER prepopulateResortDetail does NOT overwrite cachedFulfilled', async (): Promise<void> => {
+    // Race: a GET fires; before it resolves, the caller (e.g. PR 4.4d's
+    // useWorkspaceState post-PUT path) calls prepopulateResortDetail with
+    // newer post-PUT data. The older GET MUST NOT clobber cachedFulfilled
+    // when it eventually resolves — otherwise the next render serves
+    // pre-PUT data until the next manual invalidate.
+    //
+    // Test driver: spy on apiClient.getResort so we control resolution
+    // timing precisely (sidesteps MSW handler scheduling).
+    let resolveGet: (value: ResortDetailResponse) => void = (): void => {}
+    const olderResponse = makeSyntheticResponse('older-response-slug')
+    const newerResponse = makeSyntheticResponse('newer-response-slug')
+    const spy = vi.spyOn(apiClient, 'getResort').mockImplementation(
+      (): Promise<ResortDetailResponse> =>
+        new Promise<ResortDetailResponse>((resolve): void => { resolveGet = resolve }),
+    )
+
+    try {
+      // Kick off the in-flight GET via the hook (don't await full resolution
+      // since the promise is still pending).
+      await act(async (): Promise<void> => {
+        render(
+          <Suspense fallback={<CountingFallback />}>
+            <Probe slug={KOTELNICA} />
+          </Suspense>,
+        )
+        // One microtask tick lets the hook call apiClient.getResort and
+        // populate cachedPromises with the deferred promise.
+        await Promise.resolve()
+      })
+      expect(spy).toHaveBeenCalledTimes(1)
+
+      // Prepopulate with the newer response while the GET is still in flight.
+      // This replaces cachedPromises.get(slug) with Promise.resolve(newer).
+      prepopulateResortDetail(KOTELNICA, newerResponse)
+
+      // Resolve the older GET. The .then guard should reject the cache write
+      // because cachedPromises.get(slug) is no longer the older promise.
+      await act(async (): Promise<void> => {
+        resolveGet(olderResponse)
+        for (let i = 0; i < 10; i += 1) {
+          await Promise.resolve()
+        }
+      })
+
+      // The next read returns the NEWER response (synchronous fast path);
+      // the older GET's .then ran but skipped writing cachedFulfilled.
+      expect(screen.getByTestId('probe-slug')).toHaveTextContent('newer-response-slug')
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
   it('rejected-promise path skips the synchronous cache (preserves ADR-0010 pinning across the dual-cache shape)', async (): Promise<void> => {
     server.use(
       http.get('/api/resorts/:slug', (): Response =>

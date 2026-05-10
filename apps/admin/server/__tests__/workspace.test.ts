@@ -106,6 +106,24 @@ describe('readWorkspaceFileForSlug (PR 4.4a-2, spec §4.2 / §10.3.1)', (): void
       expect(err.details).toEqual({ slug, issues: err.issues })
     }
   })
+
+  it('Codex P2 fold: filename/embedded-slug drift throws WorkspaceCorruptError (does NOT serve the wrong resort)', async (): Promise<void> => {
+    // Author a valid WorkspaceFile that internally references a DIFFERENT
+    // slug, then save it under the kotelnica filename. WorkspaceFile.parse
+    // succeeds (internal slug consistency holds: top-level slug === resort.slug
+    // === live_signal.resort_slug). Without the filename↔slug drift guard,
+    // GET /api/resorts/kotelnica-bialczanska would serve the spindleruv resort.
+    const seedJson = readFileSync(join(SEED_FIXTURE_DIR, 'spindleruv-mlyn.json'), 'utf8')
+    await writeFile(join(workspaceDir, 'kotelnica-bialczanska.json'), seedJson, 'utf8')
+
+    await expect(readWorkspaceFileForSlug(workspaceDir, 'kotelnica-bialczanska'))
+      .rejects.toMatchObject({
+        code: 'workspace-corrupt',
+        slug: 'kotelnica-bialczanska',
+      })
+    await expect(readWorkspaceFileForSlug(workspaceDir, 'kotelnica-bialczanska'))
+      .rejects.toThrow(/filename\/slug drift/)
+  })
 })
 
 describe('readPublishedDocOrNull (PR 4.4a-2, spec §10.9)', (): void => {

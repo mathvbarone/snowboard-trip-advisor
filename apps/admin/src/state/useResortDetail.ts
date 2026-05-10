@@ -41,10 +41,22 @@ function loadOnce(slug: ResortSlug): Promise<ResortDetailResponse> {
   // Chain via .then so the synchronous cache populates on resolution; on
   // rejection the .then callback never runs and cachedFulfilled stays empty
   // (ADR-0010 pinning preserved across the dual-cache shape).
-  const next = apiClient.getResort(slug).then((response): ResortDetailResponse => {
-    cachedFulfilled.set(slug, response)
-    return response
-  })
+  //
+  // Codex P2 fold: stale-request guard. If `prepopulateResortDetail(slug,
+  // newer)` lands while THIS GET is still in flight, the prepopulate replaces
+  // `cachedPromises.get(slug)` with a fresh resolved promise. When the older
+  // GET eventually resolves, we MUST NOT overwrite cachedFulfilled with the
+  // older response — that would serve pre-PUT data to subsequent renders
+  // until the next manual invalidate. Gate the write on identity: only
+  // populate cachedFulfilled if `next` is still the active cache entry.
+  const next: Promise<ResortDetailResponse> = apiClient.getResort(slug).then(
+    (response): ResortDetailResponse => {
+      if (cachedPromises.get(slug) === next) {
+        cachedFulfilled.set(slug, response)
+      }
+      return response
+    },
+  )
   cachedPromises.set(slug, next)
   // Empty terminal .catch suppresses the unhandled-rejection signal; the
   // rejection itself is observed by `use()` inside React's render machinery.

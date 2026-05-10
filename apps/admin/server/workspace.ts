@@ -73,6 +73,20 @@ export async function readWorkspaceFileForSlug(
       `workspace file ${slug}.json failed schema validation: ${parsed.error.issues.map((i): string => i.message).join('; ')}`,
     )
   }
+  // Codex P2 fold: WorkspaceFile.parse only enforces internal consistency
+  // (top-level slug === resort.slug === live_signal.resort_slug). It does
+  // NOT verify the filename matches the embedded slug. A renamed/copied file
+  // (kotelnica.json containing slug: 'spindleruv-mlyn', valid internally)
+  // would otherwise project the wrong resort under the requested route.
+  // Treat filename↔slug drift as corruption — same surface as the other
+  // schema-validation failures.
+  if (parsed.data.slug !== slug) {
+    throw new WorkspaceCorruptError(
+      slug,
+      [],
+      `workspace file ${slug}.json embeds slug "${parsed.data.slug}" — filename/slug drift`,
+    )
+  }
   return parsed.data
 }
 
