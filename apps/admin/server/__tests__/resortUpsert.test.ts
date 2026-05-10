@@ -280,27 +280,6 @@ describe('resortUpsertHandler — happy paths (PR 4.4c spec §7.12)', (): void =
     expect(wf.live_signal?.lifts_open?.count).toBe(7)
   })
 
-  it('live_signal patch without field_sources preserves base.field_sources entries (shallow merge)', async (): Promise<void> => {
-    // Provenance is non-negotiable in production (the SPA always pairs a value
-    // edit with a manual FieldSource), but the wire schema allows omission;
-    // pin the merge invariant so a patch lacking field_sources doesn't wipe
-    // the base entries.
-    await seedWorkspace(workspaceDir, 'kotelnica-bialczanska')
-    await resortUpsertHandler(
-      {
-        params: { slug: KOTELNICA },
-        body: { live_signal: { snow_depth_cm: 220 } },
-      },
-      { workspaceRoot: root },
-    )
-    const wf = WorkspaceFile.parse(
-      JSON.parse(await readFile(join(workspaceDir, 'kotelnica-bialczanska.json'), 'utf-8')),
-    )
-    expect(wf.live_signal?.snow_depth_cm).toBe(220)
-    // Base field_sources entries (snow_depth_cm provenance from OpenSnow) survive.
-    expect(wf.live_signal?.field_sources['snow_depth_cm']?.source).toBe('opensnow')
-  })
-
   it('draft resort: PUT response hides live_signal even if on-disk has it (mirrors GET; Codex round-2 P2)', async (): Promise<void> => {
     // Workspace exists with live_signal populated; published doc is absent
     // (draft scenario per spec §4.2.1). The GET handler returns
@@ -426,6 +405,85 @@ describe('resortUpsertHandler — reject paths', (): void => {
         { workspaceRoot: root },
       ),
     ).rejects.toMatchObject({ code: 'invalid-resort' })
+  })
+
+  it('rejects a resort value edit without matching manual provenance → InvalidRequestError (Codex round-3 P1)', async (): Promise<void> => {
+    // Wire schema allows `{ resort: { slopes_km: 999 } }` (field_sources is
+    // optional on Partial<Resort>). Without server-side enforcement the merge
+    // would write slopes_km: 999 against the inherited resort-feed source —
+    // misattributing a manual edit to the upstream adapter. The handler MUST
+    // reject. (SPA-side D12 ensures pairing in production; server-side is
+    // defense-in-depth.)
+    await seedWorkspace(workspaceDir, 'kotelnica-bialczanska')
+    try {
+      await resortUpsertHandler(
+        {
+          params: { slug: KOTELNICA },
+          body: { resort: { slopes_km: 999 } },
+        },
+        { workspaceRoot: root },
+      )
+      throw new Error('should have rejected')
+    } catch (e: unknown) {
+      const err = e as { code: string; message: string; details: ReadonlyArray<{ path: ReadonlyArray<string>; message: string }> }
+      expect(err.code).toBe('invalid-request')
+      expect(err.message).toMatch(/slopes_km/)
+      expect(err.message).toMatch(/resort-feed/)   // names the misattribution source explicitly
+      expect(err.details[0]?.path).toEqual(['field_sources', 'slopes_km'])
+    }
+    // On-disk file is byte-equal to the seed — no partial overwrite.
+    const onDisk = await readFile(join(workspaceDir, 'kotelnica-bialczanska.json'), 'utf-8')
+    const seedJson = readFileSync(join(SEED_FIXTURE_DIR, 'kotelnica-bialczanska.json'), 'utf-8')
+    expect(onDisk).toBe(seedJson)
+  })
+
+  it('rejects a live_signal value edit without matching manual provenance → InvalidRequestError (Codex round-3 P1)', async (): Promise<void> => {
+    // Same invariant on the live side: snow_depth_cm change without a manual
+    // entry would silently keep the OpenSnow provenance from the seed.
+    await seedWorkspace(workspaceDir, 'kotelnica-bialczanska')
+    await expect(
+      resortUpsertHandler(
+        {
+          params: { slug: KOTELNICA },
+          body: { live_signal: { snow_depth_cm: 220 } },
+        },
+        { workspaceRoot: root },
+      ),
+    ).rejects.toMatchObject({ code: 'invalid-request' })
+  })
+
+  it('accepts a value edit when the patch carries a matching manual field_sources entry (positive control)', async (): Promise<void> => {
+    // Mirrors the production SPA pattern (Decision D12): every value edit
+    // ships paired with a fresh manual FieldSource. The handler accepts and
+    // writes; the on-disk file carries the manual provenance.
+    await seedWorkspace(workspaceDir, 'kotelnica-bialczanska')
+    await seedPublished(publishedPath, 'kotelnica-bialczanska')
+    await resortUpsertHandler(
+      {
+        params: { slug: KOTELNICA },
+        body: {
+          resort: {
+            slopes_km: 999,
+            field_sources: {
+              slopes_km: {
+                source: 'manual',
+                source_url: 'https://admin.local/manual',
+                observed_at: ISODateTimeString.parse('2026-04-29T10:00:00Z'),
+                fetched_at: ISODateTimeString.parse('2026-04-29T10:00:00Z'),
+                upstream_hash: UpstreamHash.parse('d'.repeat(64)),
+                attribution_block: { en: 'Manual entry by analyst.' },
+              },
+            },
+          },
+        },
+      },
+      { workspaceRoot: root },
+    )
+    const wf = WorkspaceFile.parse(
+      JSON.parse(await readFile(join(workspaceDir, 'kotelnica-bialczanska.json'), 'utf-8')),
+    )
+    expect(wf.resort.slopes_km).toBe(999)
+    expect(wf.resort.field_sources['slopes_km']?.source).toBe('manual')
   })
 
   it('corrupt workspace target: throws WorkspaceCorruptError and refuses to overwrite', async (): Promise<void> => {

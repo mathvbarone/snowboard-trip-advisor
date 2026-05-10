@@ -2,8 +2,11 @@ import { join } from 'node:path'
 
 import {
   ISODateTimeString,
+  METRIC_FIELDS,
   WorkspaceFile,
   projectFieldStates,
+  type FieldSource,
+  type MetricPath,
   type Resort,
   type ResortLiveSignal,
 } from '@snowboard-trip-advisor/schema'
@@ -43,6 +46,25 @@ class NotFoundError extends Error {
   public constructor(message: string) {
     super(message)
     this.name = 'NotFoundError'
+  }
+}
+
+// Codex round-3 P1 fold (provenance pairing rejection). dispatch.ts maps
+// `.code = 'invalid-request'` → 400 via STATUS_FOR_CODE and forwards `.details`
+// per spec §4.10. Distinct from InvalidResortError (post-merge schema reject)
+// because this is a wire-protocol violation: the client sent a value edit
+// without the matching manual provenance entry.
+class InvalidRequestError extends Error {
+  public readonly code = 'invalid-request' as const
+  public readonly details: ReadonlyArray<{ readonly path: ReadonlyArray<string>; readonly message: string }>
+
+  public constructor(
+    message: string,
+    details: ReadonlyArray<{ readonly path: ReadonlyArray<string>; readonly message: string }>,
+  ) {
+    super(message)
+    this.name = 'InvalidRequestError'
+    this.details = details
   }
 }
 
@@ -126,6 +148,13 @@ export async function resortUpsertHandler(
     throw new InvalidResortError(parsed.error.issues)
   }
 
+  // Codex round-3 P1 fold: provenance pairing — defense-in-depth for the
+  // wire schema's optional field_sources. See assertProvenancePairing.
+  assertProvenancePairing(
+    { resort: baseResort, live: baseLive },
+    { resort: parsed.data.resort, live: parsed.data.live_signal },
+  )
+
   await atomicWriteWorkspaceFile(targetPath, JSON.stringify(parsed.data, null, 2))
 
   // Codex round-2 P2 fold: mirror the resortDetail GET handler's draft check.
@@ -158,11 +187,13 @@ function mergeResort(base: Resort, patch: ResortUpsertBody['resort']): unknown {
   if (patch === undefined) {
     return base
   }
-  const patchFs = patch.field_sources ?? {}
+  // Spreading `undefined` is a no-op in object spreads, so when patch.field_sources
+  // is omitted the merged field_sources is just `{...base.field_sources}` —
+  // semantically equal to base.field_sources. No conditional needed.
   return {
     ...base,
     ...patch,
-    field_sources: { ...base.field_sources, ...patchFs },
+    field_sources: { ...base.field_sources, ...patch.field_sources },
   }
 }
 
@@ -195,10 +226,102 @@ function mergeLiveSignal(
       ...patch,
     }
   }
-  const patchFs = patch.field_sources ?? {}
   return {
     ...base,
     ...patch,
-    field_sources: { ...base.field_sources, ...patchFs },
+    field_sources: { ...base.field_sources, ...patch.field_sources },
+  }
+}
+
+// Codex round-3 P1 fold — provenance pairing.
+// The wire schema's ResortUpsertBody types `resort.field_sources` and
+// `live_signal.field_sources` as OPTIONAL (a value patch can ship without
+// provenance). On the server side, that's a misattribution risk: a PUT like
+// `{ resort: { slopes_km: 999 } }` would set the new value while leaving the
+// inherited `field_sources.slopes_km` (e.g., source: 'resort-feed') intact —
+// the workspace would then claim an analyst's manual edit was sourced from
+// the upstream adapter, violating the project's "Provenance is not optional"
+// core principle. Per Decision D12 the SPA pairs every value edit with a
+// fresh manual FieldSource; the server enforces the pairing as defense-in-
+// depth, rejecting any PUT that changes a metric-path value to a defined
+// state without a matching manual field_sources entry. Value REMOVAL
+// (afterValue undefined) is exempt — there's no value left to misattribute.
+const DURABLE_PATHS: ReadonlySet<MetricPath> = new Set<MetricPath>([
+  'altitude_m.min', 'altitude_m.max', 'slopes_km', 'lift_count',
+  'skiable_terrain_ha', 'season.start_month', 'season.end_month',
+])
+
+function readMetricValue(
+  resort: Resort,
+  live: ResortLiveSignal | null,
+  path: MetricPath,
+): unknown {
+  switch (path) {
+    case 'altitude_m.min': return resort.altitude_m.min
+    case 'altitude_m.max': return resort.altitude_m.max
+    case 'slopes_km': return resort.slopes_km
+    case 'lift_count': return resort.lift_count
+    case 'skiable_terrain_ha': return resort.skiable_terrain_ha
+    case 'season.start_month': return resort.season.start_month
+    case 'season.end_month': return resort.season.end_month
+    case 'snow_depth_cm': return live?.snow_depth_cm
+    case 'lifts_open.count': return live?.lifts_open?.count
+    case 'lifts_open.total': return live?.lifts_open?.total
+    case 'lift_pass_day': return live?.lift_pass_day
+    case 'lodging_sample.median_eur': return live?.lodging_sample?.median_eur
+  }
+}
+
+function readFieldSource(
+  resort: Resort,
+  live: ResortLiveSignal | null,
+  path: MetricPath,
+): FieldSource | undefined {
+  if (DURABLE_PATHS.has(path)) {
+    return resort.field_sources[path]
+  }
+  return live?.field_sources[path]
+}
+
+function valuesEqual(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) {
+    return true
+  }
+  // Money / lifts_open / season are small structural values; JSON.stringify
+  // is sufficient (key insertion order is consistent because both sides come
+  // from Zod-parsed objects with identical schema-defined ordering).
+  if (typeof a === 'object' && a !== null && typeof b === 'object' && b !== null) {
+    return JSON.stringify(a) === JSON.stringify(b)
+  }
+  return false
+}
+
+function assertProvenancePairing(
+  base: { readonly resort: Resort; readonly live: ResortLiveSignal | null },
+  merged: { readonly resort: Resort; readonly live: ResortLiveSignal | null },
+): void {
+  for (const path of METRIC_FIELDS) {
+    const beforeValue = readMetricValue(base.resort, base.live, path)
+    const afterValue = readMetricValue(merged.resort, merged.live, path)
+    // Removed values (undefined post-merge) carry no misattribution risk —
+    // there's no claim to make about provenance for an absent value.
+    if (afterValue === undefined) {
+      continue
+    }
+    if (valuesEqual(beforeValue, afterValue)) {
+      continue
+    }
+    const fs = readFieldSource(merged.resort, merged.live, path)
+    if (fs?.source !== 'manual') {
+      // Template-literal coercion renders `undefined` as "undefined" — same
+      // human-readable output as `?? 'undefined'` without the dead branch.
+      throw new InvalidRequestError(
+        `value at metric path "${path}" changed but no manual field_sources entry was supplied — server would otherwise misattribute the edit to source "${String(fs?.source)}"`,
+        [{
+          path: ['field_sources', path],
+          message: `manual field_sources entry required when value at "${path}" changes`,
+        }],
+      )
+    }
   }
 }
