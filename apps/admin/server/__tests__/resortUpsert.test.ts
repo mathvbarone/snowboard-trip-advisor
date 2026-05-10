@@ -80,14 +80,17 @@ afterEach(async (): Promise<void> => {
 })
 
 describe('resortUpsertHandler — happy paths (PR 4.4c spec §7.12)', (): void => {
-  it('writes the merged WorkspaceFile to disk and returns the projected response', async (): Promise<void> => {
+  it('writes the merged WorkspaceFile to disk and returns the projected response (published — live_signal exposed)', async (): Promise<void> => {
+    // Both seeds (workspace + published doc) so the resort is NOT a draft and
+    // live_signal flows through to the response. Draft semantics are exercised
+    // by the dedicated draft test below (Codex round-2 P2 fold).
     await seedWorkspace(workspaceDir, 'kotelnica-bialczanska')
+    await seedPublished(publishedPath, 'kotelnica-bialczanska')
     const body: ResortUpsertBody = { editor_modes: { slopes_km: 'manual' } }
     const response = await resortUpsertHandler(
       { params: { slug: KOTELNICA }, body },
       { workspaceRoot: root },
     )
-    // Response shape matches GET — same projection as resortDetail.
     expect(response.resort.slug).toBe('kotelnica-bialczanska')
     expect(response.live_signal).not.toBeNull()
     expect(response.field_states['slopes_km']?.state).toBe('manual')
@@ -102,6 +105,7 @@ describe('resortUpsertHandler — happy paths (PR 4.4c spec §7.12)', (): void =
 
   it('is idempotent — re-running the same PUT produces the same on-disk content (modulo modified_at)', async (): Promise<void> => {
     await seedWorkspace(workspaceDir, 'kotelnica-bialczanska')
+    await seedPublished(publishedPath, 'kotelnica-bialczanska')
     const body: ResortUpsertBody = { editor_modes: { slopes_km: 'manual' } }
     await resortUpsertHandler({ params: { slug: KOTELNICA }, body }, { workspaceRoot: root })
     const first = JSON.parse(
@@ -295,6 +299,33 @@ describe('resortUpsertHandler — happy paths (PR 4.4c spec §7.12)', (): void =
     expect(wf.live_signal?.snow_depth_cm).toBe(220)
     // Base field_sources entries (snow_depth_cm provenance from OpenSnow) survive.
     expect(wf.live_signal?.field_sources['snow_depth_cm']?.source).toBe('opensnow')
+  })
+
+  it('draft resort: PUT response hides live_signal even if on-disk has it (mirrors GET; Codex round-2 P2)', async (): Promise<void> => {
+    // Workspace exists with live_signal populated; published doc is absent
+    // (draft scenario per spec §4.2.1). The GET handler returns
+    // `live_signal: null` for drafts; the PUT response MUST do the same so
+    // PR 4.4d's prepopulateResortDetail doesn't seed an inconsistent
+    // ResortDetailResponse into the cache. The on-disk workspace file
+    // preserves the live_signal — only the projected response strips it.
+    await seedWorkspace(workspaceDir, 'kotelnica-bialczanska')
+    const response = await resortUpsertHandler(
+      {
+        params: { slug: KOTELNICA },
+        body: { editor_modes: { slopes_km: 'manual' } },
+      },
+      { workspaceRoot: root },
+    )
+    // Response: live_signal hidden (draft semantics).
+    expect(response.live_signal).toBeNull()
+    // field_states for live paths reflect the absent live_signal — no value.
+    expect(response.field_states['snow_depth_cm']?.state).toBe('failed')
+    // On-disk preservation: workspace file STILL carries live_signal.
+    const wf = WorkspaceFile.parse(
+      JSON.parse(await readFile(join(workspaceDir, 'kotelnica-bialczanska.json'), 'utf-8')),
+    )
+    expect(wf.live_signal).not.toBeNull()
+    expect(wf.live_signal?.snow_depth_cm).toBe(145)
   })
 
   it('live_signal: explicit null clears the live signal in the workspace file', async (): Promise<void> => {

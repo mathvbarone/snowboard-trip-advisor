@@ -128,12 +128,26 @@ export async function resortUpsertHandler(
 
   await atomicWriteWorkspaceFile(targetPath, JSON.stringify(parsed.data, null, 2))
 
+  // Codex round-2 P2 fold: mirror the resortDetail GET handler's draft check.
+  // When the resort is a draft (workspace file exists but slug NOT in
+  // published doc) the GET handler returns `live_signal: null` per spec §4.2.1.
+  // The PUT response MUST hide live_signal the same way — otherwise PR 4.4d's
+  // `prepopulateResortDetail` would cache a response carrying live values
+  // that a fresh GET would hide, and the editor would briefly show
+  // inconsistent draft data until the next manual cache invalidation. The
+  // on-disk workspace file still carries the live_signal as-is (per the
+  // suggestion: "without necessarily deleting the on-disk live data") — only
+  // the projected response strips it.
+  const isDraft = publishedDoc === null
+    || !publishedDoc.resorts.some((r): boolean => r.slug === slug)
+  const responseLive: ResortLiveSignal | null = isDraft ? null : parsed.data.live_signal
+
   return {
     resort: parsed.data.resort,
-    live_signal: parsed.data.live_signal,
+    live_signal: responseLive,
     field_states: projectFieldStates(
       parsed.data.resort,
-      parsed.data.live_signal,
+      responseLive,
       parsed.data.editor_modes,
       new Date(),
     ),
