@@ -1,6 +1,27 @@
+import { ISODateTimeString, type FieldStateFor } from '@snowboard-trip-advisor/schema'
+import { render, screen, within } from '@testing-library/react'
+import { axe } from 'jest-axe'
 import { describe, expect, it } from 'vitest'
 
-import { formatMetricValue, labelForPath } from './FieldRow'
+import { FieldRow, formatMetricValue, labelForPath } from './FieldRow'
+
+const OBS_AT = ISODateTimeString.parse('2026-04-29T08:00:00Z')
+
+function liveState(value: unknown): FieldStateFor<unknown> {
+  return { state: 'live', value, source: 'resort-feed', observed_at: OBS_AT }
+}
+
+function staleState(value: unknown): FieldStateFor<unknown> {
+  return { state: 'stale', value, source: 'opensnow', observed_at: OBS_AT, age_days: 12 }
+}
+
+function failedState(): FieldStateFor<unknown> {
+  return { state: 'failed', reason: 'never_fetched', observed_at: OBS_AT }
+}
+
+function manualState(value: unknown): FieldStateFor<unknown> {
+  return { state: 'manual', value, observed_at: OBS_AT }
+}
 
 // PR 4.4b Task 1 — formatMetricValue + labelForPath tests.
 // Per Decision D2 (formatters): exhaustive switch on MetricPath; out-of-range
@@ -107,6 +128,74 @@ describe('formatMetricValue (PR 4.4b §D2)', (): void => {
 
   it('returns "—" for Money objects whose amount is not a number', (): void => {
     expect(formatMetricValue('lift_pass_day', { amount: 'abc', currency: 'EUR' })).toBe('—')
+  })
+})
+
+describe('FieldRow render-only (PR 4.4b Tasks 3+4)', (): void => {
+  it('renders the field label, formatted value, StatusPill (live), and source badge for a live state', (): void => {
+    render(<FieldRow path="slopes_km" state={liveState(142)} />)
+    const row = screen.getByLabelText('Slopes (km)')
+    expect(within(row).getByText('Slopes (km)')).toBeInTheDocument()
+    expect(within(row).getByText('142 km')).toBeInTheDocument()
+    expect(within(row).getByText('Live')).toBeInTheDocument()
+    expect(within(row).getByText('Resort Feed')).toBeInTheDocument()
+  })
+
+  it('renders the StatusPill (stale) and source badge for a stale state', (): void => {
+    render(<FieldRow path="snow_depth_cm" state={staleState(80)} />)
+    const row = screen.getByLabelText('Snow depth (cm)')
+    expect(within(row).getByText('Stale')).toBeInTheDocument()
+    expect(within(row).getByText('80 cm')).toBeInTheDocument()
+    expect(within(row).getByText('OpenSnow')).toBeInTheDocument()
+  })
+
+  it('renders "—" and omits the source badge for a failed state', (): void => {
+    render(<FieldRow path="lift_pass_day" state={failedState()} />)
+    const row = screen.getByLabelText('Lift pass (per day)')
+    expect(within(row).getByText('Failed')).toBeInTheDocument()
+    expect(within(row).getByText('—')).toBeInTheDocument()
+    // No source badge for the failed state — failed has no provenance to show.
+    expect(within(row).queryByText('OpenSnow')).toBeNull()
+    expect(within(row).queryByText('Resort Feed')).toBeNull()
+    expect(within(row).queryByText('Manual')).toBeNull()
+  })
+
+  it('renders the StatusPill (manual) and a Manual source badge for a manual state', (): void => {
+    render(<FieldRow path="lift_count" state={manualState(7)} />)
+    const row = screen.getByLabelText('Lift count')
+    expect(within(row).getByText('7')).toBeInTheDocument()
+    // "Manual" appears three times in this state (StatusPill, SourceBadge,
+    // ModeToggle); use the typed data attributes the DS primitives expose to
+    // assert each one independently of DOM-text count.
+    expect(row.querySelector('[data-variant="manual"]')).not.toBeNull()
+    expect(row.querySelector('[data-source="manual"]')).not.toBeNull()
+  })
+
+  it('renders an inline render-only ModeToggle (span role="switch" aria-disabled) — aria-checked tracks the manual state', (): void => {
+    const { rerender } = render(<FieldRow path="slopes_km" state={liveState(10)} />)
+    const liveToggle = screen.getByRole('switch')
+    expect(liveToggle.tagName).toBe('SPAN')
+    expect(liveToggle).toHaveAttribute('aria-disabled', 'true')
+    expect(liveToggle).toHaveAttribute('aria-checked', 'false')
+
+    rerender(<FieldRow path="slopes_km" state={manualState(15)} />)
+    const manualToggle = screen.getByRole('switch')
+    expect(manualToggle).toHaveAttribute('aria-disabled', 'true')
+    expect(manualToggle).toHaveAttribute('aria-checked', 'true')
+  })
+
+  it('passes jest-axe across all four FieldStateFor states', async (): Promise<void> => {
+    const { container, rerender } = render(<FieldRow path="slopes_km" state={liveState(142)} />)
+    expect(await axe(container)).toHaveNoViolations()
+
+    rerender(<FieldRow path="snow_depth_cm" state={staleState(80)} />)
+    expect(await axe(container)).toHaveNoViolations()
+
+    rerender(<FieldRow path="lift_pass_day" state={failedState()} />)
+    expect(await axe(container)).toHaveNoViolations()
+
+    rerender(<FieldRow path="lift_count" state={manualState(7)} />)
+    expect(await axe(container)).toHaveNoViolations()
   })
 })
 

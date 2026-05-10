@@ -1,4 +1,11 @@
-import type { MetricPath, Money } from '@snowboard-trip-advisor/schema'
+import { SourceBadge, StatusPill } from '@snowboard-trip-advisor/design-system'
+import type {
+  FieldStateFor,
+  MetricPath,
+  Money,
+  SourceKey,
+} from '@snowboard-trip-advisor/schema'
+import type { JSX } from 'react'
 
 // PR 4.4b §D2 formatters. Exhaustive switch on MetricPath; never throws;
 // shape-mismatch / null / undefined inputs render as '—'. Money values use
@@ -62,6 +69,7 @@ function formatPlainNumber(value: unknown): string {
   return String(value)
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- helper co-located inside FieldRow.tsx to honour the PR 4.4b 8-file budget; PR 4.4d widens this file with the MANUAL <input> + responsive gate, splitting becomes worthwhile then. The render-only FieldRow has no production HMR path that depends on this re-export.
 export function formatMetricValue(path: MetricPath, value: unknown): string {
   switch (path) {
     case 'altitude_m.min':
@@ -86,6 +94,57 @@ export function formatMetricValue(path: MetricPath, value: unknown): string {
   }
 }
 
+function sourceForBadge(state: FieldStateFor<unknown>): SourceKey | null {
+  if (state.state === 'live' || state.state === 'stale') {
+    return state.source
+  }
+  if (state.state === 'manual') {
+    return 'manual'
+  }
+  return null
+}
+
+function displayValue(path: MetricPath, state: FieldStateFor<unknown>): string {
+  if (state.state === 'failed') {
+    return '—'
+  }
+  return formatMetricValue(path, state.value)
+}
+
+export interface FieldRowProps {
+  readonly path: MetricPath
+  readonly state: FieldStateFor<unknown>
+}
+
+// Render-only FieldRow (PR 4.4b). PR 4.4d adds the MANUAL <input> for the 7
+// durable numeric paths, the interactive <ModeToggle> button, and the responsive
+// gate per Decision D11. The render-only ModeToggle below (`<span role="switch"
+// aria-disabled="true">`) is the visible-but-inert placeholder that PR 4.4d
+// will replace with a button-based primitive — the spec deviation is flagged
+// in the PR description.
+export function FieldRow({ path, state }: FieldRowProps): JSX.Element {
+  const label = labelForPath(path)
+  const badgeSource = sourceForBadge(state)
+  const isManual = state.state === 'manual'
+  return (
+    <div data-path={path} aria-label={label} className="sta-field-row">
+      <span className="sta-field-row__label">{label}</span>
+      <StatusPill variant={state.state} />
+      <span className="sta-field-row__value">{displayValue(path, state)}</span>
+      {badgeSource !== null ? <SourceBadge source={badgeSource} /> : null}
+      <span
+        role="switch"
+        aria-checked={isManual}
+        aria-disabled="true"
+        className="sta-field-row__mode-toggle"
+      >
+        {isManual ? 'Manual' : 'Auto'}
+      </span>
+    </div>
+  )
+}
+
+// eslint-disable-next-line react-refresh/only-export-components -- helper co-located inside FieldRow.tsx; same rationale as `formatMetricValue` above. PR 4.4d's interactive ModeToggle still consumes labelForPath for its aria-label.
 export function labelForPath(path: MetricPath): string {
   switch (path) {
     case 'altitude_m.min': return 'Altitude (min, m)'
