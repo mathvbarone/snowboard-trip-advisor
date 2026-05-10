@@ -3,7 +3,12 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { ResortSlug, WorkspaceFile } from '@snowboard-trip-advisor/schema'
+import {
+  ISODateTimeString,
+  ResortSlug,
+  UpstreamHash,
+  WorkspaceFile,
+} from '@snowboard-trip-advisor/schema'
 import type { ResortUpsertBody } from '@snowboard-trip-advisor/schema/api'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
@@ -179,9 +184,9 @@ describe('resortUpsertHandler — happy paths (PR 4.4c spec §7.12)', (): void =
           slopes_km: {
             source: 'manual',
             source_url: 'https://admin.local/manual',
-            observed_at: '2026-04-29T09:00:00Z',
-            fetched_at: '2026-04-29T09:00:00Z',
-            upstream_hash: 'a'.repeat(64),
+            observed_at: ISODateTimeString.parse('2026-04-29T09:00:00Z'),
+            fetched_at: ISODateTimeString.parse('2026-04-29T09:00:00Z'),
+            upstream_hash: UpstreamHash.parse('a'.repeat(64)),
             attribution_block: { en: 'Manual entry by analyst.' },
           },
         },
@@ -209,9 +214,9 @@ describe('resortUpsertHandler — happy paths (PR 4.4c spec §7.12)', (): void =
           snow_depth_cm: {
             source: 'manual',
             source_url: 'https://admin.local/manual',
-            observed_at: '2026-04-29T09:00:00Z',
-            fetched_at: '2026-04-29T09:00:00Z',
-            upstream_hash: 'b'.repeat(64),
+            observed_at: ISODateTimeString.parse('2026-04-29T09:00:00Z'),
+            fetched_at: ISODateTimeString.parse('2026-04-29T09:00:00Z'),
+            upstream_hash: UpstreamHash.parse('b'.repeat(64)),
             attribution_block: { en: 'Manual entry.' },
           },
         },
