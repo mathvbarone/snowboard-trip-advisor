@@ -387,6 +387,50 @@ describe('useWorkspaceState — hydration edge cases (Codex round-4 P2-6 + cold-
     expect(out).toEqual({ slopes_km: 100 })
   })
 
+  it('diffSide includes a 2-segment field_sources entry when `sent` is undefined entirely (cParent defined, sParent absent — Codex P2-D edge)', (): void => {
+    // sent === undefined arm of valueAtPathDiffersFromSent's 2-segment branch.
+    // Reached in production when lastSent has no patch for the side (e.g., a
+    // mode-only PUT) and the queued flush carries a fresh nested-leaf edit.
+    const fs: Record<string, never> = {}
+    const out = diffSide<{
+      altitude_m?: { min: number; max: number }
+      field_sources?: Record<string, Record<string, never>>
+    }>(
+      { altitude_m: { min: 1600, max: 920 }, field_sources: { 'altitude_m.min': fs } },
+      undefined,
+    )
+    expect(out?.altitude_m).toEqual({ min: 1600, max: 920 })
+    expect(out?.field_sources?.['altitude_m.min']).toBe(fs)
+  })
+
+  it('diffSide skips a 2-segment field_sources entry whose leaf value matches sent (cParent + sParent both objects, leaves equal)', (): void => {
+    const fs: Record<string, never> = {}
+    const out = diffSide<{
+      altitude_m?: { min: number; max: number }
+      field_sources?: Record<string, Record<string, never>>
+    }>(
+      { altitude_m: { min: 1600, max: 920 }, field_sources: { 'altitude_m.min': fs } },
+      { altitude_m: { min: 1600, max: 920 } },
+    )
+    // Pass 1 finds altitude_m identical → no top-level diff.
+    // Pass 2 sees altitude_m.min unchanged → field_sources entry skipped.
+    expect(out).toBeNull()
+  })
+
+  it('diffSide treats a non-object current parent as a missing leaf (defensive shape; cParent FALSE arm)', (): void => {
+    // Generic Partial<T> contract allows `current[parent]` to be a primitive.
+    // Public API never produces this shape, but the function's signature
+    // accepts it. Cast loosely so TypeScript permits the malformed input.
+    const fs: Record<string, never> = {}
+    type Loose = { altitude_m?: unknown; field_sources?: Record<string, Record<string, never>> }
+    const out = diffSide<Loose>(
+      { altitude_m: 'not-an-object', field_sources: { 'altitude_m.min': fs } },
+      { altitude_m: { min: 1600, max: 920 } },
+    )
+    // cLeaf=undefined (cParent is a string, not structural), sLeaf=1600 → differ → include.
+    expect(out?.field_sources?.['altitude_m.min']).toBe(fs)
+  })
+
   it('nested live-path edit when canonical.live_signal is null (draft resort): hydration returns empty (canonicalSide-null branch)', (): void => {
     const draftCanonical = ResortDetailResponse.parse({
       ...JSON.parse(JSON.stringify(syntheticResponse('kotelnica-bialczanska'))),
@@ -751,6 +795,46 @@ describe('useWorkspaceState — draft reset + diff PUT (D13, Codex rounds 7/16/1
     // valueAtPathChanged sees parent NOT in diffed (we dropped it) → drop too.
     // Empty diff → short-circuit; no second PUT fires.
     expect(spy).toHaveBeenCalledTimes(1)
+  })
+
+  it('nested-sibling mid-flight edit: queued diff body excludes field_sources entries for unchanged leaves (Codex round-3 P2-D)', async (): Promise<void> => {
+    // Edit altitude_m.min, PUT 1 fires, edit altitude_m.max mid-flight,
+    // resolve PUT 1 (rev moved). The queued diff body emits the WHOLE
+    // altitude_m parent (Pass 1 — max changed) but must NOT include the
+    // unchanged altitude_m.min field_sources entry: the server's
+    // assertProvenancePairing rejects a field_sources entry without a
+    // paired value change as a provenance-only patch (apps/admin/server/
+    // resortUpsert.ts §371-384), and the value at altitude_m.min didn't
+    // change between PUT 1 (post-merge base for PUT 2) and the current
+    // draft. Without the leaf-aware diff, PUT 2 would 400 invalid-request.
+    prepopulateResortDetail(KOTELNICA, syntheticResponse('kotelnica-bialczanska'))
+    let resolveFirst!: (v: ResortDetailResponse) => void
+    const spy = vi
+      .spyOn(apiClient, 'upsertResort')
+      .mockImplementationOnce(
+        (): Promise<ResortDetailResponse> =>
+          new Promise<ResortDetailResponse>((resolve): void => { resolveFirst = resolve }),
+      )
+      .mockResolvedValue(syntheticResponse('kotelnica-bialczanska'))
+
+    const { result } = renderHook(() => useWorkspaceState())
+    act((): void => { result.current.setFieldValue('altitude_m.min', 1600) })
+    await act(async (): Promise<void> => { await vi.advanceTimersByTimeAsync(600) })
+    // PUT 1 in-flight; edit the SIBLING leaf.
+    act((): void => { result.current.setFieldValue('altitude_m.max', 2200) })
+
+    await act(async (): Promise<void> => {
+      resolveFirst(syntheticResponse('kotelnica-bialczanska'))
+      await vi.advanceTimersByTimeAsync(600)
+    })
+
+    expect(spy).toHaveBeenCalledTimes(2)
+    const body = spy.mock.calls[1]?.[1] as ResortUpsertBody
+    // Whole parent emitted (server shallow-merges top-level Resort fields).
+    expect(body.resort?.altitude_m).toEqual({ min: 1600, max: 2200 })
+    // Only the changed leaf's field_sources entry — sibling skipped.
+    expect(body.resort?.field_sources?.['altitude_m.max']?.source).toBe('manual')
+    expect(body.resort?.field_sources?.['altitude_m.min']).toBeUndefined()
   })
 
   it('clearing the last live field while resort is populated preserves the resort edits (finishSide cross-side branch, live → resort kept)', (): void => {

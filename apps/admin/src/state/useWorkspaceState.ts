@@ -288,12 +288,17 @@ export function diffSide<T extends object>(
       hasChanges = true
     }
   }
-  // Pass 2: field_sources entries — only include those whose corresponding
-  // metric value also diffed in Pass 1 (otherwise the server rejects as a
-  // provenance-only patch per Codex round-6 P1-1). Each manual edit writes
-  // a fresh upstream_hash; comparing by hash would incorrectly include
-  // field_sources entries when the user typed-then-reverted a value
-  // (Codex round-18 P2-25: empty-diff short-circuit).
+  // Pass 2: field_sources entries — include only those whose corresponding
+  // LEAF value differs from `sent` (not just whose PARENT differs).
+  // Codex round-3 P2-D fold: when a sibling leaf is edited mid-flight the
+  // diff emits the whole parent in Pass 1, but the unchanged sibling's
+  // field_sources entry must NOT ride along — `assertProvenancePairing`
+  // rejects a provenance-only patch for a leaf whose value didn't change
+  // (apps/admin/server/resortUpsert.ts §371-384).
+  // Codex round-6 P1-1 + round-18 P2-25 invariants are preserved: each
+  // manual edit writes a fresh upstream_hash, so an unchanged hash alone
+  // would still mis-include reverted edits — the leaf-VALUE check is the
+  // necessary criterion.
   const currentFs = (current as Record<string, unknown>)['field_sources'] as Record<string, ManualFieldSource> | undefined
   // The `?? {}` keeps the loop a single uncontested code path — current.field_sources
   // is always present after a setFieldValue (which writes paired provenance per
@@ -302,7 +307,7 @@ export function diffSide<T extends object>(
   const diffedFs: Record<string, ManualFieldSource> = {}
   let fsChanged = false
   for (const [path, fs] of Object.entries(currentFs ?? {})) {
-    if (valueAtPathChanged(out, path)) {
+    if (valueAtPathDiffersFromSent(current, sent, path)) {
       diffedFs[path] = fs
       fsChanged = true
     }
@@ -314,26 +319,28 @@ export function diffSide<T extends object>(
   return hasChanges ? out : null
 }
 
-// Walks a dotted MetricPath into the diff result to check whether the
-// corresponding value is present (i.e., changed in Pass 1). For top-level
-// paths (`slopes_km`), checks `diffed.slopes_km`. For nested paths
-// (`altitude_m.min`), checks `diffed.altitude_m?.min` — and yes, the parent
-// was emitted whole, so a top-level edit pulls all its siblings in too,
-// but field_sources only carries entries for paths the user actually
-// edited (patchFieldSource is sparse), so this never over-includes.
-function valueAtPathChanged(diffed: Record<string, unknown>, path: string): boolean {
-  // The diff result is structured: top-level keys are top-level field names,
-  // and 2-segment paths' parents (e.g., altitude_m) are always objects when
-  // present (the diff emits the whole parent in pass 1). No mid-path defensive
-  // structural check is needed.
+// Compares the leaf value at `path` in `current` vs `sent`. Top-level paths
+// (`slopes_km`) compare directly; 2-segment paths (`altitude_m.min`) walk
+// into the parent and compare the leaf. JSON.stringify is the structural
+// equality check used elsewhere in diffSide. When `sent` is undefined or
+// the parent is missing, the corresponding leaf is treated as undefined
+// (so a fresh edit always counts as differing).
+function valueAtPathDiffersFromSent(
+  current: Record<string, unknown>,
+  sent: Record<string, unknown> | undefined,
+  path: string,
+): boolean {
   const dotIdx = path.indexOf('.')
   if (dotIdx === -1) {
-    return path in diffed
+    return JSON.stringify(current[path]) !== JSON.stringify(sent === undefined ? undefined : sent[path])
   }
   const parent = path.slice(0, dotIdx)
-  if (!(parent in diffed)) { return false }
   const leaf = path.slice(dotIdx + 1)
-  return leaf in (diffed[parent] as Record<string, unknown>)
+  const cParent = current[parent]
+  const sParent = sent === undefined ? undefined : sent[parent]
+  const cLeaf = isStructuralObject(cParent) ? (cParent as Record<string, unknown>)[leaf] : undefined
+  const sLeaf = isStructuralObject(sParent) ? (sParent as Record<string, unknown>)[leaf] : undefined
+  return JSON.stringify(cLeaf) !== JSON.stringify(sLeaf)
 }
 
 async function flush(slug: ResortSlug): Promise<void> {
