@@ -47,7 +47,10 @@ Per [spec §7.4](../specs/2026-05-01-epic-4-admin-app-design.md), after PRs 4.5a
 | **G1** | Shell's HeaderBar gains a `<Button>Publish</Button>` (existing DS primitive, `variant="primary"` per design pattern). Click toggles `isPublishOpen` local Shell state. `<PublishDialog open={isPublishOpen} onClose={...} />` renders inside Shell's root div (NOT portal — Phase 1 admin has no z-index complexity). `<ToastProvider>` wraps Shell's main content. | Locality. Shell already coordinates HeaderBar + Sidebar + main; adding the dialog + toast slots fits cleanly. |
 | **H1** | PublishHistory route lives at `?route=publishes`. `urlState.ts` MODIFY adds `{ route: 'publishes'; page?: number }` variant; default page = 0. Sort: `published_at` descending (handler returns newest-first per spec §4.7). Pagination: `?route=publishes&page=N`. Page size: 20 (matches `ListPublishesQuery` default per spec §4.7). | Match existing URL-state pattern. |
 | **I1** | Bridge integration test `publish-flow.test.tsx` ships in PR **4.5d** (NOT a separate 4.5e). The integration test exercises the full flow (open Shell → click Publish → confirm → wait → see Toast → navigate to `?route=publishes` → see entry); PublishHistory is required for the "see entry" assertion. The PR 4.5d file budget (6 files post-A1 P0-1 fold) fits. | Test serves the user-facing flow; ship with the last UI piece. |
-| **J1** | Per spec §4.9 invariant 5 (`POST` carries `Idempotency-Key`; Phase 1 honors but does not enforce; Phase 2 enforces): the publish handler **accepts but does not act on** the header — it parses request bodies via Zod, and the header is request-metadata that the dispatcher passes through without rejecting. **Add a test** in `apps/admin/server/__tests__/publish.test.ts` asserting that a request carrying `Idempotency-Key: <opaque>` produces an identical response shape (handler ignores it). The wire schemas in `packages/schema/api/` already include the header in `PublishRequestMeta` if present; no schema change required for Phase 1. | Spec-compliance + Phase 2 readiness. Without an explicit test, a future refactor that 400s on unknown headers would silently regress the invariant. |
+| **J1** | Per spec §4.9 invariant 5 (`POST` carries `Idempotency-Key`; Phase 1 honors but does not enforce; Phase 2 enforces): build the real Phase 1 client→server header path (Codex round 1 PR #97 fold — corrects the original J1 which assumed nonexistent `PublishRequestMeta` scaffolding):
+- **Client (`apps/admin/src/lib/apiClient.ts`):** `apiClient.publish()` MODIFY to inject `Idempotency-Key: ${crypto.randomUUID()}` (Node 19+ web-crypto API available in both apps/admin's Vite dev runtime and the Vitest jsdom test environment) into the POST request headers. A co-located `apiClient.test.ts` MODIFY case asserts the header is present and matches the UUID regex.
+- **Server (`apps/admin/server/dispatch.ts` + handler):** the dispatcher already forwards Node `http.IncomingMessage.headers` through to handlers via the existing route plumbing. The publish handler does NOT read the header in Phase 1 (it has no dedup store). A dispatch-test case asserts a POST carrying `Idempotency-Key: <opaque>` produces an identical 200 response (no rejection). Phase 2's Hono service swap will read the header at the middleware boundary; no Phase 1 schema change required.
+- **NOT in scope:** `PublishRequestMeta` Zod schema (does not exist; the header is HTTP transport metadata, not request body). No `packages/schema/api/**` change for the header. | Spec-compliance + Phase 2 readiness. Codex round 1 verified that the original J1 claim ("schemas already include `PublishRequestMeta`") was incorrect — no such symbol exists. Real path: client adds the header on every POST publish; server accepts but ignores in Phase 1. |
 
 ---
 
@@ -74,16 +77,18 @@ Per [spec §7.4](../specs/2026-05-01-epic-4-admin-app-design.md), after PRs 4.5a
 
 **Subagent review trigger:** **YES** — `apps/admin/server/**` is the Phase 2 portability surface. Brief the reviewer to verify: (a) `composePublishInput` correctly merges workspace ∪ published (workspace overrides per slug; published-only resorts kept), (b) the handler calls `publishDataset()` from `@snowboard-trip-advisor/schema/node` (NOT a subprocess), (c) `slug === '__all__'` assertion catches per-slug calls in Phase 1, (d) listPublishes parses the `${counter}-${iso}.json` filename pattern (NOT `v_<iso>`) per `packages/schema/src/publishDataset.ts:81`, (e) `dispatch.ts` route registration uses the wire-schema's `PublishSlugParam` union.
 
-**File budget:** 6 files (within ≤8 budget).
+**File budget:** 8 files (at ≤8 budget; Codex round 1 PR #97 fold added the `apiClient` Idempotency-Key wiring per Decision J1).
 
 **Files (tests first):**
 
 1. **Create** `apps/admin/server/__tests__/publish.test.ts` — handler unit tests.
 2. **Create** `apps/admin/server/__tests__/listPublishes.test.ts` — handler unit tests.
-3. **Modify** `apps/admin/server/__tests__/dispatch.test.ts` — add bridge-routed positive controls for `POST /api/resorts/__all__/publish` and `GET /api/publishes`.
+3. **Modify** `apps/admin/server/__tests__/dispatch.test.ts` — add bridge-routed positive controls for `POST /api/resorts/__all__/publish` and `GET /api/publishes`, plus the Idempotency-Key passthrough test (Decision J1).
 4. **Modify** `apps/admin/server/publish.ts` — replace 4.1b's 501 stub with the real handler.
 5. **Modify** `apps/admin/server/listPublishes.ts` — replace 4.1b's 501 stub with the real handler.
-6. **Modify** `apps/admin/server/dispatch.ts` — add route entries; verify `STATUS_FOR_CODE` covers `publish-validation-failed` + `invalid-request`.
+6. **Modify** `apps/admin/server/dispatch.ts` — add route entries; verify `STATUS_FOR_CODE` covers `publish-validation-failed` + `invalid-request` + `workspace-corrupt` (the last per Codex round 1 PR #97 P1 fold; `workspace-corrupt` → 500 per spec §10.3.1).
+7. **Modify** `apps/admin/src/lib/apiClient.ts` — inject `Idempotency-Key: ${crypto.randomUUID()}` header in `publish()` per Decision J1.
+8. **Modify** `apps/admin/src/lib/apiClient.test.ts` — assert the header is present + matches UUID regex.
 
 #### Task 4.5a-1: `publish.test.ts` happy path + slug assertion
 
@@ -228,9 +233,34 @@ async function composePublishInput(workspaceRoot: string): Promise<Resort[]> {
   const workspaceResorts = new Map<string, Resort>()
   for (const entry of await readdir(workspaceDir)) {
     if (!entry.endsWith('.json')) { continue }
-    const raw = await readFile(join(workspaceDir, entry), 'utf-8')
-    const parsed = WorkspaceFile.safeParse(JSON.parse(raw))
-    if (!parsed.success) { continue }  // Corrupt; skip (health surfaces via §10.3.1).
+    const filePath = join(workspaceDir, entry)
+    let json: unknown
+    try {
+      json = JSON.parse(await readFile(filePath, 'utf-8'))
+    } catch (e) {
+      // P1 (Codex round 1 PR #97 fold): per spec §10.3.1, publish must REJECT
+      // (not silently skip) when any workspace file is corrupt — the dialog's
+      // pre-publish gate is a UX affordance, not the load-bearing safety; the
+      // server is the source of truth. Skipping would let a curl-bypassing
+      // caller silently lose the corrupt staged file in the new snapshot.
+      const err = new Error('workspace-corrupt')
+      ;(err as Error & { code: string; details: unknown }).code = 'workspace-corrupt'
+      ;(err as Error & { code: string; details: unknown }).details = {
+        slug: entry.replace(/\.json$/, ''),
+        reason: e instanceof Error ? e.message : 'invalid JSON',
+      }
+      throw err
+    }
+    const parsed = WorkspaceFile.safeParse(json)
+    if (!parsed.success) {
+      const err = new Error('workspace-corrupt')
+      ;(err as Error & { code: string; details: unknown }).code = 'workspace-corrupt'
+      ;(err as Error & { code: string; details: unknown }).details = {
+        slug: entry.replace(/\.json$/, ''),
+        issues: parsed.error.issues,
+      }
+      throw err
+    }
     workspaceResorts.set(parsed.data.slug, parsed.data.resort)
   }
 
@@ -283,15 +313,18 @@ it('returns 400 publish-validation-failed when validatePublishedDataset rejects'
   })
 })
 
-it('skips corrupt workspace files; the survivor publishes', async (): Promise<void> => {
-  // Seed published with resort A; seed a corrupt workspace JSON (parse-fail);
-  // seed valid workspace edit for resort A.
-  // Expect: publish uses workspace's edit for A; corrupt file silently skipped.
-  // (Implementation per §10.3.1 — corrupt count surfaces via health, not publish.)
-  const response = await publishHandler(
-    { params: { slug: '__all__' }, body: { confirm: true } }, deps,
-  )
-  expect(response.resort_count).toBe(1)
+it('rejects publish with 500 workspace-corrupt when any workspace file is corrupt (spec §10.3.1)', async (): Promise<void> => {
+  // P1 (Codex round 1 PR #97 fold): per spec §10.3.1, publish MUST refuse when
+  // any workspace file is corrupt — the operator must `rm` the file or repair
+  // it. Silently skipping (the original plan's behavior) would let a curl
+  // bypass of the dialog drop the staged corrupt slug from the snapshot.
+  // Seed published with resort A; seed a corrupt workspace JSON.
+  await expect(
+    publishHandler({ params: { slug: '__all__' }, body: { confirm: true } }, deps),
+  ).rejects.toMatchObject({
+    code: 'workspace-corrupt',
+    details: expect.objectContaining({ slug: expect.any(String) }),
+  })
 })
 ```
 
@@ -484,7 +517,7 @@ it('honors Idempotency-Key header on POST publish without rejecting (Phase 1, sp
 - [ ] **Step 3: Modify dispatch.ts route table.** Add route entries:
   - `POST /api/resorts/:slug/publish` → wrap `publishHandler` with `PublishSlugParam.parse` + `PublishBody.parse`.
   - `GET /api/publishes` → wrap `listPublishesHandler` with `ListPublishesQuery.parse`.
-  - Verify `STATUS_FOR_CODE` maps `publish-validation-failed` → 400 (existing from PR 4.1b's groundwork) and `invalid-request` → 400 (existing).
+  - Verify `STATUS_FOR_CODE` maps `publish-validation-failed` → 400 (existing) and `invalid-request` → 400 (existing); ADD a map entry for `workspace-corrupt` → 500 (Codex round 1 PR #97 P1 fold — per spec §10.3.1 the publish handler throws this when any workspace file fails JSON parse or `WorkspaceFile.parse()`).
 
 - [ ] **Step 4: Run** `npx vitest run apps/admin/server/__tests__/dispatch.test.ts`. Expected: 5 new tests PASS.
 
@@ -498,7 +531,67 @@ git commit -s -m "feat(admin-server): wire publish + listPublishes routes in dis
 git push -u origin epic-4/pr-4.5a-publish-handler
 ```
 
-#### Task 4.5a-6: PR creation + subagent review + Codex review
+#### Task 4.5a-6: `apiClient.publish()` injects `Idempotency-Key` (Decision J1)
+
+**Files:** Modify `apps/admin/src/lib/apiClient.test.ts` first, then `apps/admin/src/lib/apiClient.ts`.
+
+- [ ] **Step 1: Add failing tests to `apiClient.test.ts`.**
+
+```ts
+it('publish() sends an Idempotency-Key header matching UUID v4 regex (spec §4.9 invariant 5)', async (): Promise<void> => {
+  let capturedHeader: string | null = null
+  server.use(
+    http.post(/\/api\/resorts\/__all__\/publish$/, (info): HttpResponse => {
+      capturedHeader = info.request.headers.get('Idempotency-Key')
+      return HttpResponse.json({ version_id: 'x', archive_path: '/x', published_at: '2026-05-11T00:00:00.000Z', resort_count: 0 })
+    }),
+  )
+  await apiClient.publish()
+  expect(capturedHeader).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)
+})
+
+it('publish() generates a fresh Idempotency-Key per call', async (): Promise<void> => {
+  const captured: string[] = []
+  server.use(
+    http.post(/\/api\/resorts\/__all__\/publish$/, (info): HttpResponse => {
+      const v = info.request.headers.get('Idempotency-Key')
+      if (v !== null) { captured.push(v) }
+      return HttpResponse.json({ version_id: 'x', archive_path: '/x', published_at: '2026-05-11T00:00:00.000Z', resort_count: 0 })
+    }),
+  )
+  await apiClient.publish()
+  await apiClient.publish()
+  expect(captured).toHaveLength(2)
+  expect(captured[0]).not.toBe(captured[1])
+})
+```
+
+- [ ] **Step 2: Run — expect FAIL** (`apiClient.publish()` does not set the header).
+
+- [ ] **Step 3: Modify `apiClient.publish()` body.**
+
+```ts
+publish: (): Promise<PublishResponse> =>
+  postJson(
+    '/api/resorts/__all__/publish',
+    PublishResponse,
+    { confirm: true },
+    { headers: { 'Idempotency-Key': crypto.randomUUID() } },  // Decision J1.
+  ),
+```
+
+(If `postJson` does not accept a `headers` opt, extend it minimally — same `fetch` plumbing, just merge headers.)
+
+- [ ] **Step 4: Run — expect PASS.**
+
+- [ ] **Step 5: Commit.**
+
+```bash
+git add apps/admin/src/lib/apiClient.ts apps/admin/src/lib/apiClient.test.ts
+git commit -s -m "feat(admin-client): apiClient.publish() injects Idempotency-Key (PR 4.5a §4.5a-6, Decision J1)"
+```
+
+#### Task 4.5a-7: PR creation + subagent review + Codex review
 
 - [ ] Open the PR (`gh pr create`) with subagent-review brief in the body (per Decision 4.5a subagent trigger above).
 - [ ] Dispatch subagent reviewer with the brief from the §7.14 trigger justification.
@@ -970,6 +1063,8 @@ it.each([
 })
 
 it('confirm button enabled when health is clean; click → submit; on success → onClose called + Toast surfaces', /* ... */)
+it('confirm button DISABLED while health.value === null (loading); shows "Loading pre-publish checks…"', /* P2 fold Codex round 1 PR #97 */)
+it('confirm button DISABLED while health.error !== null; shows error message', /* P2 fold Codex round 1 PR #97 */)
 it('Escape closes dialog; backdrop click closes dialog; first focusable element is auto-focused', /* ... */)
 it('Confirm button has aria-describedby pointing at the blocker tooltip id when a blocker is active', /* P2-4 fold */)
 // P1-6 fold: dropped the "Tab / Shift+Tab cycles inside (focus trap)" assertion. Phase 1 relies
@@ -1039,15 +1134,20 @@ export function PublishDialog({ open, onClose }: PublishDialogProps): JSX.Elemen
 
   if (!open) { return null }
 
+  // Codex round 1 PR #97 P2 fold: fail-CLOSED while health is unknown.
+  // Original logic enabled the confirm button when `health.value === null`
+  // (loading or error), letting a fast click bypass the very blockers the
+  // dialog enforces. Treat unknown health as disabled with a loading affordance.
+  const healthUnknown = health.value === null
   const blocker: Blocker | null =
-    health.value === null ? null  // Loading or error — treat as not-blocked-yet.
-      : health.value.resorts_with_failed_fields > 0 ? 'failed_fields'
-      : health.value.resorts_with_missing_provenance > 0 ? 'missing_provenance'
-      : health.value.resorts_with_corrupt_workspace > 0 ? 'corrupt_workspace'
-      : health.value.resorts_total === 0 ? 'empty'
+    healthUnknown ? null
+      : health.value!.resorts_with_failed_fields > 0 ? 'failed_fields'
+      : health.value!.resorts_with_missing_provenance > 0 ? 'missing_provenance'
+      : health.value!.resorts_with_corrupt_workspace > 0 ? 'corrupt_workspace'
+      : health.value!.resorts_total === 0 ? 'empty'
       : null
 
-  const disabled = blocker !== null || publish.status === 'submitting'
+  const disabled = healthUnknown || blocker !== null || publish.status === 'submitting'
 
   return (
     <>
@@ -1060,7 +1160,12 @@ export function PublishDialog({ open, onClose }: PublishDialogProps): JSX.Elemen
         className="publish-dialog"
       >
         <h2 id="publish-dialog-title">Publish</h2>
-        {blocker !== null && (
+        {healthUnknown && (
+          <p id="publish-dialog-blocker" className="publish-dialog__tooltip" role="status">
+            {health.error === null ? 'Loading pre-publish checks…' : `Could not load health: ${health.error.message}`}
+          </p>
+        )}
+        {!healthUnknown && blocker !== null && (
           <p id="publish-dialog-blocker" className="publish-dialog__tooltip">
             {TOOLTIP_BY_BLOCKER[blocker]}
           </p>
@@ -1428,6 +1533,9 @@ _Populate as Codex / subagent / maintainer / user findings land per round. Carry
 | 1 | 4.5d | plan-document-reviewer subagent | **P2-3** PublishHistory row lacked `<time dateTime>`, pluralization, and used a `file_size_bytes` field NOT in `PublishMetadata` schema | Added `dateTime` attribute, pluralized resort count, dropped `file_size_bytes` (not in schema; replaced with `published_by` display). |
 | 1 | 4.5c | plan-document-reviewer subagent | **P2-4** PublishDialog tooltip used `role="status"`; Confirm button lacked `aria-describedby` | Tooltip now uses `id="publish-dialog-blocker"`; Confirm button carries `aria-describedby` when a blocker is active. Decision F1 amended. |
 | 1 | 4.5b | plan-document-reviewer subagent | **P2-5** Toast pause was mouse-only (WCAG 2.2 SC 2.2.1 keyboard parity) | Added `onFocus`/`onBlur` parity + `tabIndex={0}` + visible "Dismiss" `<Button>` for keyboard users. |
+| 2 | 4.5a | Codex round 1 PR #97 | **P1** `composePublishInput` silently skipped corrupt workspace files; contradicted spec §10.3.1 which mandates publish refuses with `500 workspace-corrupt`. Curl could bypass the dialog and drop the staged corrupt slug. | `composePublishInput` now throws `workspace-corrupt` (with the failing slug + Zod issues in `details`) on any JSON-parse or `WorkspaceFile.parse()` failure. Test renamed from "skips corrupt; survivor publishes" → "rejects publish with workspace-corrupt when any workspace file is corrupt". `dispatch.ts` `STATUS_FOR_CODE` adds `workspace-corrupt → 500`. |
+| 2 | 4.5a | Codex round 1 PR #97 | **P1** Decision J1 claimed `PublishRequestMeta` schema scaffolding existed; it does not (`grep` returns 0 hits). Following the plan as written would leave Phase 1 publish POSTs without the spec §4.9 `Idempotency-Key` header. | Decision J1 rewritten to build the real client→server header path: `apiClient.publish()` MODIFY to inject `Idempotency-Key: ${crypto.randomUUID()}`; co-located test asserts header + UUID regex + freshness per call. Added apiClient + test to PR 4.5a file list (8/8 budget). New Task 4.5a-6 ships the client-side change before PR creation. |
+| 2 | 4.5c | Codex round 1 PR #97 | **P2** PublishDialog failed open while `health.value === null` — fast click could submit before health loaded. | Treat unknown health as disabled (`healthUnknown` short-circuit on top of the blocker chain); added loading affordance (`role="status"` + "Loading pre-publish checks…" / error message); added 2 dialog test cases asserting the disabled-during-loading + disabled-during-error semantics. |
 
 ---
 
