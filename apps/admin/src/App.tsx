@@ -2,23 +2,21 @@ import type { JSX } from 'react'
 
 import { useURLState } from './state/useURLState'
 import { Dashboard } from './views/Dashboard'
+import { ResortEditor } from './views/ResortEditor'
 import { ResortsTable } from './views/ResortsTable'
 import { Shell } from './views/Shell'
 
 export default function App(): JSX.Element {
   const route = useURLState()
-  // PR 4.4b will add a dedicated editor render branch. Pre-4.4b, the editor
-  // route (produced by row-click in ResortsTable) keeps the user inside the
-  // resorts view rather than dropping them onto the Dashboard — Codex round-4
-  // P1: a Dashboard fallback on an editor URL is a context-loss jump that
-  // hides the selected resort and breaks the row-click navigation flow. The
-  // slug stays in the URL; PR 4.4b's editor branch will pick it up without a
-  // change to ResortsTable. The `inResortsContext` shape is the canonical
-  // Phase-1 grouping ("anywhere downstream of /resorts").
-  const inResortsContext = route.route === 'resorts' || route.route === 'editor'
+  // PR 4.4b lands the dedicated editor branch — the PR 4.3 stop-gap (which
+  // routed editor → ResortsTable to avoid a context-loss jump back to Dashboard
+  // before the editor view shipped) is replaced here. Each route renders its
+  // own view; ResortEditor consumes the URL slug directly.
   return (
     <Shell>
-      {inResortsContext ? <ResortsTable /> : <Dashboard />}
+      {route.route === 'dashboard' ? <Dashboard /> : null}
+      {route.route === 'resorts' ? <ResortsTable /> : null}
+      {route.route === 'editor' ? <ResortEditor slug={route.slug} /> : null}
     </Shell>
   )
 }
