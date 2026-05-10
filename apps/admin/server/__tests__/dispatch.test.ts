@@ -75,17 +75,21 @@ describe('dispatch (PR 4.1b §2.1, spec §10.1 + §7.6)', (): void => {
     expect(typeof details.issues[0]?.message).toBe('string')
   })
 
-  it('routes PUT /api/resorts/:slug to resortUpsertHandler with parsed slug + body', async (): Promise<void> => {
+  it('routes PUT /api/resorts/:slug to resortUpsertHandler (PR 4.4c — handler implemented; clean tmpdir → 404 not-found)', async (): Promise<void> => {
+    // Pre-PR-4.4c the stub returned 501 not-implemented; PR 4.4c lands the
+    // real handler. Clean tmpdir → no workspace + no published doc → handler
+    // throws NotFoundError → dispatch maps to 404 via STATUS_FOR_CODE.
     const r = await dispatch(
       {
         method: 'PUT',
         pathname: '/api/resorts/kotelnica-bialczanska',
         search: '',
-        body: { editor_modes: { snow_depth_cm: 'manual' } },
+        body: { editor_modes: { 'altitude_m.min': 'manual' } },
       },
       { workspaceRoot },
     )
-    expect(r?.status).toBe(501)
+    expect(r?.status).toBe(404)
+    expect(r?.body).toMatchObject({ error: { code: 'not-found' } })
   })
 
   it('returns 400 invalid-request on body Zod parse fail (empty PUT body — refine requires at-least-one)', async (): Promise<void> => {
