@@ -172,13 +172,16 @@ import { mkdir, readdir, readFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 
 import { publishDataset } from '@snowboard-trip-advisor/schema/node'
+// Codex round 5 PR #97 P2 fold: `Resort` + `ResortLiveSignal` are domain types
+// exported from the schema root (`packages/schema/src/index.ts`), NOT the API
+// barrel (`packages/schema/api/index.ts:1-9`, which only exposes endpoint
+// schema types like PublishBody/PublishResponse/PublishSlugParam).
 import type {
   PublishBody,
   PublishResponse,
   PublishSlugParam,
-  Resort,
-  ResortLiveSignal,
 } from '@snowboard-trip-advisor/schema/api'
+import type { Resort, ResortLiveSignal } from '@snowboard-trip-advisor/schema'
 import { WorkspaceFile } from '@snowboard-trip-advisor/schema'
 
 import type { HandlerDeps } from './listResorts'
@@ -449,8 +452,15 @@ describe('listPublishesHandler', (): void => {
   it('skips files that do not match the version pattern', async (): Promise<void> => {
     const dir = join(workspaceRoot, 'data/published/history')
     await mkdir(dir, { recursive: true })
-    await writeFile(join(dir, '1-2026-05-09T00-00-00-000Z.json'), '{}')
-    await writeFile(join(dir, 'not-a-version.json'), '{}')
+    // Codex round 5 PR #97 P2 fold: the matching `1-...json` needs a real
+    // archive body — the handler reads body.published_at + body.resorts for
+    // every filename matching VERSION_FILENAME, so `{}` would crash before
+    // the non-matching assertion could fire.
+    await writeFile(
+      join(dir, '1-2026-05-09T00-00-00-000Z.json'),
+      '{"schema_version":1,"published_at":"2026-05-09T00:00:00.000Z","resorts":[],"live_signals":[],"manifest":{"resort_count":0,"generated_by":"test","validator_version":"1"}}',
+    )
+    await writeFile(join(dir, 'not-a-version.json'), '{}')  // Non-matching pattern — skipped.
     await writeFile(join(dir, 'README.txt'), 'unrelated')
 
     const r = await listPublishesHandler({ query: {} }, deps)
@@ -666,14 +676,16 @@ git push -u origin epic-4/pr-4.5a-publish-handler
 
 **Subagent review trigger:** **YES** — `packages/design-system/**` (per spec §7.15 line 659). Brief the reviewer to verify: (a) ARIA roles per variant (`info`/`success` → `role="status"`; `error` → `role="alert"`), (b) auto-dismiss timing prop respected, (c) hover-to-pause works via timer clear/reset, (d) jest-axe clean in all 3 variants, (e) single-Toast semantics (no queue/stack — Decision C1).
 
-**File budget:** 4 files (well within ≤8 budget).
+**File budget:** 6 files (within ≤8 budget; Codex round 5 PR #97 P2 fold added `Button` ARIA-prop extension here since it's the same DS-surface review surface as Toast).
 
 **Files (tests first):**
 
 1. **Create** `packages/design-system/src/components/Toast.test.tsx`.
 2. **Create** `packages/design-system/src/components/Toast.tsx`.
-3. **Modify** `packages/design-system/src/index.ts` — re-export `Toast` + `ToastProvider` + `useToast`.
-4. **Modify** `packages/design-system/src/index.test.ts` — barrel test (verified at `packages/design-system/src/index.test.ts:1`); add assertions that `Toast`, `ToastProvider`, `useToast` exports are re-exported from the package root.
+3. **Modify** `packages/design-system/src/components/Button.test.tsx` — assert new ARIA props pass through to the rendered `<button>` element.
+4. **Modify** `packages/design-system/src/components/Button.tsx` — extend `ButtonProps` with `aria-describedby?: string` (needed by PR 4.5c's PublishDialog for `aria-describedby` → tooltip wiring per Decision F1). `aria-disabled` is NOT added because the standard `disabled` attribute already conveys disabled state to AT; PublishDialog should pass `disabled={blocker !== null}` and drop the `aria-disabled` prop.
+5. **Modify** `packages/design-system/src/index.ts` — re-export `Toast` + `ToastProvider` + `useToast`.
+6. **Modify** `packages/design-system/src/index.test.ts` — barrel test (verified at `packages/design-system/src/index.test.ts:1`); add assertions that `Toast`, `ToastProvider`, `useToast` exports are re-exported from the package root.
 
 #### Task 4.5b-1: Toast.test.tsx — 3 variants + ARIA + axe
 
@@ -971,7 +983,61 @@ export function useToast(): ToastContextValue {
 
 - [ ] **Step 3: Commit.**
 
-#### Task 4.5b-3: barrel re-export
+#### Task 4.5b-3: extend `Button` `aria-describedby` support (Codex round 5 PR #97 P2 fold)
+
+**Files:** Modify `packages/design-system/src/components/Button.test.tsx` first, then `packages/design-system/src/components/Button.tsx`.
+
+- [ ] **Step 1: Add failing test for `aria-describedby` pass-through.**
+
+```tsx
+it('forwards aria-describedby to the rendered <button> (PR 4.5c PublishDialog consumer per Decision F1)', (): void => {
+  render(<Button aria-describedby="some-id">Click</Button>)
+  expect(screen.getByRole('button')).toHaveAttribute('aria-describedby', 'some-id')
+})
+```
+
+- [ ] **Step 2: Run — expect FAIL** (current `ButtonProps` does not declare `aria-describedby`).
+
+- [ ] **Step 3: Extend `ButtonProps`:**
+
+```ts
+export interface ButtonProps {
+  // ... existing props ...
+  'aria-label'?: string
+  'aria-pressed'?: boolean
+  'aria-describedby'?: string  // ← new (PR 4.5c consumes for PublishDialog tooltip wiring).
+}
+
+export function Button({
+  // ... existing destructuring ...
+  'aria-label': ariaLabel,
+  'aria-pressed': ariaPressed,
+  'aria-describedby': ariaDescribedBy,
+  ...rest
+}: ButtonProps): JSX.Element {
+  return (
+    <button
+      // ... existing JSX ...
+      aria-label={ariaLabel}
+      aria-pressed={ariaPressed}
+      aria-describedby={ariaDescribedBy}
+    >
+      {children}
+    </button>
+  )
+}
+```
+
+- [ ] **Step 4: Run — expect PASS.**
+
+- [ ] **Step 5: Commit.**
+
+```bash
+git add packages/design-system/src/components/Button.tsx packages/design-system/src/components/Button.test.tsx
+git commit -s -m "feat(design-system): extend Button with aria-describedby for PublishDialog tooltip wiring (PR 4.5b §4.5b-3)"
+```
+
+#### Task 4.5b-4: barrel re-export
 
 **Files:** Modify `packages/design-system/src/index.ts`.
 
@@ -1276,7 +1342,6 @@ export function PublishDialog({ onClose }: PublishDialogProps): JSX.Element {
           <Button
             onClick={(): void => { void publish.submit() }}
             disabled={disabled}
-            aria-disabled={disabled}
             aria-describedby={blocker !== null ? 'publish-dialog-blocker' : undefined}
           >
             {publish.status === 'submitting' ? 'Publishing…' : 'Confirm'}
@@ -1648,6 +1713,9 @@ _Populate as Codex / subagent / maintainer / user findings land per round. Carry
 | 4 | 4.5c | Codex round 3 PR #97 | **P1** `<PublishDialog open={open} onClose={...} />` left the component mounted for the app lifetime; the internal `if (!open) return null` returns null but does NOT unmount → `useHealth`'s once-on-mount effect fires only at app boot → dialog always opens against stale health. Confirm could be enabled after corrupt-workspace state newly appeared. | Removed the `open` prop. Shell mounts the dialog conditionally: `{isPublishOpen && <PublishDialog onClose={...} />}`. Each open is a fresh mount → fresh `useHealth` fetch. Decision G1 amended. |
 | 5 | 4.5a | Codex round 4 PR #97 | **P2** `version_id` reconstructed from `deps.now()` mismatches the archive filename. `publishDataset()` internally calls `new Date()` (NOT `deps.now()`) for its filename — slight timestamp drift makes the handler's response version_id different from what `listPublishesHandler` reports for the same archive. Success Toast and PublishHistory row would identify the same archive with different IDs. | Derive `version_id` from `basename(result.archive_path, '.json')` — authoritative source (same path `listPublishesHandler` reads). Added `basename` import from `node:path`. |
 | 5 | 4.5a | Codex round 4 PR #97 | **P2** Workflow ordering bug: Task 4.5a-5 ended with `git push`; Task 4.5a-6 (apiClient Idempotency-Key) commits locally but never pushes; Task 4.5a-7 opens the PR with an outdated branch missing the client header change. | Moved the `git push -u origin` from end of Task 4.5a-5 to end of Task 4.5a-6 so the PR branch carries every commit through the final apiClient change. |
+| 6 | 4.5a | Codex round 5 PR #97 | **P2** `publish.ts` imported `Resort` + `ResortLiveSignal` from `@snowboard-trip-advisor/schema/api`; the API barrel exports only endpoint schemas (`packages/schema/api/index.ts:1-9` — `ListResortsQuery`, `PublishBody`, `HealthResponse`, etc.). Domain types live at the schema root. Plan would fail typecheck. | Split imports: endpoint shapes from `/api`, domain types (`Resort`, `ResortLiveSignal`) from the schema root. |
+| 6 | 4.5a | Codex round 5 PR #97 | **P2** `listPublishes.test.ts` "skips non-matching files" case seeded the matching `1-...json` as `'{}'`. The handler reads `body.published_at` + `body.resorts.length` for every filename matching `VERSION_FILENAME`, so the matching file would crash before the non-matching assertion could fire. | Replaced the matching-file fixture with a valid archive-shape body. Non-matching fixture stays as `'{}'` (irrelevant to the read path). |
+| 6 | 4.5b | Codex round 5 PR #97 | **P2** DS `Button` only declared `aria-label` + `aria-pressed` props (`packages/design-system/src/components/Button.tsx:21-34`). PR 4.5c's PublishDialog passes `aria-describedby` (and `aria-disabled`). Plan would fail typecheck. | Added Task 4.5b-3: extend `ButtonProps` with `aria-describedby?: string` (the `aria-disabled` prop dropped from PublishDialog — `disabled` covers the same AT semantic). PR 4.5b file count now 6 (well under ≤8). |
 
 ---
 
