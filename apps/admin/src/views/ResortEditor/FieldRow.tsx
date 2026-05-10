@@ -252,11 +252,27 @@ export function FieldRow({ path, state }: FieldRowProps): JSX.Element {
   // persist via the 500ms autosave. The local string syncs from
   // `persistedValue` via a render-time ref check when the persisted value
   // changes externally (post-PUT canonical update, navigation reload).
+  //
+  // Codex P2-A fold (PR 4.4d): sync ONLY when `localString` still matches
+  // the previously-synced `persistedValue` (string form). If the user has
+  // edited locally to a value that disagrees with the prior sync (e.g.,
+  // typed `'155'` then cleared the input — `clearFieldValue` removes the
+  // draft → `persistedValue` falls back to the canonical `state.value`),
+  // we MUST NOT overwrite the user's transient input with a stale
+  // canonical value. Without this guard, clearing or typing an invalid
+  // intermediate restores the old canonical immediately and the user
+  // can't even hold the field blank to start over. The ref still advances
+  // so a subsequent external change (slug-switch / reload) can re-sync
+  // when localString matches the new baseline.
   const [localString, setLocalString] = useState((): string => persistedValueToString(persistedValue))
   const lastPersistedRef = useRef<unknown>(persistedValue)
   if (lastPersistedRef.current !== persistedValue) {
+    const prevPersistedStr = persistedValueToString(lastPersistedRef.current)
+    const nextPersistedStr = persistedValueToString(persistedValue)
     lastPersistedRef.current = persistedValue
-    setLocalString(persistedValueToString(persistedValue))
+    if (localString === prevPersistedStr) {
+      setLocalString(nextPersistedStr)
+    }
   }
 
   // ModeToggle: above md → interactive DS Button (disabled for live paths);

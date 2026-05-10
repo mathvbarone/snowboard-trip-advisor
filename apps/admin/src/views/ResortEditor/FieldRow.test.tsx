@@ -579,6 +579,31 @@ describe('FieldRow below-md responsive gate (Decision D11)', (): void => {
 
 // PR 4.4d Task 6 — edit-then-clear scenarios (Codex rounds 20/21/24).
 describe('FieldRow MANUAL clear scenarios (Codex rounds 20/21/24)', (): void => {
+  it('clear-after-typing leaves the input blank (Codex P2-A: render-time sync must not restore the old canonical when the user clears)', (): void => {
+    prepopulateResortDetail(KOTELNICA, syntheticResponse({ slopesState: 'manual' }))
+    render(<FieldRow path="slopes_km" state={manualState(8)} />)
+    const input = screen.getByRole('textbox', { name: 'Slopes (km)' })
+
+    // Initial state: input shows the canonical value '8'.
+    expect(input).toHaveValue('8')
+
+    // User types a valid value — draft is set, localString reflects '155'.
+    fireEvent.change(input, { target: { value: '155' } })
+    expect(input).toHaveValue('155')
+
+    // User clears the input — clearFieldValue drops the draft, persistedValue
+    // falls back to the canonical state.value = 8. Without the P2-A fix, the
+    // render-time sync would overwrite localString with '8', making it
+    // impossible to hold the field blank to retype.
+    fireEvent.change(input, { target: { value: '' } })
+    expect(input).toHaveValue('')
+
+    // Typing an invalid intermediate (e.g., '7e') triggers the same
+    // clearFieldValue path. The user's transient string must survive.
+    fireEvent.change(input, { target: { value: '7e' } })
+    expect(input).toHaveValue('7e')
+  })
+
   it('edit-then-clear of a top-level path drops value/provenance but preserves editor_modes (round-20 P2-28 + round-24 P2-35 no-mode variant)', async (): Promise<void> => {
     vi.useFakeTimers()
     prepopulateResortDetail(KOTELNICA, syntheticResponse({ slopesState: 'manual' }))
