@@ -166,7 +166,11 @@ async function withPublishLock<T>(
 // This makes call sites honest about what they're writing and removes the two-helper ceremony.
 // ---------------------------------------------------------------------------
 
-async function atomicWriteText(targetPath: string, body: string): Promise<void> {
+// PR 4.4c §B1 widened this to a public export so apps/admin/server can import
+// the canonical impl rather than copy-paste the fsync→rename→fsync sequence.
+// node.ts already does `export * from './publishDataset'`, so flipping the
+// keyword surfaces it through the /node subpath without touching node.ts.
+export async function atomicWriteText(targetPath: string, body: string): Promise<void> {
   const dir = dirname(targetPath)
   const tmp = join(dir, `.${basename(targetPath)}.tmp.${String(process.pid)}.${randomUUID()}`)
 
