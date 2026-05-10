@@ -46,7 +46,19 @@ export function ResortEditor({ slug }: ResortEditorProps): JSX.Element {
     setRoute({ route: 'resorts' })
   }
   return (
-    <EditorErrorBoundary key={retryKey} slug={slug} onRetry={onRetry} onBack={onBack}>
+    // Codex round-1 P2 fold: include slug in the key so a slug change on the
+    // editor route (browser history between two ?route=editor&slug=... entries,
+    // or a future row-click that re-targets the editor) unmounts the boundary
+    // and re-fetches. Keying only on retryKey would leave a prior error state
+    // pinned across the slug change — children never re-render, no new GET
+    // fires, and the user is stuck on the old not-found / workspace-corrupt /
+    // generic error UI.
+    <EditorErrorBoundary
+      key={`${slug}-${String(retryKey)}`}
+      slug={slug}
+      onRetry={onRetry}
+      onBack={onBack}
+    >
       <Suspense fallback={<div role="status" aria-live="polite">Loading…</div>}>
         <ResortEditorBody slug={slug} />
       </Suspense>

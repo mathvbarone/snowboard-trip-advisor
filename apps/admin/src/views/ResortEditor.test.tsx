@@ -27,6 +27,7 @@ import { ResortEditor } from './ResortEditor'
 // → JSON.parse → schema parse → render) settle in one act window.
 
 const KOTELNICA = ResortSlug.parse('kotelnica-bialczanska')
+const SPINDLERUV = ResortSlug.parse('spindleruv-mlyn')
 
 async function renderAsync(node: ReactNode): Promise<ReturnType<typeof render>> {
   let view!: ReturnType<typeof render>
@@ -347,6 +348,32 @@ describe('EditorErrorBoundary (PR 4.4b §D1)', (): void => {
     )
     const { container } = await renderAsync(<ResortEditor slug={KOTELNICA} />)
     expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it('on slug change after an error, the boundary unsticks and re-fetches the new slug (Codex round-1 P2)', async (): Promise<void> => {
+    server.use(
+      http.get('/api/resorts/:slug', ({ params }): Response => {
+        if (params.slug === 'kotelnica-bialczanska') {
+          return HttpResponse.json(
+            { error: { code: 'not-found', message: 'no such slug' } },
+            { status: 404 },
+          )
+        }
+        return HttpResponse.json(makeFullDetail('spindleruv-mlyn'))
+      }),
+    )
+    const { rerender } = await renderAsync(<ResortEditor slug={KOTELNICA} />)
+    expect(screen.getByText('Resort not found.')).toBeInTheDocument()
+
+    await act(async (): Promise<void> => {
+      rerender(<ResortEditor slug={SPINDLERUV} />)
+      for (let i = 0; i < 20; i += 1) {
+        await Promise.resolve()
+      }
+    })
+
+    expect(screen.queryByText('Resort not found.')).toBeNull()
+    expect(screen.getByRole('tablist', { name: 'Editor sections' })).toBeInTheDocument()
   })
 
   it('passes jest-axe in the generic-fallback error state', async (): Promise<void> => {
