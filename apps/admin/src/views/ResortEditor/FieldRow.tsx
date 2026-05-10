@@ -1,6 +1,6 @@
 import { SourceBadge, StatusPill } from '@snowboard-trip-advisor/design-system'
 import type {
-  FieldStateFor,
+  FieldState,
   MetricPath,
   Money,
   SourceKey,
@@ -94,7 +94,7 @@ export function formatMetricValue(path: MetricPath, value: unknown): string {
   }
 }
 
-function sourceForBadge(state: FieldStateFor<unknown>): SourceKey | null {
+function sourceForBadge(state: FieldState): SourceKey | null {
   if (state.state === 'live' || state.state === 'stale') {
     return state.source
   }
@@ -104,7 +104,7 @@ function sourceForBadge(state: FieldStateFor<unknown>): SourceKey | null {
   return null
 }
 
-function displayValue(path: MetricPath, state: FieldStateFor<unknown>): string {
+function displayValue(path: MetricPath, state: FieldState): string {
   if (state.state === 'failed') {
     return '—'
   }
@@ -113,7 +113,12 @@ function displayValue(path: MetricPath, state: FieldStateFor<unknown>): string {
 
 export interface FieldRowProps {
   readonly path: MetricPath
-  readonly state: FieldStateFor<unknown>
+  // FieldState is the Zod-inferred, wire-shaped union (`author?: string | undefined`
+  // on the manual variant). FieldStateFor<unknown> in resortView.ts is the
+  // strict-TS equivalent (`author?: string`); under exactOptionalPropertyTypes
+  // they diverge, so we accept the wire shape here. Tests can still construct
+  // FieldStateFor literals — they're a structural subtype.
+  readonly state: FieldState
 }
 
 // Render-only FieldRow (PR 4.4b). PR 4.4d adds the MANUAL <input> for the 7
