@@ -169,7 +169,7 @@ git commit -s -m "test(admin-server): failing publish-handler happy-path + slug-
 
 ```ts
 import { mkdir, readdir, readFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 
 import { publishDataset } from '@snowboard-trip-advisor/schema/node'
 import type {
@@ -231,7 +231,14 @@ export async function publishHandler(
   }
 
   return {
-    version_id: `${String(result.counter)}-${publishedAt}`,
+    // Codex round 4 PR #97 P2 fold: derive version_id from the archive path
+    // returned by publishDataset() — which is the authoritative source — rather
+    // than reconstructing from deps.now(). publishDataset() internally calls
+    // `new Date()` (NOT deps.now()) for its filename, so reconstruction here
+    // would mismatch what listPublishesHandler later returns, causing the
+    // success Toast to identify a different version_id than the PublishHistory
+    // row. basename(path, '.json') strips dirname + extension.
+    version_id: basename(result.archive_path, '.json'),
     archive_path: result.archive_path,
     published_at: publishedAt,
     resort_count: resorts.length,
@@ -568,12 +575,13 @@ it('honors Idempotency-Key header on POST publish without rejecting (Phase 1, sp
 
 - [ ] **Step 5: Run** `npm run qa` — expect green (full chain since `apps/admin/server/**` triggers scope-detector → `full`).
 
-- [ ] **Step 6: Commit + push.**
+- [ ] **Step 6: Commit (do NOT push yet — Task 4.5a-6 follows with the apiClient Idempotency-Key change, then pushes the full PR at once).**
 
 ```bash
 git add apps/admin/server/__tests__/dispatch.test.ts apps/admin/server/dispatch.ts
 git commit -s -m "feat(admin-server): wire publish + listPublishes routes in dispatch (PR 4.5a §4.5a-5)"
-git push -u origin epic-4/pr-4.5a-publish-handler
+# Codex round 4 PR #97 P2 fold: deferred push to end of 4.5a-6 so the PR
+# branch includes the Idempotency-Key client change.
 ```
 
 #### Task 4.5a-6: `apiClient.publish()` injects `Idempotency-Key` (Decision J1)
@@ -629,11 +637,14 @@ publish: (): Promise<PublishResponse> =>
 
 - [ ] **Step 4: Run — expect PASS.**
 
-- [ ] **Step 5: Commit.**
+- [ ] **Step 5: Commit + push the full PR branch (apiClient change is the last commit).**
 
 ```bash
 git add apps/admin/src/lib/apiClient.ts apps/admin/src/lib/apiClient.test.ts
 git commit -s -m "feat(admin-client): apiClient.publish() injects Idempotency-Key (PR 4.5a §4.5a-6, Decision J1)"
+# Codex round 4 PR #97 P2 fold: push happens HERE (not in 4.5a-5) so the PR
+# branch carries the apiClient Idempotency-Key change.
+git push -u origin epic-4/pr-4.5a-publish-handler
 ```
 
 #### Task 4.5a-7: PR creation + subagent review + Codex review
@@ -1635,6 +1646,8 @@ _Populate as Codex / subagent / maintainer / user findings land per round. Carry
 | 4 | 4.5a | Codex round 3 PR #97 | **P1** `publish.ts` envelope was incomplete: `PublishedDataset` schema (`packages/schema/src/published.ts:12-22`) requires `schema_version`, `published_at`, `resorts`, `live_signals`, `manifest{resort_count,generated_by,validator_version}` — the plan used `generated_at` (wrong field name) and was missing `live_signals` + `manifest`. Every non-empty publish would fail `validatePublishedDataset` before any archive write. | Rewrote `publish.ts` envelope construction to include all required fields. `composePublishInput` now returns `{ resorts, live_signals }` — merging `WorkspaceFile.live_signal` (non-null) ∪ `published.live_signals` keyed on `resort_slug`. Manifest uses `generated_by: 'admin-workspace'` per spec §4.7 + `validator_version: '1'`. |
 | 4 | 4.5a | Codex round 3 PR #97 | **P1** `listPublishes.ts` read `body.generated_at`; the archived `PublishedDataset` schema has `published_at` (no `generated_at` field). Real archives would assign `undefined` → `apiClient.listPublishes()` rejects the response → PublishHistory unusable. | `listPublishes.ts` now reads `body.published_at`. Test fixtures updated to use the real schema shape `{schema_version, published_at, resorts, live_signals, manifest}`. Also pulls `published_by` from `body.manifest.generated_by` (falling back to `'admin-workspace'`). |
 | 4 | 4.5c | Codex round 3 PR #97 | **P1** `<PublishDialog open={open} onClose={...} />` left the component mounted for the app lifetime; the internal `if (!open) return null` returns null but does NOT unmount → `useHealth`'s once-on-mount effect fires only at app boot → dialog always opens against stale health. Confirm could be enabled after corrupt-workspace state newly appeared. | Removed the `open` prop. Shell mounts the dialog conditionally: `{isPublishOpen && <PublishDialog onClose={...} />}`. Each open is a fresh mount → fresh `useHealth` fetch. Decision G1 amended. |
+| 5 | 4.5a | Codex round 4 PR #97 | **P2** `version_id` reconstructed from `deps.now()` mismatches the archive filename. `publishDataset()` internally calls `new Date()` (NOT `deps.now()`) for its filename — slight timestamp drift makes the handler's response version_id different from what `listPublishesHandler` reports for the same archive. Success Toast and PublishHistory row would identify the same archive with different IDs. | Derive `version_id` from `basename(result.archive_path, '.json')` — authoritative source (same path `listPublishesHandler` reads). Added `basename` import from `node:path`. |
+| 5 | 4.5a | Codex round 4 PR #97 | **P2** Workflow ordering bug: Task 4.5a-5 ended with `git push`; Task 4.5a-6 (apiClient Idempotency-Key) commits locally but never pushes; Task 4.5a-7 opens the PR with an outdated branch missing the client header change. | Moved the `git push -u origin` from end of Task 4.5a-5 to end of Task 4.5a-6 so the PR branch carries every commit through the final apiClient change. |
 
 ---
 
