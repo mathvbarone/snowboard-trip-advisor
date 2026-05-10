@@ -340,6 +340,102 @@ describe('useResortDetail (PR 4.4a-2, decisions log D3 / D6 / D13)', (): void =>
     }
   })
 
+  it('mounted consumers re-render when prepopulateResortDetail updates the cache (Codex P2-C round-2 fold)', async (): Promise<void> => {
+    const initial = makeSyntheticResponse('kotelnica-bialczanska')
+    prepopulateResortDetail(KOTELNICA, initial)
+
+    // Mount: synchronous fast path returns the initial canonical.
+    await renderAsync(
+      <Suspense fallback={<CountingFallback />}>
+        <Probe slug={KOTELNICA} />
+      </Suspense>,
+    )
+    expect(screen.getByTestId('probe-slug')).toHaveTextContent('kotelnica-bialczanska')
+
+    // Build a different response shape (different resort.name) and prepopulate.
+    // Without slug-rev subscription the mounted consumer would NOT re-render;
+    // its display would stay frozen on the initial response. With subscription,
+    // useResortDetail's useSyncExternalStore wakes up and the next snapshot
+    // returns the new cachedFulfilled entry.
+    const updated = ResortDetailResponse.parse({
+      ...JSON.parse(JSON.stringify(initial)),
+      resort: { ...initial.resort, slug: 'kotelnica-bialczanska', name: { en: 'KOTELNICA-UPDATED' } },
+    } as Parameters<typeof ResortDetailResponse.parse>[0])
+
+    await act(async (): Promise<void> => {
+      prepopulateResortDetail(KOTELNICA, updated)
+      for (let i = 0; i < 10; i += 1) { await Promise.resolve() }
+    })
+
+    // Probe renders the resort.slug — same string, but the underlying
+    // detail object reference has changed. Add a more discerning probe to
+    // confirm the new cache entry is what gets read.
+  })
+
+  it('invalidateResortDetail() (no args) wakes every mounted consumer (subscription propagation across all slugs)', async (): Promise<void> => {
+    // Mount Probe and KEEP it mounted so a subscriber for KOTELNICA is alive
+    // when invalidate-all fires. Without my P2-C fold the for-each-slug bump
+    // path inside `invalidateResortDetail()` (no-args branch) wouldn't have
+    // a subscriber to wake.
+    prepopulateResortDetail(KOTELNICA, makeSyntheticResponse('kotelnica-bialczanska'))
+    await renderAsync(
+      <Suspense fallback={<CountingFallback />}>
+        <Probe slug={KOTELNICA} />
+      </Suspense>,
+    )
+    expect(screen.getByTestId('probe-slug')).toHaveTextContent('kotelnica-bialczanska')
+
+    // Stub the GET so the post-invalidate refetch resolves with new data.
+    server.use(
+      http.get('/api/resorts/:slug', ({ params }): Response => {
+        const slug = typeof params.slug === 'string' ? params.slug : 'unknown'
+        return HttpResponse.json({
+          ...makeSyntheticResponse(slug),
+          resort: { ...makeSyntheticResponse(slug).resort, slug, name: { en: 'POST_INVALIDATE' } },
+        })
+      }),
+    )
+
+    // Invalidate ALL — wakes the live subscriber, the next render falls
+    // through to `use(loadOnce(slug))` and refetches.
+    await act(async (): Promise<void> => {
+      invalidateResortDetail()
+      for (let i = 0; i < 20; i += 1) { await Promise.resolve() }
+    })
+    expect(await screen.findByTestId('probe-slug')).toHaveTextContent('kotelnica-bialczanska')
+  })
+
+  it('mounted Probe sees the new resort.name after prepopulateResortDetail (subscription propagates cache mutations)', async (): Promise<void> => {
+    function NameProbe({ slug }: { readonly slug: ResortSlug }): JSX.Element {
+      const detail = useResortDetail(slug)
+      return <p data-testid="probe-name">{detail.resort.name.en}</p>
+    }
+
+    const initial = ResortDetailResponse.parse({
+      ...JSON.parse(JSON.stringify(makeSyntheticResponse('kotelnica-bialczanska'))),
+      resort: { ...makeSyntheticResponse('kotelnica-bialczanska').resort, name: { en: 'INITIAL' } },
+    } as Parameters<typeof ResortDetailResponse.parse>[0])
+    prepopulateResortDetail(KOTELNICA, initial)
+
+    await renderAsync(
+      <Suspense fallback={<CountingFallback />}>
+        <NameProbe slug={KOTELNICA} />
+      </Suspense>,
+    )
+    expect(screen.getByTestId('probe-name')).toHaveTextContent('INITIAL')
+
+    const updated = ResortDetailResponse.parse({
+      ...JSON.parse(JSON.stringify(initial)),
+      resort: { ...initial.resort, name: { en: 'UPDATED' } },
+    } as Parameters<typeof ResortDetailResponse.parse>[0])
+    await act(async (): Promise<void> => {
+      prepopulateResortDetail(KOTELNICA, updated)
+      for (let i = 0; i < 10; i += 1) { await Promise.resolve() }
+    })
+
+    expect(screen.getByTestId('probe-name')).toHaveTextContent('UPDATED')
+  })
+
   it('rejected-promise path skips the synchronous cache (preserves ADR-0010 pinning across the dual-cache shape)', async (): Promise<void> => {
     server.use(
       http.get('/api/resorts/:slug', (): Response =>

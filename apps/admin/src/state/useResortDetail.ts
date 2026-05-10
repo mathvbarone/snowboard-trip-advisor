@@ -1,6 +1,6 @@
 import type { ResortSlug } from '@snowboard-trip-advisor/schema'
 import type { ResortDetailResponse } from '@snowboard-trip-advisor/schema/api'
-import { use } from 'react'
+import { use, useSyncExternalStore } from 'react'
 
 import { apiClient } from '../lib/apiClient'
 
@@ -32,6 +32,46 @@ import './useResortDetail.hmr'
  */
 const cachedPromises = new Map<ResortSlug, Promise<ResortDetailResponse>>()
 const cachedFulfilled = new Map<ResortSlug, ResortDetailResponse>()
+
+// Per Codex P2-C round-2 fold (PR 4.4d): cache mutations (prepopulate /
+// invalidate) must wake mounted consumers so the parent (e.g.,
+// `ResortEditorTabs`) re-renders and the fresh `detail.field_states`
+// flows through MetricPanel → FieldRow as a new `state` prop. Without
+// this, a clean PUT success would update the cache but the row would
+// snap back to the stale prop on the next draft-cleared render. A
+// per-slug rev counter is the minimal subscription surface that
+// `useSyncExternalStore` needs — the snapshot is just a number, so
+// React's referential-equality check is cheap, and only consumers of
+// the bumped slug re-render.
+const slugRevs = new Map<ResortSlug, number>()
+const slugSubscribers = new Map<ResortSlug, Set<() => void>>()
+
+function getSlugRev(slug: ResortSlug): number {
+  return slugRevs.get(slug) ?? 0
+}
+
+function bumpSlugRev(slug: ResortSlug): void {
+  slugRevs.set(slug, getSlugRev(slug) + 1)
+  const subs = slugSubscribers.get(slug)
+  if (subs !== undefined) {
+    for (const cb of subs) { cb() }
+  }
+}
+
+function subscribeSlug(slug: ResortSlug, cb: () => void): () => void {
+  let set = slugSubscribers.get(slug)
+  if (set === undefined) {
+    set = new Set()
+    slugSubscribers.set(slug, set)
+  }
+  set.add(cb)
+  return (): void => {
+    const s = slugSubscribers.get(slug)
+    if (s === undefined) { return }
+    s.delete(cb)
+    if (s.size === 0) { slugSubscribers.delete(slug) }
+  }
+}
 
 function loadOnce(slug: ResortSlug): Promise<ResortDetailResponse> {
   const existing = cachedPromises.get(slug)
@@ -67,6 +107,14 @@ function loadOnce(slug: ResortSlug): Promise<ResortDetailResponse> {
 }
 
 export function useResortDetail(slug: ResortSlug): ResortDetailResponse {
+  // Subscribe to slug-rev mutations so cache writes (prepopulate /
+  // invalidate) wake mounted consumers and the next render reads the
+  // fresh cachedFulfilled entry. The snapshot is just a number; React's
+  // referential equality bypasses re-renders when nothing changed.
+  useSyncExternalStore(
+    (cb: () => void): (() => void) => subscribeSlug(slug, cb),
+    (): number => getSlugRev(slug),
+  )
   // Synchronous fast path — avoids the React-19 use(Promise.resolve) flicker.
   // `use()` is allowed in conditionals per React 19 docs.
   const fulfilled = cachedFulfilled.get(slug)
@@ -80,9 +128,13 @@ export function invalidateResortDetail(slug?: ResortSlug): void {
   if (slug === undefined) {
     cachedPromises.clear()
     cachedFulfilled.clear()
+    // Wake every subscribed slug so each mounted consumer re-checks the
+    // (now-empty) cache and falls through to a fresh `use(loadOnce)`.
+    for (const s of slugSubscribers.keys()) { bumpSlugRev(s) }
   } else {
     cachedPromises.delete(slug)
     cachedFulfilled.delete(slug)
+    bumpSlugRev(slug)
   }
 }
 
@@ -99,10 +151,13 @@ export function invalidateResortDetail(slug?: ResortSlug): void {
 export function prepopulateResortDetail(slug: ResortSlug, response: ResortDetailResponse): void {
   cachedFulfilled.set(slug, response)
   cachedPromises.set(slug, Promise.resolve(response))
+  bumpSlugRev(slug)
 }
 
 /** Test-only: clear both caches between tests. */
 export function __resetForTests(): void {
   cachedPromises.clear()
   cachedFulfilled.clear()
+  slugRevs.clear()
+  slugSubscribers.clear()
 }
