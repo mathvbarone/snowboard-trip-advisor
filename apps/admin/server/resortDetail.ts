@@ -36,13 +36,25 @@ export async function resortDetailHandler(
   // Workspace branch first — workspace takes precedence per spec §4.1.1.
   // readWorkspaceFileForSlug propagates WorkspaceCorruptError (with
   // `.code = 'workspace-corrupt'`) so dispatch maps it to 500 §10.3.1.
-  const wf = await readWorkspaceFileForSlug(workspaceDir, slug)
+  //
+  // Codex round-3 P2 fold + spec §4.2.1: when the workspace file exists but
+  // the slug is NOT yet in the published doc (= draft resort), `live_signal`
+  // MUST be null per the spec ("no live data until the resort is published
+  // and signals start flowing"). Read both sources to determine
+  // draft-vs-published; only surface the workspace's live_signal for
+  // resorts that have actually been published.
+  const [wf, publishedDoc] = await Promise.all([
+    readWorkspaceFileForSlug(workspaceDir, slug),
+    readPublishedDocOrNull(publishedPath),
+  ])
   if (wf !== null) {
-    return buildResponse(wf.resort, wf.live_signal, wf.editor_modes)
+    const isDraft = publishedDoc === null
+      || !publishedDoc.resorts.some((r): boolean => r.slug === slug)
+    const liveSignal: ResortLiveSignal | null = isDraft ? null : wf.live_signal
+    return buildResponse(wf.resort, liveSignal, wf.editor_modes)
   }
 
-  // Fall through to the published doc per §4.2.1.
-  const publishedDoc = await readPublishedDocOrNull(publishedPath)
+  // No workspace file — fall through to the published doc per §4.2.
   if (publishedDoc !== null) {
     const resort = publishedDoc.resorts.find((r): boolean => r.slug === slug)
     if (resort !== undefined) {
