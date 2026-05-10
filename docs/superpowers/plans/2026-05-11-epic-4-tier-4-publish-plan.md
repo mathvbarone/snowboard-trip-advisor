@@ -31,8 +31,8 @@ Per [spec §7.4](../specs/2026-05-01-epic-4-admin-app-design.md), after PRs 4.5a
 | **C1** | Toast variants: `'info' \| 'success' \| 'error'` per spec §7.15 (line 644/653). ARIA: `info`/`success` → `role="status"` (polite), `error` → `role="alert"` (assertive). **Auto-dismiss defaults (P2-1 fold — per-variant for WCAG 2.2 SC 2.2.1 timing-adjustable):** `info` 5000 ms, `success` 5000 ms, `error` 8000 ms. The `dismissAfterMs` prop overrides per-call. **Pause-on-interaction (P2-5 fold — keyboard parity):** `onMouseEnter` / `onFocus` clear the timer + capture remaining time; `onMouseLeave` / `onBlur` reset the timer from the captured remainder. The Toast root carries `tabIndex={0}` so keyboard users can focus + pause. A visible "Dismiss" `<Button>` inside the Toast lets keyboard users clear the Toast without waiting (mirrors error-Toast convention). **Single Toast at a time** — Phase 1 doesn't need a queue/portal/stack; one slot at the top-right. Add fan-out when a second concurrent consumer exists. | YAGNI. Publish is the only consumer; one Toast suffices. WCAG 2.2 SC 2.2.1 satisfied via dismiss button + pause on hover/focus + per-variant timing. |
 | **C2** | `<ToastProvider>` is the host. Children opt-in via a `useToast()` hook returning `{ show(input): void }`. Provider stores `ToastInput \| null` in `useState`; show overwrites and starts the timer. **No queue.** If a second `show()` fires while one is visible, it replaces. **P2-2 fold — accepted risk:** in the publish flow, the user triggers the Toast (Publish click → success/error Toast); only that flow shows Toasts in Phase 1, so the user never sees a Toast they didn't trigger get replaced. When Phase 2 adds adapter actions (Test / Sync) that emit Toasts, revisit the queue decision then. | YAGNI for Phase 1; the user-triggered-only invariant makes replacement safe. |
 | **D1** | `usePublish` returns `{ submit, status, response, error, reset }`. `status` is `'idle' \| 'submitting' \| 'success' \| 'error'`. `submit(): Promise<void>` calls `apiClient.publish()` and updates state. `reset()` clears back to `'idle'` (used by the dialog to dismiss the error indicator before the user re-tries). **NOT** Suspense-based — publish is a mutation, not a render-time read. | Locality + ai-clean-code-adherence §2: Suspense for reads, callbacks for mutations. Don't reuse `useResortDetail`'s `use()` pattern for an action. |
-| **D2** | On successful publish, `usePublish` calls `invalidateHealth()` AND `invalidateListPublishes()` so the Dashboard's blocking counts and the PublishHistory list both reflect the new state. **NOT** `invalidateResortDetail()` — workspace files weren't mutated (publish reads them, writes `current.v1.json` + history). Per-resort detail caches stay valid. | Cache coherence. Only invalidate what the publish mutation actually affects. |
-| **D3** | `useHealth` is **extended** (one file MODIFY in PR 4.5c) with consumer subscription via `useSyncExternalStore` (mirroring `useResortDetail`'s round-2 P2-C fold from PR 4.4d). Adds `invalidateHealth(): void` module export. Without this, `invalidateHealth()` would re-fetch but mounted PublishDialog wouldn't re-render. | Mirrors Tier 3's pattern. Avoids the latent oversight the round-2 P2-C fold uncovered. |
+| **D2** | On successful publish, `usePublish` calls `invalidateListPublishes()` so the PublishHistory list reflects the new state. **NOT** `invalidateHealth()` — PublishDialog unmounts on success (it calls `onClose()`); next time it opens it re-fetches health from scratch via the existing `useHealth` `useEffect`-on-mount pattern (no cache, no stale read). The Dashboard's persistent health-card display lags one navigation cycle behind a publish; tracked as Phase-1 limitation for PR 4.6a Tier 5 polish per spec §7.16. **NOT** `invalidateResortDetail()` — workspace files weren't mutated. Per-resort detail caches stay valid. | Cache coherence + tight scope. Only invalidate what the publish mutation actually affects within the open user session. Dashboard staleness deferred. (Decision originally added `invalidateHealth()` per Tier 3 precedent; Codex round 2 PR #97 P2 fold revealed it pushes PR 4.5c over the 8-file budget without buying anything load-bearing for the publish flow.) |
+| ~~**D3**~~ | **Removed** per Codex round 2 PR #97 P2 fold. Original D3 extended `useHealth` with `invalidateHealth` + `useSyncExternalStore` subscription mirroring `useResortDetail`'s round-2 P2-C pattern. Dropped because (a) `useHealth.ts` + `useHealth.test.ts` would be 2 paths counted toward PR 4.5c's budget per AGENTS.md PR-sizing rule (paths, not concerns), pushing PR 4.5c to 9 files (over the ≤8 ceiling); (b) PublishDialog re-fetches health on each mount via the existing `useEffect` pattern, so the subscription wasn't load-bearing for the publish flow. Dashboard's persistent health-card display will lag a publish by one navigation cycle (acceptable Phase-1 limitation, tagged for PR 4.6a Tier 5 polish). | File budget + scope correctness. |
 | **E1** | `useListPublishes` is Suspense-friendly via React 19 `use()` + a single-promise cache (`Map<string, Promise<...>>` keyed by serialised query string, mirroring `useResortList`'s pattern). Consumer subscription via `useSyncExternalStore` for `invalidateListPublishes()` (NEW module export). Rejected-promise pinning per [ADR-0010](../../adr/0010-usedataset-rejected-promise-pinning.md). | Consistency with `useResortList`. `__resetForTests()` exposed for test isolation. |
 | **F1** | `PublishDialog` is a `<div role="dialog" aria-modal="true" aria-labelledby="publish-dialog-title">` overlay (raw `<dialog>` JSX banned by `RAW_HTML_ELS`). Backdrop: sibling `<div className="publish-dialog__backdrop">` with `onClick` → close. **Focus management** (Phase 1, P1-6 fold — scope reduced from full trap to MVP):
 - `useEffect` on mount focuses the first focusable element via ref.
@@ -734,6 +734,46 @@ describe('ToastProvider + useToast', (): void => {
     await user.click(screen.getByRole('button', { name: 'fire' }))
     expect(screen.getByRole('status')).toHaveTextContent('Yay')
   })
+
+  // Codex round 2 PR #97 P1 fold: context value must be stable across renders
+  // so consumers' useEffect deps including `toast` don't infinite-loop.
+  it('useToast().show is referentially stable across re-renders of ToastProvider', (): void => {
+    let captured: Array<{ show: (i: ToastInput) => void }> = []
+    function Probe(): React.ReactElement {
+      const toast = useToast()
+      captured.push(toast)
+      return null
+    }
+    const { rerender } = render(<ToastProvider><Probe /></ToastProvider>)
+    rerender(<ToastProvider><Probe /></ToastProvider>)
+    expect(captured.length).toBeGreaterThanOrEqual(2)
+    expect(captured[0]!.show).toBe(captured[1]!.show)
+  })
+
+  // Codex round 2 PR #97 P2 fold: replacement Toast must use its own timing,
+  // not inherit the previous Toast's remainingRef.
+  it('replacement Toast remounts with fresh timing (key-by-show-counter)', async (): Promise<void> => {
+    vi.useFakeTimers()
+    function DoubleFire(): React.ReactElement {
+      const { show } = useToast()
+      return (
+        <>
+          <button onClick={(): void => { show({ variant: 'info', message: 'First', dismissAfterMs: 100_000 }) }}>fire1</button>
+          <button onClick={(): void => { show({ variant: 'error', message: 'Second', dismissAfterMs: 1000 }) }}>fire2</button>
+        </>
+      )
+    }
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    render(<ToastProvider><DoubleFire /></ToastProvider>)
+    await user.click(screen.getByRole('button', { name: 'fire1' }))
+    expect(screen.getByRole('status')).toHaveTextContent('First')
+    await user.click(screen.getByRole('button', { name: 'fire2' }))
+    expect(screen.getByRole('alert')).toHaveTextContent('Second')
+    // The replacement uses its own 1000ms; the first one's 100000ms is forgotten.
+    act((): void => { vi.advanceTimersByTime(1000) })
+    expect(screen.queryByRole('alert')).toBeNull()
+    vi.useRealTimers()
+  })
 })
 ```
 
@@ -748,7 +788,7 @@ describe('ToastProvider + useToast', (): void => {
 - [ ] **Step 1: Implement.**
 
 ```tsx
-import { createContext, useContext, useEffect, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { JSX, ReactNode } from 'react'
 
 import { Button } from './Button'
@@ -833,15 +873,30 @@ interface ToastContextValue {
 const ToastContext = createContext<ToastContextValue | null>(null)
 
 export function ToastProvider({ children }: { children: ReactNode }): JSX.Element {
-  const [current, setCurrent] = useState<ToastInput | null>(null)
+  // Codex round 2 PR #97 P1 fold: memoize context value so consumers' useEffect
+  // deps including `toast` don't see a new object every render (the original
+  // inline `value={{ show: setCurrent }}` would cause infinite re-loops in
+  // PublishDialog's success/error effect).
+  const [current, setCurrent] = useState<{ input: ToastInput; key: number } | null>(null)
+  const keyRef = useRef<number>(0)
+  const value = useMemo((): ToastContextValue => ({
+    // Codex round 2 PR #97 P2 fold: increment key on every show() so a replacement
+    // Toast un-mounts/re-mounts (fresh `useRef(dismissAfterMs)` — otherwise the
+    // second toast inherits the first one's remaining time).
+    show: (input: ToastInput): void => {
+      keyRef.current += 1
+      setCurrent({ input, key: keyRef.current })
+    },
+  }), [])
   return (
-    <ToastContext.Provider value={{ show: setCurrent }}>
+    <ToastContext.Provider value={value}>
       {children}
       {current !== null && (
         <Toast
-          variant={current.variant}
-          message={current.message}
-          dismissAfterMs={current.dismissAfterMs}
+          key={current.key}
+          variant={current.input.variant}
+          message={current.input.message}
+          dismissAfterMs={current.input.dismissAfterMs}
           onDismiss={(): void => { setCurrent(null) }}
         />
       )}
@@ -885,18 +940,19 @@ export type { ToastProps, ToastVariant, ToastInput } from './components/Toast'
 
 **Subagent review trigger:** **NO** (UI components; schema + server + DS shipped under review in PRs 4.5a + 4.5b). **Section review (`feedback_section_review_workflow.md`):** PublishDialog 4-state blocking UX is user-facing — dispatch a domain-specialist subagent reviewer with the blocking tooltip copy from spec §4.3.1 BEFORE asking the user for section approval.
 
-**File budget:** 8 files (at ≤8 budget — Decision A1 P0-1 fold moves `useListPublishes.ts` + its test into 4.5c so `usePublish` imports resolve).
+**File budget:** 7 files (within ≤8 budget; Codex round 2 PR #97 P2 fold removed `useHealth.ts` + `useHealth.test.ts` after dropping Decision D3).
 
 **Files (tests first):**
 
 1. **Create** `apps/admin/src/state/usePublish.test.ts` — hook tests.
-2. **Create** `apps/admin/src/state/usePublish.ts` — submit + state machine + on-success invalidations.
+2. **Create** `apps/admin/src/state/usePublish.ts` — submit + state machine + on-success invalidation of `listPublishes`.
 3. **Create** `apps/admin/src/state/useListPublishes.test.ts` — Suspense + invalidation tests (moved from PR 4.5d per A1 P0-1 fold).
 4. **Create** `apps/admin/src/state/useListPublishes.ts` — single-promise cache + consumer subscription per Decision E1 (moved from PR 4.5d per A1 P0-1 fold).
 5. **Create** `apps/admin/src/views/PublishDialog.test.tsx` — render + 4 blocking states + interaction.
-6. **Create** `apps/admin/src/views/PublishDialog.tsx` — modal overlay; reads `useHealth()`; uses `usePublish()`.
-7. **Modify** `apps/admin/src/state/useHealth.ts` — add `invalidateHealth()` + consumer subscription via `useSyncExternalStore` per Decision D3. Co-located `useHealth.test.ts` MODIFY counts as part of this file (single concern).
-8. **Modify** `apps/admin/src/views/Shell.tsx` — add `<Button>Publish</Button>` in header; wrap children in `<ToastProvider>`; render `<PublishDialog open onClose />` conditionally.
+6. **Create** `apps/admin/src/views/PublishDialog.tsx` — modal overlay; reads `useHealth()` (existing, unchanged); uses `usePublish()`.
+7. **Modify** `apps/admin/src/views/Shell.tsx` — add `<Button>Publish</Button>` in header; wrap children in `<ToastProvider>`; render `<PublishDialog open onClose />` conditionally.
+
+**`useHealth.ts` is NOT extended** (per Decision D3 removal — Codex round 2 P2 fold). PublishDialog re-fetches health via the existing `useEffect`-on-mount pattern each time the modal opens. Dashboard staleness post-publish is a documented Phase-1 limitation; PR 4.6a Tier 5 polish revisits.
 
 **MSW handlers** for the new `getHealth` blocker fixtures live inline in `PublishDialog.test.tsx` (via `server.use(...)` per the existing apps/admin test-setup convention); no global `test-setup.ts` modification needed.
 
@@ -931,7 +987,7 @@ import { renderHook, act, waitFor } from '@testing-library/react'
 
 import { usePublish, __resetForTests } from './usePublish'
 import * as listPublishesModule from './useListPublishes'  // ships in §4.5c-2 above; import resolves.
-import * as healthModule from './useHealth'
+// Codex round 2 PR #97 P2 fold: useHealth not extended in this PR; usePublish does NOT call invalidateHealth.
 
 // MSW: success-mock for happy path; error-mock for failure path.
 
@@ -943,15 +999,13 @@ describe('usePublish', (): void => {
     expect(result.current.status).toBe('idle')
   })
 
-  it('happy path: idle → submitting → success; calls invalidateHealth + invalidateListPublishes', async (): Promise<void> => {
-    const invalidateH = vi.spyOn(healthModule, 'invalidateHealth')
+  it('happy path: idle → submitting → success; calls invalidateListPublishes (NOT invalidateHealth — Decision D3 removed)', async (): Promise<void> => {
     const invalidateP = vi.spyOn(listPublishesModule, 'invalidateListPublishes')
     const { result } = renderHook((): ReturnType<typeof usePublish> => usePublish())
 
     await act(async (): Promise<void> => { await result.current.submit() })
     expect(result.current.status).toBe('success')
     expect(result.current.response).toMatchObject({ resort_count: expect.any(Number) })
-    expect(invalidateH).toHaveBeenCalledOnce()
     expect(invalidateP).toHaveBeenCalledOnce()
   })
 
@@ -981,7 +1035,7 @@ import { useState } from 'react'
 import type { PublishResponse } from '@snowboard-trip-advisor/schema/api'
 
 import { apiClient } from '../lib/apiClient'
-import { invalidateHealth } from './useHealth'
+// Codex round 2 PR #97 P2 fold: no invalidateHealth import — Decision D3 dropped.
 import { invalidateListPublishes } from './useListPublishes'
 
 export type PublishStatus = 'idle' | 'submitting' | 'success' | 'error'
@@ -1006,7 +1060,6 @@ export function usePublish(): UsePublishResult {
       const r = await apiClient.publish()
       setResponse(r)
       setStatus('success')
-      invalidateHealth()
       invalidateListPublishes()
     } catch (e) {
       setError(e instanceof Error ? e : new Error(String(e)))
@@ -1026,26 +1079,9 @@ export function usePublish(): UsePublishResult {
 export function __resetForTests(): void { /* no module-level state */ }
 ```
 
-#### Task 4.5c-5: `useHealth.ts` MODIFY — add `invalidateHealth` + subscription per Decision D3
+#### Task 4.5c-5 — **REMOVED** per Codex round 2 PR #97 P2 fold
 
-**Files:** Modify `apps/admin/src/state/useHealth.ts` + `useHealth.test.ts` (same single-concern file pair counts as one in the budget).
-
-- [ ] **Step 1: Write failing tests** at the end of the existing `useHealth.test.ts` block, mirroring `useResortDetail`'s round-2 P2-C tests:
-  - **`invalidateHealth()` is exported and is a function.**
-  - **Subscribed consumer re-renders on `invalidateHealth()`.** Mount a probe component using `useHealth`; after the initial promise resolves, call `invalidateHealth()` from a sibling. Assert the probe re-fetches (new MSW handler returns a different `resorts_total`) and re-renders with the new value via `useSyncExternalStore`.
-  - **Unsubscribed consumer does NOT re-render on `invalidateHealth()`** (sanity check for the subscriber-set cleanup on unmount).
-
-- [ ] **Step 2: Run** — `npx vitest run apps/admin/src/state/useHealth.test.ts`. Expected: FAIL (the new tests reference `invalidateHealth` which does not exist).
-
-- [ ] **Step 3: Modify `useHealth.ts`** following `useResortDetail.ts`'s round-2 P2-C pattern:
-  - Add module-level `subscribers: Set<() => void>` and `revision: number` (singleton; useHealth has one key per Decision D3).
-  - Replace the current `useState`/`useEffect` body with a `useSyncExternalStore` snapshot driven by `revision`; the `useEffect` still kicks the fetch on first mount but the result lands in a module-level cache (or a singleton state) read by the subscribe-snapshot.
-  - Export `invalidateHealth(): void` that clears the cache + in-flight map and notifies every subscriber.
-  - **Do NOT** introduce a per-key Map here (Decision D3: useHealth is singleton; no key parameter); avoid copy-pasting `useResortDetail.ts`'s per-slug Map shape.
-
-- [ ] **Step 4: Run** — `npx vitest run apps/admin/src/state/useHealth.test.ts`. Expected: PASS.
-
-- [ ] **Step 5: Commit** (`feat(admin-state): useHealth invalidation + consumer subscription (PR 4.5c §4.5c-5)`).
+Original Task 4.5c-5 extended `useHealth.ts` with an `invalidateHealth` export + `useSyncExternalStore` subscription. Removed because: (a) the AGENTS.md PR-sizing rule counts paths, not concerns, so `useHealth.ts` + `useHealth.test.ts` would have pushed PR 4.5c to 9 files (over the ≤8 hard ceiling), and (b) `PublishDialog` unmounts on success/close and re-fetches health on every subsequent mount via the existing `useEffect` pattern, so the subscription wasn't load-bearing for the publish flow. Decision D3 has been struck through in the Decisions log. The Dashboard's post-publish health-card staleness is a documented Phase-1 limitation tagged for PR 4.6a Tier 5 polish.
 
 #### Task 4.5c-6: `PublishDialog.test.tsx` — 4 blocking states
 
@@ -1065,6 +1101,8 @@ it.each([
 it('confirm button enabled when health is clean; click → submit; on success → onClose called + Toast surfaces', /* ... */)
 it('confirm button DISABLED while health.value === null (loading); shows "Loading pre-publish checks…"', /* P2 fold Codex round 1 PR #97 */)
 it('confirm button DISABLED while health.error !== null; shows error message', /* P2 fold Codex round 1 PR #97 */)
+it('on success: fires Toast EXACTLY ONCE then calls publish.reset() so subsequent re-renders are no-ops', /* P1 fold Codex round 2 PR #97 */)
+it('on error: fires Toast EXACTLY ONCE then calls publish.reset()', /* P1 fold Codex round 2 PR #97 */)
 it('Escape closes dialog; backdrop click closes dialog; first focusable element is auto-focused', /* ... */)
 it('Confirm button has aria-describedby pointing at the blocker tooltip id when a blocker is active', /* P2-4 fold */)
 // P1-6 fold: dropped the "Tab / Shift+Tab cycles inside (focus trap)" assertion. Phase 1 relies
@@ -1124,13 +1162,21 @@ export function PublishDialog({ open, onClose }: PublishDialogProps): JSX.Elemen
   }, [open, onClose])
 
   useEffect((): void => {
+    // Codex round 2 PR #97 P1 fold: after handling terminal status, call
+    // publish.reset() so subsequent re-renders see status === 'idle' and the
+    // effect's body is a no-op — defense-in-depth on top of the ToastProvider
+    // memoization that already stabilizes `toast`. Without the reset, if any
+    // future refactor destabilizes `toast`, the effect re-runs while status
+    // is still 'success'/'error' and fires a fresh Toast per render.
     if (publish.status === 'success') {
       toast.show({ variant: 'success', message: `Published version ${publish.response?.version_id ?? ''}` })
+      publish.reset()
       onClose()
     } else if (publish.status === 'error') {
       toast.show({ variant: 'error', message: `Publish failed: ${publish.error?.message ?? 'unknown'}` })
+      publish.reset()
     }
-  }, [publish.status, publish.response, publish.error, onClose, toast])
+  }, [publish, onClose, toast])
 
   if (!open) { return null }
 
@@ -1536,6 +1582,9 @@ _Populate as Codex / subagent / maintainer / user findings land per round. Carry
 | 2 | 4.5a | Codex round 1 PR #97 | **P1** `composePublishInput` silently skipped corrupt workspace files; contradicted spec §10.3.1 which mandates publish refuses with `500 workspace-corrupt`. Curl could bypass the dialog and drop the staged corrupt slug. | `composePublishInput` now throws `workspace-corrupt` (with the failing slug + Zod issues in `details`) on any JSON-parse or `WorkspaceFile.parse()` failure. Test renamed from "skips corrupt; survivor publishes" → "rejects publish with workspace-corrupt when any workspace file is corrupt". `dispatch.ts` `STATUS_FOR_CODE` adds `workspace-corrupt → 500`. |
 | 2 | 4.5a | Codex round 1 PR #97 | **P1** Decision J1 claimed `PublishRequestMeta` schema scaffolding existed; it does not (`grep` returns 0 hits). Following the plan as written would leave Phase 1 publish POSTs without the spec §4.9 `Idempotency-Key` header. | Decision J1 rewritten to build the real client→server header path: `apiClient.publish()` MODIFY to inject `Idempotency-Key: ${crypto.randomUUID()}`; co-located test asserts header + UUID regex + freshness per call. Added apiClient + test to PR 4.5a file list (8/8 budget). New Task 4.5a-6 ships the client-side change before PR creation. |
 | 2 | 4.5c | Codex round 1 PR #97 | **P2** PublishDialog failed open while `health.value === null` — fast click could submit before health loaded. | Treat unknown health as disabled (`healthUnknown` short-circuit on top of the blocker chain); added loading affordance (`role="status"` + "Loading pre-publish checks…" / error message); added 2 dialog test cases asserting the disabled-during-loading + disabled-during-error semantics. |
+| 3 | 4.5b/4.5c | Codex round 2 PR #97 | **P1** `ToastProvider`'s inline `value={{ show: setCurrent }}` creates a new context object every render; `PublishDialog`'s effect with `toast` in deps would infinite-loop firing Toasts while `publish.status === 'success'` until React's max-update-depth fired. | (a) `ToastProvider` memoizes the context value via `useMemo`. (b) `PublishDialog` calls `publish.reset()` after handling terminal status so subsequent re-renders see `'idle'` and the effect body is a no-op (defense-in-depth). New tests assert context-value stability across re-renders + dialog fires Toast exactly once per terminal status. |
+| 3 | 4.5b | Codex round 2 PR #97 | **P2** Replacement Toast inherits prior Toast's `remainingRef.current` because `useRef(dismissAfterMs)` only captures initial-mount value; the same instance stays mounted across replacement. | `ToastProvider` keys `<Toast>` by a per-show counter (`keyRef.current += 1` inside `show`) so React remounts on replacement → fresh refs → correct timing. Added a "replacement remounts with fresh timing" test that first triggers a 100s Toast then replaces with a 1s Toast and asserts the 1s timing is honored. |
+| 3 | 4.5c | Codex round 2 PR #97 | **P2** PR 4.5c file count was 8 only by counting `useHealth.ts` + `useHealth.test.ts` as one budget item; AGENTS.md PR-sizing rule counts paths, not concerns — true count was 9 (over the ≤8 ceiling). | **Dropped Decision D3 entirely.** `useHealth.ts` is NOT extended in PR 4.5c. PublishDialog re-fetches health via `useEffect`-on-mount each time the modal opens (existing pattern). Dashboard health-card staleness post-publish is a documented Phase-1 limitation tagged for PR 4.6a Tier 5 polish. Decision D2 amended (no `invalidateHealth()` call). PR 4.5c is now 7 files. |
 
 ---
 
