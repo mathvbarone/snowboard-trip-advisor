@@ -286,6 +286,23 @@ function patchSuppliedFieldSourceFor(patch: ResortUpsertBody, path: MetricPath):
   return patch.live_signal?.field_sources?.[path] !== undefined
 }
 
+function patchSuppliedHashFor(patch: ResortUpsertBody, path: MetricPath): string | undefined {
+  if (DURABLE_PATHS.has(path)) {
+    return patch.resort?.field_sources?.[path]?.upstream_hash
+  }
+  return patch.live_signal?.field_sources?.[path]?.upstream_hash
+}
+
+function baseHashFor(
+  base: { readonly resort: Resort; readonly live: ResortLiveSignal | null },
+  path: MetricPath,
+): string | undefined {
+  if (DURABLE_PATHS.has(path)) {
+    return base.resort.field_sources[path]?.upstream_hash
+  }
+  return base.live?.field_sources[path]?.upstream_hash
+}
+
 function valuesEqual(a: unknown, b: unknown): boolean {
   if (Object.is(a, b)) {
     return true
@@ -327,6 +344,28 @@ function assertProvenancePairing(
           message: `fresh manual field_sources entry required in the same PUT body when value at "${path}" changes`,
         }],
       )
+    }
+
+    // Direction 1b (Codex round-7 P2): value changed AND patch supplied a
+    // field_sources entry, but the patch reused the base entry's
+    // `upstream_hash` (e.g., a buggy SPA / stale draft resending the prior
+    // manual provenance verbatim). Per Decision D12 every fresh manual edit
+    // generates a NEW random hash via crypto.getRandomValues, so an unchanged
+    // hash means stale provenance for the new value — same misattribution
+    // class as round-3/4. Cold-start (no base entry) is exempt — there's
+    // nothing to compare against.
+    if (valueChanged && patchSupplied) {
+      const patchHash = patchSuppliedHashFor(patch, path)
+      const baseEntryHash = baseHashFor(base, path)
+      if (patchHash !== undefined && baseEntryHash !== undefined && patchHash === baseEntryHash) {
+        throw new InvalidRequestError(
+          `value at metric path "${path}" changed but the patch reused the base entry's upstream_hash — fresh provenance (new upstream_hash from crypto.getRandomValues per Decision D12) is required for a fresh manual edit`,
+          [{
+            path: ['field_sources', path, 'upstream_hash'],
+            message: `upstream_hash must differ from the base entry to claim a fresh manual edit at "${path}"`,
+          }],
+        )
+      }
     }
 
     // Direction 2 (Codex round-6 P1): patch supplied a field_sources entry

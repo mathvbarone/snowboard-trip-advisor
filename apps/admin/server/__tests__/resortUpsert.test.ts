@@ -502,6 +502,56 @@ describe('resortUpsertHandler — reject paths', (): void => {
     expect(wf.resort.field_sources['slopes_km']?.upstream_hash).toBe('a'.repeat(64))
   })
 
+  it('rejects a value edit whose patch reuses the base entry upstream_hash (stale provenance) → InvalidRequestError (Codex round-7 P2)', async (): Promise<void> => {
+    // Two-step: first PUT pairs value+manual hash A (accepted). Second PUT
+    // changes the value AND resends the same hash A — would reattribute the
+    // new value to the prior PUT's observed_at/upstream_hash. Per D12 every
+    // fresh manual edit generates a new random hash, so unchanged hash means
+    // stale provenance.
+    await seedWorkspace(workspaceDir, 'kotelnica-bialczanska')
+    await seedPublished(publishedPath, 'kotelnica-bialczanska')
+    const reusedHash = UpstreamHash.parse('a'.repeat(64))
+    const manualEntry = {
+      source: 'manual' as const,
+      source_url: 'https://admin.local/manual',
+      observed_at: ISODateTimeString.parse('2026-04-29T10:00:00Z'),
+      fetched_at: ISODateTimeString.parse('2026-04-29T10:00:00Z'),
+      upstream_hash: reusedHash,
+      attribution_block: { en: 'First edit.' },
+    }
+    // Step 1: paired value + fresh manual hash — accepted.
+    await resortUpsertHandler(
+      {
+        params: { slug: KOTELNICA },
+        body: {
+          resort: { slopes_km: 100, field_sources: { slopes_km: manualEntry } },
+        },
+      },
+      { workspaceRoot: root },
+    )
+    // Step 2: value changes, patch RE-USES the same hash — must reject.
+    await expect(
+      resortUpsertHandler(
+        {
+          params: { slug: KOTELNICA },
+          body: {
+            resort: {
+              slopes_km: 200,
+              field_sources: { slopes_km: { ...manualEntry, attribution_block: { en: 'Stale.' } } },
+            },
+          },
+        },
+        { workspaceRoot: root },
+      ),
+    ).rejects.toMatchObject({ code: 'invalid-request' })
+    // On-disk: step 1's value (100) AND step 1's hash preserved.
+    const wf = WorkspaceFile.parse(
+      JSON.parse(await readFile(join(workspaceDir, 'kotelnica-bialczanska.json'), 'utf-8')),
+    )
+    expect(wf.resort.slopes_km).toBe(100)
+    expect(wf.resort.field_sources['slopes_km']?.upstream_hash).toBe(reusedHash)
+  })
+
   it('rejects a provenance-only patch (field_sources entry without paired value change) → InvalidRequestError (Codex round-6 P1)', async (): Promise<void> => {
     // Reverse of round-3/4: patch supplies a manual field_sources entry for
     // slopes_km but doesn't change the slopes_km value. Without this gate, the
