@@ -502,6 +502,42 @@ describe('resortUpsertHandler — reject paths', (): void => {
     expect(wf.resort.field_sources['slopes_km']?.upstream_hash).toBe('a'.repeat(64))
   })
 
+  it('rejects a provenance-only patch (field_sources entry without paired value change) → InvalidRequestError (Codex round-6 P1)', async (): Promise<void> => {
+    // Reverse of round-3/4: patch supplies a manual field_sources entry for
+    // slopes_km but doesn't change the slopes_km value. Without this gate, the
+    // workspace would re-attribute the existing slopes_km=8 to a manual
+    // entry the analyst didn't type — falsely-attributed published data.
+    // Phase-1 SPA pairs value+source per D12, so any provenance-only patch is
+    // a wire-protocol violation.
+    await seedWorkspace(workspaceDir, 'kotelnica-bialczanska')
+    await expect(
+      resortUpsertHandler(
+        {
+          params: { slug: KOTELNICA },
+          body: {
+            resort: {
+              field_sources: {
+                slopes_km: {
+                  source: 'manual',
+                  source_url: 'https://admin.local/manual',
+                  observed_at: ISODateTimeString.parse('2026-04-29T10:00:00Z'),
+                  fetched_at: ISODateTimeString.parse('2026-04-29T10:00:00Z'),
+                  upstream_hash: UpstreamHash.parse('e'.repeat(64)),
+                  attribution_block: { en: 'Sneaky.' },
+                },
+              },
+            },
+          },
+        },
+        { workspaceRoot: root },
+      ),
+    ).rejects.toMatchObject({ code: 'invalid-request' })
+    // On-disk file is byte-equal to the seed — no partial overwrite of provenance.
+    const onDisk = await readFile(join(workspaceDir, 'kotelnica-bialczanska.json'), 'utf-8')
+    const seedJson = readFileSync(join(SEED_FIXTURE_DIR, 'kotelnica-bialczanska.json'), 'utf-8')
+    expect(onDisk).toBe(seedJson)
+  })
+
   it('accepts a value edit when the patch carries a matching manual field_sources entry (positive control)', async (): Promise<void> => {
     // Mirrors the production SPA pattern (Decision D12): every value edit
     // ships paired with a fresh manual FieldSource. The handler accepts and

@@ -312,19 +312,36 @@ function assertProvenancePairing(
     if (afterValue === undefined) {
       continue
     }
-    if (valuesEqual(beforeValue, afterValue)) {
-      continue
-    }
-    // Codex round-4 P2 fold: check the PATCH supplied a fresh entry, not the
-    // merged source. Inspecting only `merged.field_sources[path].source`
-    // missed case (b) above (base already manual; merged inherits manual;
-    // observed_at / upstream_hash silently stale).
-    if (!patchSuppliedFieldSourceFor(patch, path)) {
+    const valueChanged = !valuesEqual(beforeValue, afterValue)
+    const patchSupplied = patchSuppliedFieldSourceFor(patch, path)
+
+    // Direction 1 (Codex round-3 P1 + round-4 P2): value changed without a
+    // patch-supplied field_sources entry — server would otherwise carry the
+    // base entry forward (claim upstream provenance for an analyst edit, OR
+    // claim the prior PUT's observed_at / upstream_hash for the new value).
+    if (valueChanged && !patchSupplied) {
       throw new InvalidRequestError(
         `value at metric path "${path}" changed but the patch did not supply a fresh manual field_sources entry — the merged file would carry stale provenance (observed_at / upstream_hash) for the new value`,
         [{
           path: ['field_sources', path],
           message: `fresh manual field_sources entry required in the same PUT body when value at "${path}" changes`,
+        }],
+      )
+    }
+
+    // Direction 2 (Codex round-6 P1): patch supplied a field_sources entry
+    // WITHOUT changing the corresponding value — would falsely re-attribute
+    // an unchanged value to a manual entry the analyst didn't actually type.
+    // Phase 1 has no "provenance-only correction" workflow; the SPA pairs
+    // value+source per Decision D12, so any provenance-only patch is a
+    // wire-protocol violation. (If a future correction-flow PR ever needs
+    // it, lift this gate behind an explicit feature flag.)
+    if (!valueChanged && patchSupplied) {
+      throw new InvalidRequestError(
+        `patch supplied a field_sources entry at metric path "${path}" without changing the corresponding value — would falsely re-attribute the existing value to a manual entry the analyst didn't type`,
+        [{
+          path: ['field_sources', path],
+          message: `field_sources entry at "${path}" requires a paired value change in the same PUT body (provenance-only patches are not a Phase-1 workflow per Decision D12)`,
         }],
       )
     }
