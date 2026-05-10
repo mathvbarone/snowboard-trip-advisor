@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { resolveWorkspaceRoot } from '../dispatch'
 import {
+  atomicWriteWorkspaceFile,
   ensureWorkspaceDir,
   readPublishedDocOrNull,
   readWorkspaceFileForSlug,
@@ -123,6 +124,58 @@ describe('readWorkspaceFileForSlug (PR 4.4a-2, spec §4.2 / §10.3.1)', (): void
       })
     await expect(readWorkspaceFileForSlug(workspaceDir, 'kotelnica-bialczanska'))
       .rejects.toThrow(/filename\/slug drift/)
+  })
+})
+
+describe('atomicWriteWorkspaceFile (PR 4.4c §B1, Tasks 3+4)', (): void => {
+  let workspaceDir: string
+
+  beforeEach(async (): Promise<void> => {
+    workspaceDir = await mkdtemp(join(tmpdir(), 'ws-atomic-test-'))
+  })
+
+  afterEach(async (): Promise<void> => {
+    await rm(workspaceDir, { recursive: true, force: true })
+  })
+
+  it('writes the body verbatim to the target path', async (): Promise<void> => {
+    const target = join(workspaceDir, 'kotelnica-bialczanska.json')
+    await atomicWriteWorkspaceFile(target, '{"slug":"x"}')
+    const written = await readFile(target, 'utf-8')
+    // atomicWriteText appends a trailing newline per its contract; assert
+    // both parts so the wrapper's pass-through-to-canonical-impl is pinned.
+    expect(written).toBe('{"slug":"x"}\n')
+  })
+
+  it('overwrites an existing target with the new content', async (): Promise<void> => {
+    const target = join(workspaceDir, 'overwrite.json')
+    await writeFile(target, '{"old":true}\n', 'utf-8')
+    await atomicWriteWorkspaceFile(target, '{"new":true}')
+    expect(await readFile(target, 'utf-8')).toBe('{"new":true}\n')
+  })
+
+  it('leaves no .tmp staging files in the target dir after success', async (): Promise<void> => {
+    const target = join(workspaceDir, 'no-leftover.json')
+    await atomicWriteWorkspaceFile(target, '{"a":1}')
+    const entries = await readdir(workspaceDir)
+    expect(entries.filter((e): boolean => e.includes('.tmp'))).toHaveLength(0)
+    expect(entries).toContain('no-leftover.json')
+  })
+
+  it('JSON serialization round-trip parity (per fold §8): write → read → parse → structural-equal to input', async (): Promise<void> => {
+    // PR 4.4c relies on the canonical 2-space format for FIRST-PUT-against-
+    // freshly-loaded-fixture parity — without this assertion, a future format
+    // drift (tab vs. space, indent depth) could mutate the on-disk byte
+    // sequence the FIRST time an analyst edits a previously-untouched fixture.
+    const seedJson = readFileSync(
+      join(resolveWorkspaceRoot(), 'tests/fixtures/admin-workspace/kotelnica-bialczanska.json'),
+      'utf-8',
+    )
+    const parsed = JSON.parse(seedJson) as unknown
+    const target = join(workspaceDir, 'roundtrip.json')
+    await atomicWriteWorkspaceFile(target, JSON.stringify(parsed, null, 2))
+    const reread = JSON.parse(await readFile(target, 'utf-8')) as unknown
+    expect(reread).toEqual(parsed)
   })
 })
 

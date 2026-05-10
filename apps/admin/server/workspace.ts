@@ -2,6 +2,7 @@ import { mkdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { PublishedDataset, WorkspaceFile } from '@snowboard-trip-advisor/schema'
+import { atomicWriteText } from '@snowboard-trip-advisor/schema/node'
 import type { z } from 'zod'
 
 // Phase 1 lazy-create per spec §10.9 — matches publishDataset.ts:30's pattern
@@ -88,6 +89,21 @@ export async function readWorkspaceFileForSlug(
     )
   }
   return parsed.data
+}
+
+// Per PR 4.4c §B1: thin pass-through to the canonical
+// atomicWriteText (publishDataset.ts:169) so the workspace write path uses
+// the same fsync→rename→fsync sequence the publish path proved out — no
+// drift on the macOS-APFS EBADF tolerance + tmp-cleanup branches. The
+// wrapper exists so workspace-write call sites read as
+// atomicWriteWorkspaceFile rather than the schema-level primitive — domain
+// naming + a stable seam if a workspace-specific behavior (e.g., dir create
+// on cold-start) ever needs to layer in.
+export async function atomicWriteWorkspaceFile(
+  targetPath: string,
+  body: string,
+): Promise<void> {
+  await atomicWriteText(targetPath, body)
 }
 
 export async function readPublishedDocOrNull(
