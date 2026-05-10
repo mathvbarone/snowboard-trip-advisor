@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -37,11 +37,42 @@ describe('dispatch (PR 4.1b §2.1, spec §10.1 + §7.6)', (): void => {
   })
 
   it('routes GET /api/resorts/:slug to resortDetailHandler with parsed slug', async (): Promise<void> => {
+    // Cold tmpdir has no workspace file and no published doc; the handler
+    // (real impl in PR 4.4a-2) throws NotFoundError → dispatch envelope 404.
     const r = await dispatch(
       { method: 'GET', pathname: '/api/resorts/kotelnica-bialczanska', search: '', body: undefined },
       { workspaceRoot },
     )
-    expect(r?.status).toBe(501)
+    expect(r?.status).toBe(404)
+    expect(r?.body).toMatchObject({ error: { code: 'not-found' } })
+  })
+
+  it('corrupt workspace file: dispatch envelope is 500 workspace-corrupt with .details (slug + Zod issues) passed through (Codex round-2/4 P2 fold)', async (): Promise<void> => {
+    // A valid-JSON-but-schema-invalid workspace file should cause
+    // resortDetailHandler to throw WorkspaceCorruptError; dispatch maps
+    // .code 'workspace-corrupt' → 500 via STATUS_FOR_CODE AND passes the
+    // .details payload (slug + Zod issues) through per spec §4.10.
+    //
+    // The dispatch.ts .details pass-through was originally scoped to
+    // PR 4.4c (Decision D8). Codex round-4 caught that the spec mandates
+    // the actionable payload for the editor's recovery UI; brought
+    // forward into PR 4.4a-2 so the workspace-corrupt envelope is
+    // spec-compliant from this PR onward.
+    const corruptDir = join(workspaceRoot, 'data', 'admin-workspace')
+    await mkdir(corruptDir, { recursive: true })
+    await writeFile(join(corruptDir, 'kotelnica-bialczanska.json'), JSON.stringify({ slug: 'kotelnica-bialczanska' }), 'utf8')
+
+    const r = await dispatch(
+      { method: 'GET', pathname: '/api/resorts/kotelnica-bialczanska', search: '', body: undefined },
+      { workspaceRoot },
+    )
+    expect(r?.status).toBe(500)
+    expect(r?.body).toMatchObject({ error: { code: 'workspace-corrupt' } })
+    const body = r?.body as { error: { code: string; message: string; details?: unknown } }
+    expect(body.error.details).toMatchObject({ slug: 'kotelnica-bialczanska' })
+    const details = body.error.details as { slug: string; issues: ReadonlyArray<{ message: string }> }
+    expect(details.issues.length).toBeGreaterThan(0)
+    expect(typeof details.issues[0]?.message).toBe('string')
   })
 
   it('routes PUT /api/resorts/:slug to resortUpsertHandler with parsed slug + body', async (): Promise<void> => {
