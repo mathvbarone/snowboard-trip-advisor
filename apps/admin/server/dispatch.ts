@@ -290,16 +290,24 @@ export async function dispatch(
         body: errorEnvelope('invalid-request', 'response validation failed', err.issues),
       }
     }
-    const code = (err as Error & { code?: string }).code
+    const errCoded = err as Error & { code?: string; details?: unknown }
+    const code = errCoded.code
     if (code !== undefined) {
       // Map.get returns undefined for any non-inserted key — including
       // prototype-chain probes like '__proto__' / 'constructor'. Subagent
       // round-1 P0-2 fold (Map replaces Record for prototype safety).
       const status = STATUS_FOR_CODE.get(code)
       if (status !== undefined) {
+        // Codex round-4 P2 fold (originally Decision D8 / scoped to PR
+        // 4.4c — brought forward to PR 4.4a-2 so the workspace-corrupt
+        // envelope is spec-compliant from this PR onward). Per spec
+        // §4.10, error envelopes MAY carry `.details` for actionable
+        // recovery payloads. WorkspaceCorruptError carries the failing
+        // slug + Zod issues; passing them through lets PR 4.4d's editor
+        // tell the analyst what to repair.
         return {
           status,
-          body: errorEnvelope(code, (err as Error).message),
+          body: errorEnvelope(code, errCoded.message, errCoded.details),
         }
       }
       // Unknown error code → fall through to 500 internal envelope below.

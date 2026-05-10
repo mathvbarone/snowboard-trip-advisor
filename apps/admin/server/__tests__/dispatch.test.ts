@@ -47,16 +47,17 @@ describe('dispatch (PR 4.1b §2.1, spec §10.1 + §7.6)', (): void => {
     expect(r?.body).toMatchObject({ error: { code: 'not-found' } })
   })
 
-  it('Codex P2 fold: corrupt workspace file propagates through dispatch as 500 workspace-corrupt (details deferred to PR 4.4c per Decision D8)', async (): Promise<void> => {
+  it('corrupt workspace file: dispatch envelope is 500 workspace-corrupt with .details (slug + Zod issues) passed through (Codex round-2/4 P2 fold)', async (): Promise<void> => {
     // A valid-JSON-but-schema-invalid workspace file should cause
-    // resortDetailHandler to throw WorkspaceCorruptError; dispatch must map
-    // .code 'workspace-corrupt' → 500 via STATUS_FOR_CODE.
+    // resortDetailHandler to throw WorkspaceCorruptError; dispatch maps
+    // .code 'workspace-corrupt' → 500 via STATUS_FOR_CODE AND passes the
+    // .details payload (slug + Zod issues) through per spec §4.10.
     //
-    // The .details payload (slug + Zod issues) is dormant in this PR — PR
-    // 4.4c modifies dispatch.ts to read .details and pass through the
-    // envelope (per Decision D8 / spec §4.10). This test pins the CURRENT
-    // behavior: { code, message } only. PR 4.4c's update will extend this
-    // assertion to include the details payload. Codex round-2 P2 fold.
+    // The dispatch.ts .details pass-through was originally scoped to
+    // PR 4.4c (Decision D8). Codex round-4 caught that the spec mandates
+    // the actionable payload for the editor's recovery UI; brought
+    // forward into PR 4.4a-2 so the workspace-corrupt envelope is
+    // spec-compliant from this PR onward.
     const corruptDir = join(workspaceRoot, 'data', 'admin-workspace')
     await mkdir(corruptDir, { recursive: true })
     await writeFile(join(corruptDir, 'kotelnica-bialczanska.json'), JSON.stringify({ slug: 'kotelnica-bialczanska' }), 'utf8')
@@ -67,11 +68,11 @@ describe('dispatch (PR 4.1b §2.1, spec §10.1 + §7.6)', (): void => {
     )
     expect(r?.status).toBe(500)
     expect(r?.body).toMatchObject({ error: { code: 'workspace-corrupt' } })
-    // Details pass-through is intentionally absent here per Decision D8
-    // (PR 4.4c lands the dispatch.ts modification). The error envelope must
-    // NOT carry .details until that PR.
     const body = r?.body as { error: { code: string; message: string; details?: unknown } }
-    expect(body.error.details).toBeUndefined()
+    expect(body.error.details).toMatchObject({ slug: 'kotelnica-bialczanska' })
+    const details = body.error.details as { slug: string; issues: ReadonlyArray<{ message: string }> }
+    expect(details.issues.length).toBeGreaterThan(0)
+    expect(typeof details.issues[0]?.message).toBe('string')
   })
 
   it('routes PUT /api/resorts/:slug to resortUpsertHandler with parsed slug + body', async (): Promise<void> => {
