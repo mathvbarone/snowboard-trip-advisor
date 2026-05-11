@@ -1538,7 +1538,7 @@ export function Shell({ children }: { children: ReactNode }): JSX.Element {
 
 **Subagent review trigger:** **NO** (no CODEOWNERS-protected paths; integration test is in `tests/integration/**`).
 
-**File budget:** 7 files (within ≤8 budget; Codex round 10 PR #97 P2 fold added Shell.tsx MODIFY for the Sidebar Publishes-link href fix).
+**File budget:** 8 files (at ≤8 budget; Codex round 24 PR #97 P2 fold added `shell.test.tsx` MODIFY — the Shell.tsx href change breaks the existing assertion).
 
 **Files (tests first):**
 
@@ -1548,7 +1548,8 @@ export function Shell({ children }: { children: ReactNode }): JSX.Element {
 4. **Modify** `apps/admin/src/lib/urlState.test.ts` — round-trip case for `?route=publishes&page=2`.
 5. **Modify** `apps/admin/src/App.tsx` — mount `<PublishHistory />` on `publishes` route.
 6. **Modify** `apps/admin/src/views/Shell.tsx` — change the SIDEBAR_ITEMS `Publishes` entry's `href` from `/publishes` to `/?route=publishes` so clicking the sidebar link reaches the new route via urlState's query-string parser (Codex round 10 PR #97 P2 fold). **Pre-existing Sidebar pathname-vs-query mismatch for the other links (`/`, `/resorts`) stays Tier 5 polish per the post-Tier-2 handoff** — fixing all of them is out of scope for this PR.
-7. **Create** `tests/integration/apps/admin/publish-flow.test.tsx` — bridge-tier end-to-end (per Decision I1). Add an assertion that clicking the Sidebar "Publishes" link navigates to `?route=publishes` and renders `<PublishHistory />`.
+7. **Modify** `tests/integration/apps/admin/shell.test.tsx` — update the assertion at line 60 from `toHaveAttribute('href', '/publishes')` to `toHaveAttribute('href', '/?route=publishes')` (Codex round 24 PR #97 P2 fold — the Shell.tsx href change would otherwise break this existing test under `npm run qa`).
+8. **Create** `tests/integration/apps/admin/publish-flow.test.tsx` — bridge-tier end-to-end (per Decision I1). Add an assertion that clicking the Sidebar "Publishes" link navigates to `?route=publishes` and renders `<PublishHistory />`.
 
 #### Reference — `useListPublishes.ts` impl
 
@@ -1623,11 +1624,19 @@ export function useListPublishes(q: ListPublishesQuery): UseListPublishesResult 
 
     let p = inFlight.get(key)
     if (p === undefined) {
-      p = apiClient.listPublishes(q)
-      inFlight.set(key, p)
-      p.finally((): void => {
+      // Codex round 24 PR #97 P2 fold: chain `.finally(...)` INTO the stored
+      // promise so a rejection from apiClient.listPublishes is observed by
+      // the `p.then(_, rejectHandler)` attached below. A standalone
+      // `p.finally(...)` would create a second promise that rejects with the
+      // same error and is NEVER caught → unhandled rejection. Mirrors
+      // `useResortList.ts:58-61`'s chain shape.
+      // Codex round 10 PR #97 P2 fold preserved via the lexical `p` capture:
+      // identity-guard the delete so a stale settle doesn't evict a fresh
+      // promise placed in this slot by invalidate + onInvalidate.
+      p = apiClient.listPublishes(q).finally((): void => {
         if (inFlight.get(key) === p) { inFlight.delete(key) }
       })
+      inFlight.set(key, p)
     }
     p.then((r): void => {
       // Generation guard: if invalidate bumped the generation while this
@@ -1646,11 +1655,12 @@ export function useListPublishes(q: ListPublishesQuery): UseListPublishesResult 
       // bumpGeneration already happened in invalidateListPublishes (before
       // subscribers fire). Capture the NEW generation for this fresh fetch.
       const myGen2 = currentGeneration(key)
-      const p2 = apiClient.listPublishes(q)
-      inFlight.set(key, p2)
-      p2.finally((): void => {
+      // Codex round 24 PR #97 P2 fold: chain finally into the stored p2
+      // (avoid the unhandled-rejection trap a standalone .finally would create).
+      const p2: Promise<ListPublishesResponse> = apiClient.listPublishes(q).finally((): void => {
         if (inFlight.get(key) === p2) { inFlight.delete(key) }
       })
+      inFlight.set(key, p2)
       p2.then((r): void => {
         if (cancelled || currentGeneration(key) !== myGen2) { return }
         setValue(r); setError(null)
@@ -2039,6 +2049,8 @@ _Populate as Codex / subagent / maintainer / user findings land per round. Carry
 | 23 | 4.5a | Codex round 22 PR #97 | **P2** Hard-coded `manifest.generated_by: 'admin-workspace'` collapsed every archive's `published_by` to one value, losing per-host publish provenance. Parent spec §4.5.1 requires `generated_by = "<cli-identifier> host=<sha256(hostname)>"`. | Added `computeGeneratedBy()` helper that hashes `os.hostname()` with sha256 and formats as `admin-workspace host=<hex>`. `publish.ts` calls it instead of hard-coding the value. Imports `node:crypto` `createHash` + `node:os` `hostname` added. |
 | 23 | 4.5b | Codex round 22 PR #97 | **P2** Toast had no CSS asset/import. `Toast.tsx` assigns `sta-toast` classes but with no companion CSS, Toast renders in normal document flow → not visible as a fixed top-right notification (the single-slot promise from Decisions C1/C2 fails). | Added `Toast.css` to PR 4.5b's file list (now 7/8 budget). Mirrors `Drawer.css` pattern: scoped `.sta-toast` styles with `position: fixed`, top-right corner, z-index, padding, design tokens. `Toast.tsx` imports `./Toast.css` at top (matches `Drawer.tsx:12`). |
 | 24 | 4.5b | Codex round 23 PR #97 | **P2** `ToastProvider` passed an inline arrow `onDismiss={(): void => { setCurrent(null) }}` to `<Toast>`. Toast's timer `useEffect` depends on `onDismiss`; every ambient parent re-render (e.g., URL state changes immediately after a publish) gave `onDismiss` a new identity, triggered the effect cleanup (clearTimeout) + restart with `remainingRef.current` still at the full duration → auto-dismiss window kept resetting; Toast effectively never auto-dismissed if anything re-rendered nearby. | Wrapped the dismiss callback in `useCallback(..., [])` (setCurrent is stable) so its identity is stable across renders. Added a regression test that fires a Toast, then re-renders the ToastProvider parent 4 times during the 5s window (advancing fake timers each time) and asserts the Toast auto-dismisses at the configured 5s mark, NOT later. |
+| 25 | 4.5d | Codex round 24 PR #97 | **P2** Changing `Shell.tsx`'s SIDEBAR_ITEMS Publishes `href` to `/?route=publishes` would break the existing `tests/integration/apps/admin/shell.test.tsx:60` assertion (`toHaveAttribute('href', '/publishes')`). PR 4.5d's file list didn't include the test → `npm run qa` would fail on merge. | Added `tests/integration/apps/admin/shell.test.tsx` MODIFY to PR 4.5d's file list (now 8/8 budget); update the assertion from `'/publishes'` → `'/?route=publishes'` alongside the Shell.tsx change. |
+| 25 | 4.5c | Codex round 24 PR #97 | **P2** `useListPublishes`'s standalone `p.finally(...)` chained off the stored promise created a second promise that rejects with the same error AND is never caught. The `p.then(_, rejectHandler)` attached the rejection handler to the ORIGINAL promise, not to the `.finally`-chained one, so a fetch rejection produces an unhandled rejection. | Chained `.finally(...)` INTO the stored promise (mirrors `useResortList.ts:58-61` shape): `p = apiClient.listPublishes(q).finally((): void => { if (inFlight.get(key) === p) inFlight.delete(key) })`. The stored `p` is now the .finally-chained promise; `p.then(_, rejectHandler)` attaches to the same one that rejects. Same fix for the `onInvalidate` path (`p2`). |
 
 ---
 
