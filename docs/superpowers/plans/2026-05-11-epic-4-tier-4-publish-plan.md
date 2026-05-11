@@ -684,16 +684,36 @@ it('publish() generates a fresh Idempotency-Key per call', async (): Promise<voi
 - [ ] **Step 3: Modify `apiClient.publish()` body.**
 
 ```ts
+// Codex round 12 PR #97 P2 fold: the helper at apps/admin/src/lib/apiClient.ts:27
+// is `request<T>(method, path, body, parser)` — there is NO `postJson` symbol.
+// Extend `request()` with an optional 5th `extraHeaders` argument; `publish()`
+// passes the Idempotency-Key through it.
+
+// In the `request()` helper signature:
+async function request<T>(
+  method: string,
+  path: string,
+  body: unknown,
+  parser: (raw: unknown) => T,
+  extraHeaders?: Record<string, string>,  // ← new
+): Promise<T> {
+  const init: RequestInit = {
+    method,
+    headers: { 'Content-Type': 'application/json', ...(extraHeaders ?? {}) },
+  }
+  // ... rest unchanged ...
+}
+
+// In the apiClient.publish() body:
 publish: (): Promise<PublishResponse> =>
-  postJson(
+  request(
+    'POST',
     '/api/resorts/__all__/publish',
-    PublishResponse,
-    { confirm: true },
-    { headers: { 'Idempotency-Key': crypto.randomUUID() } },  // Decision J1.
+    { confirm: true } satisfies PublishBody,
+    (raw): PublishResponse => PublishResponse.parse(raw),
+    { 'Idempotency-Key': crypto.randomUUID() },  // Decision J1.
   ),
 ```
-
-(If `postJson` does not accept a `headers` opt, extend it minimally — same `fetch` plumbing, just merge headers.)
 
 - [ ] **Step 4: Run — expect PASS.**
 
@@ -1519,6 +1539,22 @@ export type UseListPublishesResult =
 // second mount AFTER the first resolves triggers a fresh fetch.
 const inFlight = new Map<string, Promise<ListPublishesResponse>>()
 
+// Per-key generation counter for stale-request detection. Codex round 12 PR #97
+// P1 fold replaces the previous identity-via-inFlight check (which failed in
+// the normal happy path because `.finally` removes the inFlight entry BEFORE
+// `.then` runs). Generations only increase via invalidate; capture-at-fetch +
+// compare-at-settle still detects the stale case, but cache cleanup no longer
+// affects state-write guards.
+const generations = new Map<string, number>()
+function bumpGeneration(key: string): number {
+  const g = (generations.get(key) ?? 0) + 1
+  generations.set(key, g)
+  return g
+}
+function currentGeneration(key: string): number {
+  return generations.get(key) ?? 0
+}
+
 // Recursive-key-sorted JSON for stable cache keys across caller construction order
 // (per useResortList.ts's documented "queryKey deeply sorts nested object keys" invariant).
 function keyOf(q: ListPublishesQuery): string {
@@ -1543,28 +1579,27 @@ export function useListPublishes(q: ListPublishesQuery): UseListPublishesResult 
     // user doesn't see stale rows from the previous page while the new fetch
     // is in flight. Mirrors useResortList's reset-on-effect-entry pattern.
     setValue(null); setError(null)
+
+    // Codex round 12 PR #97 P1 fold: capture the active generation at fetch
+    // start; compare at settle. Cache cleanup (.finally) no longer affects
+    // state-write guards because generation is independent of inFlight presence.
+    const myGen = currentGeneration(key)
+
     let p = inFlight.get(key)
     if (p === undefined) {
-      p = apiClient.listPublishes(q).finally((): void => {
-        // Codex round 10 PR #97 P2 fold: identity-guard the inFlight delete.
-        // After invalidateListPublishes() clears the Map and a new promise
-        // takes this slot, we must NOT delete the new one when the stale
-        // promise settles.
+      p = apiClient.listPublishes(q)
+      inFlight.set(key, p)
+      p.finally((): void => {
         if (inFlight.get(key) === p) { inFlight.delete(key) }
       })
-      inFlight.set(key, p)
     }
-    const currentP = p
     p.then((r): void => {
-      // Codex round 10 PR #97 P2 fold: stale-request identity guard
-      // (mirrors useResortDetail.ts:94 `cachedPromises.get(slug) === next`).
-      // If invalidate kicked a fresh fetch while this older one was in
-      // flight, the older response MUST NOT overwrite component state with
-      // stale data. Guard via both `cancelled` (unmount) and identity check.
-      if (cancelled || inFlight.get(key) !== currentP) { return }
+      // Generation guard: if invalidate bumped the generation while this
+      // request was in flight, our captured myGen is now stale → skip write.
+      if (cancelled || currentGeneration(key) !== myGen) { return }
       setValue(r); setError(null)
     }, (e: unknown): void => {
-      if (cancelled || inFlight.get(key) !== currentP) { return }
+      if (cancelled || currentGeneration(key) !== myGen) { return }
       setError(e instanceof Error ? e : new Error(String(e))); setValue(null)
     })
 
@@ -1572,15 +1607,19 @@ export function useListPublishes(q: ListPublishesQuery): UseListPublishesResult 
     function onInvalidate(): void {
       if (cancelled) { return }
       setValue(null); setError(null)
-      const p2 = apiClient.listPublishes(q).finally((): void => {
+      // bumpGeneration already happened in invalidateListPublishes (before
+      // subscribers fire). Capture the NEW generation for this fresh fetch.
+      const myGen2 = currentGeneration(key)
+      const p2 = apiClient.listPublishes(q)
+      inFlight.set(key, p2)
+      p2.finally((): void => {
         if (inFlight.get(key) === p2) { inFlight.delete(key) }
       })
-      inFlight.set(key, p2)
       p2.then((r): void => {
-        if (cancelled || inFlight.get(key) !== p2) { return }
+        if (cancelled || currentGeneration(key) !== myGen2) { return }
         setValue(r); setError(null)
       }, (e: unknown): void => {
-        if (cancelled || inFlight.get(key) !== p2) { return }
+        if (cancelled || currentGeneration(key) !== myGen2) { return }
         setError(e instanceof Error ? e : new Error(String(e))); setValue(null)
       })
     }
@@ -1599,6 +1638,11 @@ export function useListPublishes(q: ListPublishesQuery): UseListPublishesResult 
 
 // usePublish.ts calls this on successful publish so the PublishHistory view re-fetches.
 export function invalidateListPublishes(): void {
+  // Bump generation for every known key BEFORE clearing inFlight so any
+  // in-flight promise's eventual .then sees the generation mismatch and
+  // skips its setValue. Subscribers then fire onInvalidate which captures
+  // the new generation for the fresh fetch.
+  for (const key of subscribers.keys()) { bumpGeneration(key) }
   inFlight.clear()
   for (const set of subscribers.values()) {
     for (const cb of set) { cb() }
@@ -1608,6 +1652,7 @@ export function invalidateListPublishes(): void {
 export function __resetForTests(): void {
   inFlight.clear()
   subscribers.clear()
+  generations.clear()
 }
 ```
 
@@ -1903,6 +1948,8 @@ _Populate as Codex / subagent / maintainer / user findings land per round. Carry
 | 11 | 4.5d | Codex round 10 PR #97 | **P2** `Shell.tsx`'s SIDEBAR_ITEMS Publishes link still pointed at the pathname `/publishes`, but urlState is query-string-driven (`?route=publishes`). Clicking the sidebar Publishes link would navigate to `/publishes` with no `route` query → `parseURL` falls back to dashboard → PublishHistory never mounts via sidebar nav. | Added `apps/admin/src/views/Shell.tsx` MODIFY to PR 4.5d's file list (now 7/8 budget). Change is one line: `href: '/publishes'` → `href: '/?route=publishes'` for the Publishes item only. Other sidebar items keep their pathname-form hrefs — fixing the full Sidebar pathname-vs-query mismatch stays **Tier 5 polish per the post-Tier-2 handoff** as previously documented (out of scope here). publish-flow.test.tsx gains a sidebar-click assertion that the Publishes link routes correctly. |
 | 12 | 4.5c | Codex round 11 PR #97 | **P2** `useListPublishes` did not reset to loading on query-key change — user would see the prior page's rows + stale pagination state during the new-page fetch window. `useResortList` resets to loading at the start of its effect for this exact case. | Added `setValue(null); setError(null)` at the top of the `useEffect` body (before in-flight lookup). Added a test case asserting that rerendering with a new query key shows `{ value: null, error: null }` during the fetch window. |
 | 12 | 4.5c | Codex round 11 PR #97 | **P2** PublishDialog test instruction still asserted `aria-disabled="true"` on the Confirm button, but the round-5 fold dropped `aria-disabled` from PublishDialog in favor of the native `disabled` attribute (Button only forwards native disabled + the aria-describedby prop added in Task 4.5b-3). Following the test instruction literally would fail despite the impl being correct. | Updated the test instruction to assert via native `disabled` (`screen.getByRole('button', { name: /Confirm/ }).toBeDisabled()`); comment explains the prop history. |
+| 13 | 4.5c | Codex round 12 PR #97 | **P1** Round-10 stale-request identity-guard (`inFlight.get(key) === currentP`) had a fatal flaw: the `.finally` removes the inFlight entry BEFORE the `.then` runs in the happy path → state never sets → view stuck in loading forever. | Replaced inFlight-identity guard with a per-key **generation counter**. `invalidateListPublishes()` bumps the generation for every known key; useEffect captures the active generation at fetch start; `.then` writes state only if `currentGeneration(key) === myGen`. Cache cleanup (inFlight delete in `.finally`) is now independent of state-write guards — fixes the happy-path bug while preserving the stale-request guarantee. Test outline updated to match the new contract. |
+| 13 | 4.5a | Codex round 12 PR #97 | **P2** Task 4.5a-6's impl snippet referenced `postJson` — no such helper exists in `apps/admin/src/lib/apiClient.ts`. The actual helper is `request<T>(method, path, body, parser)` at line 27. | Rewrote the snippet to extend `request()` signature with an optional `extraHeaders?: Record<string, string>` 5th argument and pass `{ 'Idempotency-Key': crypto.randomUUID() }` through that. `apiClient.publish()` continues to use `request` (matching the rest of the apiClient's call style). |
 
 ---
 
