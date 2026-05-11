@@ -1647,9 +1647,12 @@ import { join } from 'node:path'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
-import { server } from '../../../apps/admin/src/mocks/server'
-import { bridgeHandlers } from '../../../apps/admin/src/mocks/realHandlers'
-import { App } from '../../../apps/admin/src/App'
+// Codex round 7 PR #97 P2 fold: 4 `..` segments to reach repo root from
+// tests/integration/apps/admin/ (matches existing tests like
+// resort-editor-write.test.tsx:13). App is a default export per App.tsx:9.
+import { server } from '../../../../apps/admin/src/mocks/server'
+import { bridgeHandlers } from '../../../../apps/admin/src/mocks/realHandlers'
+import App from '../../../../apps/admin/src/App'
 
 describe('publish flow — bridge tier', (): void => {
   let workspaceRoot: string
@@ -1764,6 +1767,7 @@ _Populate as Codex / subagent / maintainer / user findings land per round. Carry
 | 6 | 4.5b | Codex round 5 PR #97 | **P2** DS `Button` only declared `aria-label` + `aria-pressed` props (`packages/design-system/src/components/Button.tsx:21-34`). PR 4.5c's PublishDialog passes `aria-describedby` (and `aria-disabled`). Plan would fail typecheck. | Added Task 4.5b-3: extend `ButtonProps` with `aria-describedby?: string` (the `aria-disabled` prop dropped from PublishDialog — `disabled` covers the same AT semantic). PR 4.5b file count now 6 (well under ≤8). |
 | 7 | 4.5a | Codex round 6 PR #97 | **P2** `composePublishInput` skipped workspace `live_signal: null` entries; the merge then fell back to published live_signal for that slug — silently resurrecting data the analyst explicitly cleared via the upsert handler. | Track `workspaceSlugsWithEntry: Set<string>` separately from the value `Map`. Merge logic: if slug ∈ set → use workspace's value (which may be `null` → omit); else → fall back to published. Added a test case asserting that workspace null + published-non-null yields an empty `live_signals` array in the archived snapshot. |
 | 7 | 4.5a | Codex round 6 PR #97 | **P2** Plan called `deps.now()` but `HandlerDeps` (`apps/admin/server/listResorts.ts:16-18`) only contains `workspaceRoot`; `dispatch()` passes only `{ workspaceRoot }`. Existing handlers (`listResorts.ts:57`, `health.ts:63`) use `Date.now()` / `new Date()` directly. Plan as-written would fail typecheck. | Switched to `new Date()` directly inside the handler (matches existing pattern). Tests now use `vi.setSystemTime()` for deterministic clock (Vitest convention) instead of injecting a `now` dep. |
+| 8 | 4.5d | Codex round 7 PR #97 | **P2** `publish-flow.test.tsx` integration test imports used `../../../apps/admin/...` (3 segments — resolves to `tests/apps/admin/`, not repo-root `apps/admin/`); existing tests in the same directory (`resort-editor-write.test.tsx:13`, `resort-editor-read.test.tsx:20`, `shell.test.tsx:11`) use **4** segments. Also imported `{ App }` (named) but `apps/admin/src/App.tsx:9` declares `export default function App()`. Plan as-written would fail module resolution. | Corrected to `../../../../apps/admin/...` (4 segments) + `import App from '...'` (default). Comment cites the existing-test reference paths so an executing agent can verify. |
 
 ---
 
