@@ -167,7 +167,7 @@ describe('PublishDialog (PR 4.5c)', (): void => {
     })
   })
 
-  it('Confirm DISABLED when health fetch errors; shows error message', async (): Promise<void> => {
+  it('Confirm DISABLED when health fetch errors; shows error message + role="status" on blocker (shared with loading branch)', async (): Promise<void> => {
     server.use(
       http.get('/api/health', (): Response =>
         HttpResponse.json(
@@ -182,6 +182,12 @@ describe('PublishDialog (PR 4.5c)', (): void => {
       const blocker = document.getElementById('publish-dialog-blocker')
       expect(blocker?.textContent).toMatch(/Could not load health: health-down/)
     })
+    const blocker = document.getElementById('publish-dialog-blocker')
+    // Both the loading sub-case and the error sub-case live under
+    // `healthUnknown` (health.value === null) and share the role="status"
+    // <p>; pin the contract so a future split that drops the role on the
+    // error sub-case fails the test.
+    expect(blocker).toHaveAttribute('role', 'status')
     expect(confirmButton).toBeDisabled()
     expect(confirmButton).toHaveAttribute('aria-describedby', 'publish-dialog-blocker')
   })
