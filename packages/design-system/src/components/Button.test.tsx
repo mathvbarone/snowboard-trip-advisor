@@ -95,6 +95,22 @@ describe('Button', (): void => {
     )
   })
 
+  it('forwards aria-describedby to the rendered <button> (PR 4.5c PublishDialog consumer per Decision F1)', (): void => {
+    // PR 4.5b adds `aria-describedby` so PR 4.5c's PublishDialog can wire the
+    // Publish button to its blocker-tooltip description element. The native
+    // `disabled` attribute conveys disabled state to AT on its own; we do
+    // NOT add a parallel `aria-disabled` prop (handover anti-pattern).
+    render(
+      <Button onClick={(): void => undefined} aria-describedby="publish-blocker-tip">
+        Publish
+      </Button>,
+    )
+    expect(screen.getByRole('button', { name: 'Publish' })).toHaveAttribute(
+      'aria-describedby',
+      'publish-blocker-tip',
+    )
+  })
+
   it('passes through data-* attributes (e.g. data-detail-trigger per spec §5.5)', (): void => {
     // Mirrors IconButton's data-* pass-through. apps/public's ResortCard
     // attaches `data-detail-trigger=<slug>` to its "View details" Button so
