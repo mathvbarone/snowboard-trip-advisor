@@ -16,7 +16,7 @@
     "@radix-ui/react-dismissable-layer": "^1.1.5",
     "@radix-ui/react-focus-scope": "^1.1.2",
     "@radix-ui/react-tooltip": "^1.1.8",
-    "react": "^19.0.0"
+    "react": "^19.2.6"
   },
   "devDependencies": {
     "@types/jest-axe": "^3.5.9",
