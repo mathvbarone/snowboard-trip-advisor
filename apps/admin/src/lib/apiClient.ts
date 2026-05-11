@@ -29,8 +29,17 @@ async function request<T>(
   path: string,
   body: unknown,
   parser: (raw: unknown) => T,
+  // Round-12 P2 fold (Decision J1): optional 5th arg lets `publish()` inject
+  // an `Idempotency-Key` header per spec §4.9 invariant 5 (Phase 1 honors;
+  // Phase 2 enforces). Server-side header plumbing lands when the Hono
+  // service swap adds `DispatchInput.headers`; until then the dev server
+  // simply ignores unknown headers.
+  extraHeaders?: Record<string, string>,
 ): Promise<T> {
-  const init: RequestInit = { method, headers: { 'Content-Type': 'application/json' } }
+  const init: RequestInit = {
+    method,
+    headers: { 'Content-Type': 'application/json', ...(extraHeaders ?? {}) },
+  }
   if (body !== undefined) {
     init.body = JSON.stringify(body)
   }
@@ -100,6 +109,11 @@ export const apiClient = {
       '/api/resorts/__all__/publish',
       { confirm: true } satisfies PublishBody,
       (raw): PublishResponse => PublishResponse.parse(raw),
+      // Decision J1: fresh UUID per call (crypto.randomUUID is available in
+      // both the Vite dev runtime and the Vitest jsdom env). Phase 1 server
+      // ignores the header (DispatchInput has no `headers` field); Phase 2's
+      // Hono service swap will plumb it through for real dedupe.
+      { 'Idempotency-Key': crypto.randomUUID() },
     ),
   listPublishes: (q: ListPublishesQuery): Promise<ListPublishesResponse> =>
     request(

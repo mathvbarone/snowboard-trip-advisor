@@ -115,7 +115,13 @@ describe('dispatch (PR 4.1b §2.1, spec §10.1 + §7.6)', (): void => {
     expect(r?.body).toMatchObject({ error: { code: 'invalid-request' } })
   })
 
-  it('routes POST /api/resorts/__all__/publish (Phase-1 sentinel union accepted)', async (): Promise<void> => {
+  it('routes POST /api/resorts/__all__/publish → real publishHandler (PR 4.5a; cold workspace → 400 publish-validation-failed via dataset_empty)', async (): Promise<void> => {
+    // The PR 4.5a publishHandler composes workspace ∪ published and delegates
+    // to publishDataset(); a cold tmpdir yields 0 resorts → validatePublished
+    // Dataset emits the `dataset_empty` issue → 400 publish-validation-failed.
+    // Per-handler semantics (workspace ∪ published merge, on-disk archive
+    // write, manifest fingerprint) are pinned by publish.test.ts; this case
+    // only proves dispatch routes to the real handler.
     const r = await dispatch(
       {
         method: 'POST',
@@ -125,10 +131,14 @@ describe('dispatch (PR 4.1b §2.1, spec §10.1 + §7.6)', (): void => {
       },
       { workspaceRoot },
     )
-    expect(r?.status).toBe(501)  // STUB; real publish handler lands in PR 4.5a
+    expect(r?.status).toBe(400)
+    expect(r?.body).toMatchObject({ error: { code: 'publish-validation-failed' } })
   })
 
-  it('routes POST /api/resorts/:slug/publish for valid named slug too (forward-compat for Phase 2)', async (): Promise<void> => {
+  it('routes POST /api/resorts/:slug/publish (non-__all__) → 400 invalid-request (per-slug is Phase 2)', async (): Promise<void> => {
+    // PR 4.5a publishHandler enforces Decision B2: non-`__all__` slugs are
+    // refused with the `invalid-request` envelope so a curl bypass of the
+    // dialog cannot publish a single resort while Phase 1 is all-or-nothing.
     const r = await dispatch(
       {
         method: 'POST',
@@ -138,7 +148,8 @@ describe('dispatch (PR 4.1b §2.1, spec §10.1 + §7.6)', (): void => {
       },
       { workspaceRoot },
     )
-    expect(r?.status).toBe(501)
+    expect(r?.status).toBe(400)
+    expect(r?.body).toMatchObject({ error: { code: 'invalid-request' } })
   })
 
   it('returns 400 on POST publish with body { confirm: false } (literal(true) rejects)', async (): Promise<void> => {
@@ -162,12 +173,36 @@ describe('dispatch (PR 4.1b §2.1, spec §10.1 + §7.6)', (): void => {
     expect(r?.status).toBe(200)
   })
 
-  it('routes GET /api/publishes to listPublishesHandler (501 stub)', async (): Promise<void> => {
+  it('routes GET /api/publishes → real listPublishesHandler (PR 4.5a; empty history → 200 with empty items)', async (): Promise<void> => {
+    // Cold tmpdir → no history dir → listPublishesHandler returns the
+    // empty-list shape per its ENOENT branch (round-13 P2 fold). Per-handler
+    // pagination / sort semantics live in listPublishes.test.ts; this case
+    // pins the dispatch wiring (route → real handler → 200 envelope).
     const r = await dispatch(
       { method: 'GET', pathname: '/api/publishes', search: '', body: undefined },
       { workspaceRoot },
     )
-    expect(r?.status).toBe(501)
+    expect(r?.status).toBe(200)
+    expect(r?.body).toEqual({ items: [], page: { offset: 0, limit: 20, total: 0 } })
+  })
+
+  it('routes GET /api/publishes?page={"offset":5,"limit":10} → pagination honored through JSON-encoded query', async (): Promise<void> => {
+    // Round-8 P2 fold: apiClient.serializeQuery JSON-stringifies nested
+    // query values as a single top-level param (apiClient.ts:64-73). The
+    // `?page.offset=5&page.limit=10` shape would be ignored by
+    // ListPublishesQuery.parse() — assert the JSON-encoded format actually
+    // round-trips through the dispatcher's parseQueryString.
+    const r = await dispatch(
+      {
+        method: 'GET',
+        pathname: '/api/publishes',
+        search: '?page=' + encodeURIComponent('{"offset":5,"limit":10}'),
+        body: undefined,
+      },
+      { workspaceRoot },
+    )
+    expect(r?.status).toBe(200)
+    expect(r?.body).toEqual({ items: [], page: { offset: 5, limit: 10, total: 0 } })
   })
 
   it('passes workspaceRoot through to handler deps (verified via injected route)', async (): Promise<void> => {
