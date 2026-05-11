@@ -325,7 +325,16 @@ async function composePublishInput(workspaceRoot: string): Promise<ComposeResult
     const doc = JSON.parse(raw) as { resorts?: Resort[]; live_signals?: ResortLiveSignal[] }
     publishedResorts = doc.resorts ?? []
     publishedLive = doc.live_signals ?? []
-  } catch { /* missing published doc — workspace-only publish per §10.9. */ }
+  } catch (e) {
+    // Codex round 13 PR #97 P2 fold: only ENOENT (missing file) is the cold-
+    // start case per spec §10.9; other filesystem errors (EACCES, EIO) must
+    // propagate so we don't silently drop published-only resorts from a new
+    // current.v1.json. Mirrors the existing health.ts / listResorts.ts pattern
+    // which rethrow non-ENOENT failures.
+    const code = (e as NodeJS.ErrnoException).code
+    if (code !== 'ENOENT') { throw e }
+    // ENOENT: leave publishedResorts/publishedLive as [] (cold start per §10.9).
+  }
 
   // Merge resorts: workspace overrides per slug; published-only kept.
   const mergedResorts: Resort[] = []
@@ -559,7 +568,15 @@ export async function listPublishesHandler(
   let entries: string[]
   try {
     entries = await readdir(historyDir)
-  } catch { entries = [] }
+  } catch (e) {
+    // Codex round 13 PR #97 P2 fold: only ENOENT (directory doesn't exist =
+    // no publishes yet, cold-start) yields empty; other errors (EACCES, EIO,
+    // non-directory at path) must propagate so the operator sees a 500 with
+    // the failing operation instead of a misleading empty history.
+    const code = (e as NodeJS.ErrnoException).code
+    if (code !== 'ENOENT') { throw e }
+    entries = []
+  }
 
   // Build version metadata; sort by counter desc (the lock-allocated counter IS
   // the canonical newest-first ordering per `publishDataset.ts:74-86`).
@@ -1950,6 +1967,8 @@ _Populate as Codex / subagent / maintainer / user findings land per round. Carry
 | 12 | 4.5c | Codex round 11 PR #97 | **P2** PublishDialog test instruction still asserted `aria-disabled="true"` on the Confirm button, but the round-5 fold dropped `aria-disabled` from PublishDialog in favor of the native `disabled` attribute (Button only forwards native disabled + the aria-describedby prop added in Task 4.5b-3). Following the test instruction literally would fail despite the impl being correct. | Updated the test instruction to assert via native `disabled` (`screen.getByRole('button', { name: /Confirm/ }).toBeDisabled()`); comment explains the prop history. |
 | 13 | 4.5c | Codex round 12 PR #97 | **P1** Round-10 stale-request identity-guard (`inFlight.get(key) === currentP`) had a fatal flaw: the `.finally` removes the inFlight entry BEFORE the `.then` runs in the happy path → state never sets → view stuck in loading forever. | Replaced inFlight-identity guard with a per-key **generation counter**. `invalidateListPublishes()` bumps the generation for every known key; useEffect captures the active generation at fetch start; `.then` writes state only if `currentGeneration(key) === myGen`. Cache cleanup (inFlight delete in `.finally`) is now independent of state-write guards — fixes the happy-path bug while preserving the stale-request guarantee. Test outline updated to match the new contract. |
 | 13 | 4.5a | Codex round 12 PR #97 | **P2** Task 4.5a-6's impl snippet referenced `postJson` — no such helper exists in `apps/admin/src/lib/apiClient.ts`. The actual helper is `request<T>(method, path, body, parser)` at line 27. | Rewrote the snippet to extend `request()` signature with an optional `extraHeaders?: Record<string, string>` 5th argument and pass `{ 'Idempotency-Key': crypto.randomUUID() }` through that. `apiClient.publish()` continues to use `request` (matching the rest of the apiClient's call style). |
+| 14 | 4.5a | Codex round 13 PR #97 | **P2** `composePublishInput`'s blanket `catch` on `readFile(publishedPath)` silently treated EVERY error as cold-start. If `current.v1.json` existed but read failed (EACCES/EIO), publish would compose only workspace files and write a new `current.v1.json` that drops every published-only resort. | Catch only `ENOENT` per spec §10.9 cold-start semantics; rethrow other filesystem errors so the operator gets a 500 envelope with the actual failure. Mirrors the existing `health.ts` / `listResorts.ts` pattern. |
+| 14 | 4.5a | Codex round 13 PR #97 | **P2** `listPublishesHandler`'s blanket `catch` on `readdir(historyDir)` returned empty history for every error — hides EIO/EACCES from analyst + bridge test. | Catch only `ENOENT` (no publishes-yet cold start); rethrow other errors to the 500 envelope. |
 
 ---
 
