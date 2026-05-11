@@ -1722,6 +1722,12 @@ export function useListPublishes(q: ListPublishesQuery): UseListPublishesResult 
       cancelled = true
       set?.delete(onInvalidate)
     }
+    // Codex round 33 PR #97 P2 fold: mirrors useResortList.ts:80 — `key` is
+    // the canonical deep-sorted hash of `q`, so the effect re-runs whenever
+    // the SEMANTIC query changes even though the closure captures `q` itself.
+    // Listing `q` in deps would fire on every referentially-new but content-
+    // equal object; the dedup pattern relies on this stability.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- key is the canonical hash of q
   }, [key])
 
   return { value, error } as UseListPublishesResult
@@ -2138,6 +2144,7 @@ _Populate as Codex / subagent / maintainer / user findings land per round. Carry
 | 30 | 4.5a | Codex round 30 PR #97 | **P2** `composePublishInput` iterated filenames but trusted `parsed.data.slug` — a renamed/copied workspace file (`a.json` containing `slug: 'b'`, internally valid) could publish under the wrong slug. `WorkspaceFile.parse` only enforces INTERNAL slug consistency; the single-file read path (`workspace.readWorkspaceFileForSlug` line 84) already throws `workspace-corrupt` on filename↔embedded-slug drift. | (Reverted in round 31 — see below.) Originally added the same check: extract `filenameSlug = entry.replace(/\.json$/, '')` and compare with `parsed.data.slug`; throw `workspace-corrupt` if they don't match. |
 | 31 | 4.5a | Codex round 31 PR #97 | **P2** Round-30's drift-detection-in-publish was inconsistent with health.ts: `health.ts:65-74` runs only `WorkspaceFile.safeParse(raw)` and does NOT count drift, so `resorts_with_corrupt_workspace` would stay 0 → PublishDialog enables Confirm → POST deterministically fails with 500. Either both paths reject drift or neither does. | **Reverted round-30**. Spec §10.3.1 narrowly defines "corrupt" as "files that fail `WorkspaceFile.parse()`"; the single-file read path's drift rejection is an internal extension beyond the spec. `composePublishInput` now trusts the embedded slug. Drift surfaces when the analyst opens the editor (single-file read path still throws). Avoids the deterministic UX lie + a 9-file PR 4.5a budget. |
 | 32 | 4.5c | Codex round 32 PR #97 | **P2** PublishDialog passed `onOpenChange` through directly to Modal. Mid-publish (`publish.status === 'submitting'`), the user could Escape/backdrop-click to close the modal → PublishDialog unmounts → the success/error Toast `useEffect` (inside PublishDialog) is gone → publish completes silently. The POST still writes the archive + current.v1.json, but the user gets no Toast indication. | Wrapped `onOpenChange` in a `handleOpenChange` callback (memoized via `useCallback`) that swallows close requests while submitting: `if (!next && publish.status === 'submitting') return`. Pass `handleOpenChange` to Modal AND to the Cancel button. Cancel is also disabled while submitting for clarity. Success path still closes via the post-publish effect (status === 'success' bypass). |
+| 33 | 4.5c | Codex round 33 PR #97 | **P2** `useListPublishes` reference impl's `useEffect` closed over `q` but listed only `[key]` as a dependency → `react-hooks/exhaustive-deps` would fail lint under `npm run qa`. The existing `useResortList.ts:80` documents `key` as the canonical deep-sorted hash and disables the rule with an inline comment. | Added the same suppression comment + explanation directly above the `useEffect`'s deps line (`// eslint-disable-next-line react-hooks/exhaustive-deps -- key is the canonical hash of q`). Documents that listing `q` itself would fire the effect on every referentially-new but content-equal object pass, which the dedup pattern relies on avoiding. |
 
 ---
 
