@@ -695,4 +695,81 @@ describe('ToastProvider + useToast', (): void => {
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss notification' }))
     expect(screen.queryByRole('status')).toBeNull()
   })
+
+  // Codex round 8 PR #100 P2 fold: polite live regions must exist in the
+  // DOM BEFORE content arrives for AT to announce the change (per MDN's
+  // ARIA live-region guidance). Mounting a fresh role="status" span
+  // with the message inline (as the visible Toast does) is unreliable for
+  // info/success variants. The persistent `[aria-live="polite"]` region
+  // below sits in the DOM from provider initialization and gets its
+  // content updated on show(); AT detects the diff and announces. Error
+  // variant uses the visible Toast's role="alert", which IS announced
+  // reliably on insertion per MDN's dynamic-insertion exception.
+  function ProbeShow({ variant, message }: {
+    readonly variant: 'info' | 'success' | 'error'
+    readonly message: string
+  }): ReactElement {
+    const { show } = useToast()
+    return (
+      <button type="button" onClick={(): void => { show({ variant, message }) }}>
+        trigger
+      </button>
+    )
+  }
+
+  function getPoliteRegion(): HTMLElement {
+    const region = document.querySelector<HTMLElement>(
+      '[data-sta-toast-live="polite"]',
+    )
+    if (region === null) {
+      throw new Error('persistent polite live region not found')
+    }
+    return region
+  }
+
+  it('mounts a persistent polite live region at provider initialization (empty before any show)', (): void => {
+    render(
+      <ToastProvider>
+        <div>app</div>
+      </ToastProvider>,
+    )
+    const region = getPoliteRegion()
+    expect(region.getAttribute('aria-live')).toBe('polite')
+    expect(region.textContent).toBe('')
+  })
+
+  it('populates the polite live region when show({variant: "info"}) is called', (): void => {
+    render(
+      <ToastProvider>
+        <ProbeShow variant="info" message="Heads up" />
+      </ToastProvider>,
+    )
+    expect(getPoliteRegion().textContent).toBe('')
+    fireEvent.click(screen.getByRole('button', { name: 'trigger' }))
+    expect(getPoliteRegion().textContent).toBe('Heads up')
+  })
+
+  it('populates the polite live region when show({variant: "success"}) is called', (): void => {
+    render(
+      <ToastProvider>
+        <ProbeShow variant="success" message="Published version 7" />
+      </ToastProvider>,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'trigger' }))
+    expect(getPoliteRegion().textContent).toBe('Published version 7')
+  })
+
+  it('does NOT populate the polite live region for error variant (uses visible role="alert" instead)', (): void => {
+    render(
+      <ToastProvider>
+        <ProbeShow variant="error" message="Publish failed" />
+      </ToastProvider>,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'trigger' }))
+    // Persistent polite region stays empty (error path doesn't use it).
+    expect(getPoliteRegion().textContent).toBe('')
+    // The visible Toast renders with role="alert" — reliably announced on
+    // insertion per MDN's dynamic-insertion exception.
+    expect(screen.getByRole('alert')).toHaveTextContent('Publish failed')
+  })
 })

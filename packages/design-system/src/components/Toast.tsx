@@ -227,6 +227,17 @@ interface CurrentToast {
 
 export function ToastProvider({ children }: { children: ReactNode }): JSX.Element {
   const [current, setCurrent] = useState<CurrentToast | null>(null)
+  // Codex round 8 PR #100 P2 fold: persistent polite live region content.
+  // ARIA polite regions must exist in the DOM BEFORE their content arrives
+  // for AT to announce changes (per MDN). Mounting a fresh `role="status"`
+  // span with the message inline (as the visible Toast does) is often
+  // silently ignored by polite-region announcers. The persistent region
+  // below sits in the DOM from provider initialization; `show()` updates
+  // its content for info/success variants so AT detects a content change
+  // in an existing live region. Error variant relies on the visible
+  // Toast's `role="alert"`, which IS reliably announced on insertion per
+  // MDN's dynamic-insertion exception.
+  const [politeAnnouncement, setPoliteAnnouncement] = useState<string>('')
   const keyRef = useRef<number>(0)
 
   // Codex round 23 (PR #97) P2 fold: useCallback-stable `onDismiss`.
@@ -252,6 +263,11 @@ export function ToastProvider({ children }: { children: ReactNode }): JSX.Elemen
       show: (input: ToastInput): void => {
         keyRef.current += 1
         setCurrent({ input, key: keyRef.current })
+        // Update the persistent polite live region for non-error variants.
+        // Error variant uses the visible Toast's role="alert" path.
+        if (input.variant !== 'error') {
+          setPoliteAnnouncement(input.message)
+        }
       },
     }),
     [],
@@ -260,6 +276,13 @@ export function ToastProvider({ children }: { children: ReactNode }): JSX.Elemen
   return (
     <ToastContext.Provider value={value}>
       {children}
+      <div
+        data-sta-toast-live="polite"
+        aria-live="polite"
+        className="sta-toast-sr-only"
+      >
+        {politeAnnouncement}
+      </div>
       {current !== null && renderCurrent(current, dismissCurrent)}
     </ToastContext.Provider>
   )
