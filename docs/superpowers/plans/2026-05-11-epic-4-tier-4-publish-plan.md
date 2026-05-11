@@ -1855,7 +1855,12 @@ describe('publish flow — bridge tier', (): void => {
     await user.click(screen.getByRole('button', { name: 'Confirm' }))
 
     // Success Toast appears.
-    expect(await screen.findByRole('status', { name: /Published version/ })).toBeInTheDocument()
+    // Codex round 21 PR #97 P2 fold: Toast renders `<div role="status"><span>{message}</span>…</div>`
+    // with no aria-label. Testing Library's `name` option matches the accessible name (aria-label/-labelledby),
+    // NOT element text — so `findByRole('status', { name: /Published version/ })` would time out.
+    // Find the status region by role, then assert its text content.
+    const successToast = await screen.findByRole('status')
+    expect(successToast).toHaveTextContent(/Published version/)
 
     // History dir grew.
     const dir = join(workspaceRoot, 'data/published/history')
@@ -1974,6 +1979,7 @@ _Populate as Codex / subagent / maintainer / user findings land per round. Carry
 | 20 | 4.5c | Codex round 19 PR #97 | **P2** Decision G1 still claimed "PublishDialog no longer accepts an `open` prop; presence ↔ open" (stale from round 3) while Decision F1 + the impl now use the controlled DS Modal API `{open, onOpenChange}`. The NOT-building bullet also still said "No DS `Modal` primitive yet. PublishDialog inlines the `<div role='dialog'>`" — contradicts round 17. | Rewrote Decision G1 to acknowledge the `{open, onOpenChange}` props from F1; conditional mount preserved (cites round 3 P1 fold for the freshness motivation). Updated the NOT-building bullet to "No new DS Modal primitive — consume the EXISTING one." |
 | 21 | 4.5a | Codex round 20 PR #97 | **P2** PR 4.5a file-list entry #3 still said to add an "Idempotency-Key passthrough test" to `dispatch.test.ts`, but Decision J1 + Task 4.5a-5 already explain that `DispatchInput` has no `headers` field (no test feasible until Phase 2). Stale file-list line. | Updated the file-list entry to say "No Idempotency-Key passthrough test" and cite the round-16 P2 fold that revised Decision J1. |
 | 21 | 4.5c | Codex round 20 PR #97 | **P3** PublishDialog rendered the descriptive `<p id="publish-dialog-blocker">` during health-loading and health-error states, but only set `aria-describedby` for the four blocker cases. AT users got no explanation for the disabled Confirm during loading/error. | Replaced `aria-describedby={blocker !== null ? ...}` with `aria-describedby={hasBlockerCopy ? ...}` where `hasBlockerCopy = healthUnknown || blocker !== null`. Updated Decision F1's tooltip-wiring description to match. |
+| 22 | 4.5d | Codex round 21 PR #97 | **P2** Bridge integration test used `findByRole('status', { name: /Published version/ })` but Toast renders `<div role="status"><span>{message}</span>…</div>` with no `aria-label`. Testing Library's `name` option matches the accessible name (aria-label/-labelledby), NOT element text — so the assertion would time out. | Split into `findByRole('status')` to locate the region, then `toHaveTextContent(/Published version/)` to assert the message. Added a comment citing the round-21 catch. |
 
 ---
 
