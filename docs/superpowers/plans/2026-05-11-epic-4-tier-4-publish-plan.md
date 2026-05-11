@@ -157,12 +157,7 @@ describe('publishHandler — happy path', (): void => {
 Run: `npx vitest run apps/admin/server/__tests__/publish.test.ts`
 Expected: failures pointing at the missing `publishHandler` real impl (still 501-stub from PR 4.1b).
 
-- [ ] **Step 3: Commit the failing tests.**
-
-```bash
-git add apps/admin/server/__tests__/publish.test.ts
-git commit -s -m "test(admin-server): failing publish-handler happy-path + slug-assertion tests (PR 4.5a §4.5a-1)"
-```
+- [ ] **Step 3: Hold off on commit — Task 4.5a-2 immediately follows to green these tests. Codex round 15 PR #97 P2 fold combined 4.5a-1 + 4.5a-2 into a single red→green pair commit to keep PR 4.5a within AGENTS.md's ≤5 commit ceiling.**
 
 #### Task 4.5a-2: `publish.ts` minimal impl to green Task 1's tests
 
@@ -374,11 +369,11 @@ async function composePublishInput(workspaceRoot: string): Promise<ComposeResult
 Run: `npx vitest run apps/admin/server/__tests__/publish.test.ts`
 Expected: 2 passing.
 
-- [ ] **Step 3: Commit.**
+- [ ] **Step 3: Commit BOTH the failing tests (4.5a-1) and the impl (4.5a-2) as ONE red→green pair commit** (Codex round 15 PR #97 P2 fold — keeps PR 4.5a at ≤5 commits per AGENTS.md PR Sizing Discipline).
 
 ```bash
-git add apps/admin/server/publish.ts
-git commit -s -m "feat(admin-server): publish handler — workspace ∪ published union → publishDataset (PR 4.5a §4.5a-2)"
+git add apps/admin/server/__tests__/publish.test.ts apps/admin/server/publish.ts
+git commit -s -m "feat(admin-server): publish handler — happy path + slug assertion + workspace ∪ published union (PR 4.5a §4.5a-1+2)"
 ```
 
 #### Task 4.5a-3: `publish.test.ts` — `publishDataset` failure path + corrupt workspace skip
@@ -1781,14 +1776,22 @@ export function PublishHistory(): JSX.Element {
 #### Task 4.5d-2: `urlState.ts` MODIFY + `urlState.test.ts` round-trip
 
 ```ts
-// urlState.ts: extend AdminRoute union:
+// urlState.ts changes (Codex round 15 PR #97 P2 fold: ALSO add 'publishes' to
+// ROUTE_VALUES — without it, RouteValue.safeParse(raw) coerces 'publishes' to
+// 'dashboard' BEFORE the route-branch parsing runs, so direct deep links + the
+// new sidebar `/?route=publishes` link render the dashboard).
+
+// Line 30 — extend the enum:
+const ROUTE_VALUES = ['dashboard', 'resorts', 'editor', 'publishes'] as const
+
+// Extend AdminRoute union:
 export type AdminRoute =
   | { route: 'dashboard' }
   | { route: 'resorts'; country?: ISOCountryCode; hasFailures?: boolean }
   | { route: 'editor'; slug: ResortSlug }
   | { route: 'publishes'; page?: number }
 
-// In parseURL: add the 'publishes' branch:
+// In parseURL: add the 'publishes' branch AFTER RouteValue.safeParse succeeds:
 if (route === 'publishes') {
   const pageRaw = params.get('page')
   const page = pageRaw !== null && /^\d+$/.test(pageRaw) ? Number(pageRaw) : undefined
@@ -1968,6 +1971,8 @@ _Populate as Codex / subagent / maintainer / user findings land per round. Carry
 | 14 | 4.5a | Codex round 13 PR #97 | **P2** `listPublishesHandler`'s blanket `catch` on `readdir(historyDir)` returned empty history for every error — hides EIO/EACCES from analyst + bridge test. | Catch only `ENOENT` (no publishes-yet cold start); rethrow other errors to the 500 envelope. |
 | 15 | 4.5c | Codex round 14 PR #97 | **P2** Task 4.5c-1 file list still said "Suspense + invalidation tests" for `useListPublishes` despite Decision E1's post-round-9 fold making the hook `useState`/`useEffect`-based. Following the file-list line would re-introduce the cold-load crash the round-9 fold fixed. | Updated the file-list entries (#3 + #4) to say "useState/useEffect-based hook tests (NOT Suspense)" and list the actual test coverage (initial loading state, fetch-resolves write, error path, key-change reset, generation-counter guard, subscriber cleanup, __resetForTests). |
 | 15 | 4.5a | Codex round 14 PR #97 | **P2** Task 4.5a-5 said to "add route entries" for `POST /api/resorts/:slug/publish` + `GET /api/publishes` in `dispatch.ts`, but those routes are **already registered** against the 501 stubs (`apps/admin/server/dispatch.ts:92,100`). Plan would direct implementers at the wrong failure mode. | Rewrote Step 3 to: routes already exist; the only `dispatch.ts` MODIFY is adding `workspace-corrupt → 500` to `STATUS_FOR_CODE`. Stub-to-real swap happens via `publish.ts` / `listPublishes.ts` MODIFY entries; existing routes pick up real handlers automatically. Updated the PR 4.5a file-list summary (#6) + Task 4.5a-5 commit message. |
+| 16 | 4.5d | Codex round 15 PR #97 | **P2** `urlState.ts:30` defines `ROUTE_VALUES = ['dashboard', 'resorts', 'editor']` and parses raw via `RouteValue.safeParse(raw)` BEFORE the route-branch logic. Without adding `'publishes'` to that enum, `?route=publishes` is coerced to `'dashboard'` and PublishHistory is unreachable. | Updated Task 4.5d-2 to extend `ROUTE_VALUES = ['dashboard', 'resorts', 'editor', 'publishes']` as the very first urlState change, before the `parseURL` branch addition. |
+| 16 | 4.5a | Codex round 15 PR #97 | **P2** PR 4.5a planned 6 separate commits (Tasks 4.5a-1 through 4.5a-6) exceeding AGENTS.md's PR Sizing Discipline ≤5 commit ceiling. | Combined Tasks 4.5a-1 (failing tests for publish handler) and 4.5a-2 (impl that greens them) into a single red→green pair commit per the canonical TDD-pair shape — drops the per-task count from 6 to 5. Each remaining task still pairs one commit. The Task 4.5a-1 "Step 3: Commit" line was repurposed to defer until 4.5a-2; Task 4.5a-2 "Step 3" now commits both files with a combined message. |
 
 ---
 
