@@ -187,6 +187,21 @@ export function Toast(props: ToastProps): JSX.Element {
 // ---------------------------------------------------------------------------
 // ToastProvider + useToast — single-slot per Decision C2.
 // ---------------------------------------------------------------------------
+//
+// Codex round 6 PR #100 P2 fold — modal-coordination constraint:
+// Toasts must NOT be shown while a Radix `Dialog`/`Modal` is open. Radix's
+// modal `Dialog.Content` calls `hideOthers()` which sets
+// `aria-hidden="true"` on siblings of the modal content, and
+// `disableOutsidePointerEvents` blocks pointer interaction outside the
+// modal. A Toast rendered as a fixed-position element OUTSIDE the modal
+// hierarchy would therefore be aria-hidden to assistive tech and
+// unreachable via pointer — defeating both its live-region announcement
+// and its Dismiss control. The planned publish flow per spec §3.7
+// (`Success — dialog closes; toast`) closes the PublishDialog BEFORE
+// `showToast()` runs, so the aria-hide window never materializes for the
+// 4.5c consumer. Any future consumer pairing Toast with a modal must
+// follow the same close-modal-first pattern, OR mount its own toast
+// surface inside the dialog content.
 
 export interface ToastInput {
   readonly variant: ToastVariant
