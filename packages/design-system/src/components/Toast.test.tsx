@@ -165,6 +165,49 @@ describe('Toast — variants + ARIA', (): void => {
     }
   })
 
+  // Codex round 7 PR #100 P3 fold: the outer toast wrapper must NOT carry
+  // its own tabindex — that adds an unnamed tab stop ahead of the actual
+  // Dismiss button. The focus-pause behavior still works via React's
+  // bubbling synthetic onFocus/onBlur when the inner Dismiss <Button>
+  // gains/loses focus.
+  it('does not add an unnamed tab stop on the outer wrapper (no tabindex)', (): void => {
+    const { container } = render(
+      <Toast variant="info" message="X" onDismiss={(): void => undefined} />,
+    )
+    const root = container.firstChild as HTMLElement
+    expect(root.hasAttribute('tabindex')).toBe(false)
+    // Sanity: the only focusable element inside the toast is the Dismiss button.
+    const dismissButton = screen.getByLabelText('Dismiss notification')
+    expect(root.tabIndex).toBe(-1)
+    expect(dismissButton.tagName).toBe('BUTTON')
+  })
+
+  it('pauses the timer when the Dismiss button gains focus (bubbling onFocus from inner control)', (): void => {
+    vi.useFakeTimers()
+    try {
+      const onDismiss = vi.fn()
+      render(<Toast variant="info" message="X" onDismiss={onDismiss} dismissAfterMs={5000} />)
+      act((): void => {
+        vi.advanceTimersByTime(2000)
+      })
+      const dismissButton = screen.getByLabelText('Dismiss notification')
+      // Real keyboard users tab to the Dismiss button — focus bubbles up
+      // via React's synthetic event system to the wrapper's onFocus.
+      fireEvent.focus(dismissButton)
+      act((): void => {
+        vi.advanceTimersByTime(10_000)
+      })
+      expect(onDismiss).not.toHaveBeenCalled()
+      fireEvent.blur(dismissButton)
+      act((): void => {
+        vi.advanceTimersByTime(5000)
+      })
+      expect(onDismiss).toHaveBeenCalledOnce()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   // Codex round 2 PR #100 P2 fold: hover and focus must be tracked
   // independently. Otherwise mouseleave (resume) can defeat an active focus
   // (pause), and the timer fires while the keyboard user is still

@@ -32,4 +32,11 @@ describe('Toast.css', (): void => {
     expect(source).toContain('.sta-toast--success')
     expect(source).toContain('.sta-toast--error')
   })
+
+  it('declares box-sizing: border-box so max-width includes padding and border (codex round 7 P2 fold)', (): void => {
+    // Without this, the content-box max-width plus 32px horizontal padding
+    // and 2px border overflows narrow viewports — a 320px viewport with
+    // right: 16px offset clipped long publish messages off the left edge.
+    expect(source).toContain('box-sizing: border-box')
+  })
 })

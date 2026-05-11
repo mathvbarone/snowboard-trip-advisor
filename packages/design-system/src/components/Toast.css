@@ -8,6 +8,13 @@
  */
 
 .sta-toast {
+  /* Codex round 7 PR #100 P2 fold: border-box sizing so the 32px horizontal
+   * padding + 2px border (plus 4px variant border-left) are INCLUDED in
+   * max-width. Without this, the content-box max-width plus padding/border
+   * makes the rendered element wider than the calc()-constrained viewport
+   * envelope; at a 320px viewport with right: 16px the toast overflowed
+   * the left edge and clipped long publish messages. */
+  box-sizing: border-box;
   position: fixed;
   top: var(--space-lg, 16px);
   right: var(--space-lg, 16px);

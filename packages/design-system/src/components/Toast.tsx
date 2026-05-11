@@ -167,9 +167,14 @@ export function Toast(props: ToastProps): JSX.Element {
   // the text span.
   const role = variant === 'error' ? 'alert' : 'status'
 
+  // Codex round 7 PR #100 P3 fold: do NOT add `tabIndex={0}` to the outer
+  // wrapper. With a tabindex but no role/name, keyboard users tab to a
+  // non-control before reaching the actual Dismiss button. The
+  // focus-pause behavior still works via React's bubbling synthetic
+  // `onFocus`/`onBlur` events when the inner Dismiss <Button> gains/
+  // loses focus.
   return (
     <div
-      tabIndex={0}
       className={`sta-toast sta-toast--${variant}`}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
