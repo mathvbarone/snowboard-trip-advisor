@@ -86,7 +86,7 @@ Per [spec §7.4](../specs/2026-05-01-epic-4-admin-app-design.md), after PRs 4.5a
 3. **Modify** `apps/admin/server/__tests__/dispatch.test.ts` — add bridge-routed positive controls for `POST /api/resorts/__all__/publish` and `GET /api/publishes`, plus the Idempotency-Key passthrough test (Decision J1).
 4. **Modify** `apps/admin/server/publish.ts` — replace 4.1b's 501 stub with the real handler.
 5. **Modify** `apps/admin/server/listPublishes.ts` — replace 4.1b's 501 stub with the real handler.
-6. **Modify** `apps/admin/server/dispatch.ts` — add route entries; verify `STATUS_FOR_CODE` covers `publish-validation-failed` + `invalid-request` + `workspace-corrupt` (the last per Codex round 1 PR #97 P1 fold; `workspace-corrupt` → 500 per spec §10.3.1).
+6. **Modify** `apps/admin/server/dispatch.ts` — routes for `POST /api/resorts/:slug/publish` (line 92) + `GET /api/publishes` (line 100) are **already registered** against the 501 stubs (Codex round 14 PR #97 P2 fold); the only required change is adding `workspace-corrupt → 500` to `STATUS_FOR_CODE` (Codex round 1 PR #97 P1 fold per spec §10.3.1). The handler stub→real swap happens via the `publish.ts` / `listPublishes.ts` MODIFY entries (#4 and #5 below); the existing route entries pick up the real handlers automatically.
 7. **Modify** `apps/admin/src/lib/apiClient.ts` — inject `Idempotency-Key: ${crypto.randomUUID()}` header in `publish()` per Decision J1.
 8. **Modify** `apps/admin/src/lib/apiClient.test.ts` — assert the header is present + matches UUID regex.
 
@@ -643,10 +643,7 @@ it('honors Idempotency-Key header on POST publish without rejecting (Phase 1, sp
 
 - [ ] **Step 2: Run** `npx vitest run apps/admin/server/__tests__/dispatch.test.ts`. Expected: 5 new tests FAIL (routes not registered).
 
-- [ ] **Step 3: Modify dispatch.ts route table.** Add route entries:
-  - `POST /api/resorts/:slug/publish` → wrap `publishHandler` with `PublishSlugParam.parse` + `PublishBody.parse`.
-  - `GET /api/publishes` → wrap `listPublishesHandler` with `ListPublishesQuery.parse`.
-  - Verify `STATUS_FOR_CODE` maps `publish-validation-failed` → 400 (existing) and `invalid-request` → 400 (existing); ADD a map entry for `workspace-corrupt` → 500 (Codex round 1 PR #97 P1 fold — per spec §10.3.1 the publish handler throws this when any workspace file fails JSON parse or `WorkspaceFile.parse()`).
+- [ ] **Step 3: Modify dispatch.ts STATUS_FOR_CODE only.** Codex round 14 PR #97 P2 fold: the route entries for `POST /api/resorts/:slug/publish` (line 92) and `GET /api/publishes` (line 100) are **already registered** in `apps/admin/server/dispatch.ts` against the existing 501-stub handlers; the bridge tests verify the stub→real swap works end-to-end (no route-table change). `STATUS_FOR_CODE` already maps `publish-validation-failed` → 400 (line 204) and `invalid-request` → 400. **Only new map entry to ADD**: `workspace-corrupt` → 500 (Codex round 1 PR #97 P1 fold — per spec §10.3.1 the publish handler throws this when any workspace file fails JSON parse or `WorkspaceFile.parse()`).
 
 - [ ] **Step 4: Run** `npx vitest run apps/admin/server/__tests__/dispatch.test.ts`. Expected: 5 new tests PASS.
 
@@ -656,7 +653,7 @@ it('honors Idempotency-Key header on POST publish without rejecting (Phase 1, sp
 
 ```bash
 git add apps/admin/server/__tests__/dispatch.test.ts apps/admin/server/dispatch.ts
-git commit -s -m "feat(admin-server): wire publish + listPublishes routes in dispatch (PR 4.5a §4.5a-5)"
+git commit -s -m "feat(admin-server): add workspace-corrupt status mapping + bridge-tier positive controls (PR 4.5a §4.5a-5)"
 # Codex round 4 PR #97 P2 fold: deferred push to end of 4.5a-6 so the PR
 # branch includes the Idempotency-Key client change.
 ```
@@ -1155,8 +1152,8 @@ export type { ToastProps, ToastVariant, ToastInput } from './components/Toast'
 
 1. **Create** `apps/admin/src/state/usePublish.test.ts` — hook tests.
 2. **Create** `apps/admin/src/state/usePublish.ts` — submit + state machine + on-success invalidation of `listPublishes`.
-3. **Create** `apps/admin/src/state/useListPublishes.test.ts` — Suspense + invalidation tests (moved from PR 4.5d per A1 P0-1 fold).
-4. **Create** `apps/admin/src/state/useListPublishes.ts` — single-promise cache + consumer subscription per Decision E1 (moved from PR 4.5d per A1 P0-1 fold).
+3. **Create** `apps/admin/src/state/useListPublishes.test.ts` — useState/useEffect-based hook tests (NOT Suspense — see Decision E1 post-round-9 fold + Codex round 14 PR #97 P2 fold). Tests cover initial loading state, fetch-resolves write, error path, key-change reset, generation-counter stale-request guard, subscriber cleanup on unmount, `__resetForTests()` cleanup.
+4. **Create** `apps/admin/src/state/useListPublishes.ts` — useState + useEffect + module-level inFlight Map + per-key generation counter (Decision E1; mirrors `useResortList.ts:2-16` shape). Moved from PR 4.5d per A1 P0-1 fold.
 5. **Create** `apps/admin/src/views/PublishDialog.test.tsx` — render + 4 blocking states + interaction.
 6. **Create** `apps/admin/src/views/PublishDialog.tsx` — modal overlay; reads `useHealth()` (existing, unchanged); uses `usePublish()`.
 7. **Modify** `apps/admin/src/views/Shell.tsx` — add `<Button>Publish</Button>` in header; wrap children in `<ToastProvider>`; render `<PublishDialog open onClose />` conditionally.
@@ -1969,6 +1966,8 @@ _Populate as Codex / subagent / maintainer / user findings land per round. Carry
 | 13 | 4.5a | Codex round 12 PR #97 | **P2** Task 4.5a-6's impl snippet referenced `postJson` — no such helper exists in `apps/admin/src/lib/apiClient.ts`. The actual helper is `request<T>(method, path, body, parser)` at line 27. | Rewrote the snippet to extend `request()` signature with an optional `extraHeaders?: Record<string, string>` 5th argument and pass `{ 'Idempotency-Key': crypto.randomUUID() }` through that. `apiClient.publish()` continues to use `request` (matching the rest of the apiClient's call style). |
 | 14 | 4.5a | Codex round 13 PR #97 | **P2** `composePublishInput`'s blanket `catch` on `readFile(publishedPath)` silently treated EVERY error as cold-start. If `current.v1.json` existed but read failed (EACCES/EIO), publish would compose only workspace files and write a new `current.v1.json` that drops every published-only resort. | Catch only `ENOENT` per spec §10.9 cold-start semantics; rethrow other filesystem errors so the operator gets a 500 envelope with the actual failure. Mirrors the existing `health.ts` / `listResorts.ts` pattern. |
 | 14 | 4.5a | Codex round 13 PR #97 | **P2** `listPublishesHandler`'s blanket `catch` on `readdir(historyDir)` returned empty history for every error — hides EIO/EACCES from analyst + bridge test. | Catch only `ENOENT` (no publishes-yet cold start); rethrow other errors to the 500 envelope. |
+| 15 | 4.5c | Codex round 14 PR #97 | **P2** Task 4.5c-1 file list still said "Suspense + invalidation tests" for `useListPublishes` despite Decision E1's post-round-9 fold making the hook `useState`/`useEffect`-based. Following the file-list line would re-introduce the cold-load crash the round-9 fold fixed. | Updated the file-list entries (#3 + #4) to say "useState/useEffect-based hook tests (NOT Suspense)" and list the actual test coverage (initial loading state, fetch-resolves write, error path, key-change reset, generation-counter guard, subscriber cleanup, __resetForTests). |
+| 15 | 4.5a | Codex round 14 PR #97 | **P2** Task 4.5a-5 said to "add route entries" for `POST /api/resorts/:slug/publish` + `GET /api/publishes` in `dispatch.ts`, but those routes are **already registered** against the 501 stubs (`apps/admin/server/dispatch.ts:92,100`). Plan would direct implementers at the wrong failure mode. | Rewrote Step 3 to: routes already exist; the only `dispatch.ts` MODIFY is adding `workspace-corrupt → 500` to `STATUS_FOR_CODE`. Stub-to-real swap happens via `publish.ts` / `listPublishes.ts` MODIFY entries; existing routes pick up real handlers automatically. Updated the PR 4.5a file-list summary (#6) + Task 4.5a-5 commit message. |
 
 ---
 
