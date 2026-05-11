@@ -14,7 +14,7 @@ Epic 4 ships `apps/admin`, a loopback-only Vite SPA + in-process API middleware 
 
 - **Foundation** (PRs 4.1a/b/c) — `packages/schema/api/` Zod surface for 6 in-scope endpoints + `WorkspaceFile` schema (with top-level `editor_modes` + cross-key invariant per §10.2) + contract-snapshot test; the `vite-plugin-admin-api.ts` middleware skeleton + `apps/admin` Shell composition + tiered-MSW test harness (canned + bridge); design-system additions (Sidebar, StatusPill, Tabs, Popover, DropdownMenu).
 - **Navigation** (PRs 4.2 / 4.3) — Dashboard health cards + Resorts table. Both surface the cold-start empty state per §10.9.
-- **Editor** (PRs 4.4a/4.4b/4.4c/4.4d) — quad-split on the server / view / write / interaction axes: 4.4a ships the server read path (`resortDetail` + workspace read helpers); 4.4b ships the read-only editor view (durable + live panels + StatusPill); 4.4c ships the server write path (`resortUpsert` + workspace atomic-write helper) — server-only, with the client-side `useWorkspaceState` hook landing in 4.4d alongside the interactive ModeToggle; 4.4d makes the editor edit-interactive (ModeToggle flips AUTO↔MANUAL via `editor_modes`, MANUAL exposes edit input, integration write round-trip via `bridgeHandlers(tmpdir)`).
+- **Editor** (PRs 4.4a/4.4b/4.4c/4.4d) — quad-split on the server / view / write / interaction axes: 4.4a ships the server read path (`resortDetail` + workspace read helpers); 4.4b ships the read-only editor view (durable + live panels + StatusPill); 4.4c ships the server write path (`resortUpsert` + workspace atomic-write helper) — server-only, with the client-side `useWorkspaceState` hook shipped in 4.4d alongside the interactive ModeToggle; 4.4d makes the editor edit-interactive (ModeToggle flips AUTO↔MANUAL via `editor_modes`, MANUAL exposes edit input, integration write round-trip via `bridgeHandlers(tmpdir)`).
 - **Publish** (PRs 4.5a/4.5b) — dual-split on the handler / UI axis: 4.5a ships `publish` + `listPublishes` server handlers; 4.5b ships `<PublishDialog>` + `<PublishHistory>` views + the first real Toast consumer. PublishDialog gates on four blocking conditions including `resorts_with_corrupt_workspace > 0` per §4.3.1.
 - **Closing** (PRs 4.6a / 4.6b) — dual-split on the polish / integration-backfill axis: 4.6a ships keyboard shortcuts + responsive read-only-below-md affordance; 4.6b ships the integration backfill (Dashboard, ResortsTable, full-flow). 4.6a and 4.6b are parallel-capable (no shared files). The Dockerfile prod-build guard is **deferred to Epic 6** alongside the Dockerfile rewrite (the existing `Dockerfile` is broken — see §10.7).
 
@@ -401,7 +401,7 @@ Per Epic 3 spec §5.1 "Out of Epic 3" — these components are admin-only in Pha
   - **`DurablePanel`** — renders the Resort doc's durable fields via `<FieldRow>` per field.
   - **`LivePanel`** — renders the latest `ResortLiveSignal` per field via `<FieldRow>`.
   - **`FieldRow`** — `<StatusPill>` + value display (or edit input in MANUAL mode) + `<ModeToggle>` + `<SourceBadge>` (the Epic-3 design-system component).
-  - **`ModeToggle`** — `AUTO` ↔ `MANUAL` toggle. **Interactive in Epic 4** (lands in PR 4.4d): clicking flips a field's mode in the workspace state, and MANUAL mode exposes the edit input that PR 4.4c wires to PUT. What is **absent** in Epic 4 is the AUTO-side adapter-action buttons (Test / Sync) — those land in Epic 5 alongside the first real adapter per [ADR-0011](../../adr/0011-defer-test-sync-ux-to-epic-5.md). §1.1's parent-spec divergence row for §3.6 ("`AUTO` mode in Epic 4 displays the most recent value with `SourceBadge` (read-only); no refresh-from-adapter button. `MANUAL` mode is the only edit path.") is the canonical Epic 4 behavior. PRs 4.4a–4.4b ship the toggle in a render-only state (visible, no PUT yet); 4.4d makes it interactive.
+  - **`ModeToggle`** — `AUTO` ↔ `MANUAL` toggle. **Interactive in Epic 4** (shipped in PR 4.4d): clicking flips a field's mode in the workspace state, and MANUAL mode exposes the edit input that PR 4.4c's PUT handler accepts. What is **absent** in Epic 4 is the AUTO-side adapter-action buttons (Test / Sync) — those land in Epic 5 alongside the first real adapter per [ADR-0011](../../adr/0011-defer-test-sync-ux-to-epic-5.md). §1.1's parent-spec divergence row for §3.6 ("`AUTO` mode in Epic 4 displays the most recent value with `SourceBadge` (read-only); no refresh-from-adapter button. `MANUAL` mode is the only edit path.") is the canonical Epic 4 behavior.
 - **`PublishDialog`** — modal confirm dialog before `POST /api/resorts/:slug/publish` (the canonical endpoint per §4.6; Phase 1 publish is all-or-nothing per §1 row 5, so the SPA hard-codes a sentinel slug `'__all__'` in the URL path while exposing a no-arg `apiClient.publish()` per §7.5 / B4 P1 fold). Lists workspace state (number of changed resorts; number of resorts with `Failed` fields blocking publish per parent §3.7 + §4.3.1).
 - **`PublishHistory`** — list of past publishes from `GET /api/publishes`. Phase 1 read-only — no rollback action.
 
@@ -489,7 +489,7 @@ Epic 4 ships across **5 tiers** (13 PRs total). **Inter-tier gates are blocking*
 |---|---|---|
 | 1 — Foundation | 4.1a → 4.1b → 4.1c | Sequential (each builds on the prior PR's surface) |
 | 2 — Navigation | 4.2 → 4.3 | Sequential (shared `apps/admin/src/lib/urlState.ts`) |
-| 3 — Editor | (4.4a ‖ 4.4b) → 4.4c → 4.4d | 4.4a/4.4b parallel; 4.4c → 4.4d sequential (4.4d's bridge integration test invokes 4.4c's handler) |
+| 3 — Editor | (4.4a ‖ 4.4b) → 4.4c → 4.4d | 4.4a/4.4b parallel as planned; 4.4c → 4.4d sequential (4.4d's bridge integration test invokes 4.4c's handler). **Executed serial:** PR 4.4a split into 4.4a-1 + 4.4a-2 for file-budget reasons, which dropped the `4.4a ‖ 4.4b` parallelism (see §7.11). |
 | 4 — Publish | 4.5a → 4.5b | Sequential (4.5b's bridge integration test invokes 4.5a's handler) |
 | 5 — Closing | 4.6a ‖ 4.6b | Parallel (no shared files; 4.6a is polish, 4.6b is integration backfill) |
 
@@ -543,10 +543,10 @@ Tier 5 ─ Closing
   - Cold-start empty state visible per §10.9 (Dashboard "No resorts yet" card; ResortsTable empty-state row) when `data/admin-workspace/` is empty AND `data/published/current.v1.json` is missing. ✅
   - Card-click + row-click navigation works in browser smoke (URL state updates). ✅ (row-click closed by 4.3; card-click closed by PR 4.3.1 — see §7.9.1.)
   - Both real handlers tested against missing-`current.v1.json` fixtures. ✅
-- **Tier 3 → 4 gate (after 4.4a/b/c/d merged):**
-  - Editor opens for both seed slugs (`kotelnica-bialczanska`, `spindleruv-mlyn`); MANUAL edit round-trips through PUT; page reload preserves the workspace state via `editor_modes`.
-  - Bridge integration test (`resort-editor-write.test.tsx`, Tier 2 of the test harness) green; per-test workspace tmpdir verified to receive the atomic-written file.
-  - `editor_modes` cross-key invariant rejects malformed PUTs (handler test asserts `400 invalid-resort` carrying the refinement message).
+- **Tier 3 → 4 gate (after 4.4a/b/c/d merged) — CLOSED.** Originally listed:
+  - Editor opens for both seed slugs (`kotelnica-bialczanska`, `spindleruv-mlyn`); MANUAL edit round-trips through PUT; page reload preserves the workspace state via `editor_modes`. ✅
+  - Bridge integration test (`resort-editor-write.test.tsx`, Tier 2 of the test harness) green; per-test workspace tmpdir verified to receive the atomic-written file. ✅
+  - `editor_modes` cross-key invariant rejects malformed PUTs (handler test asserts `400 invalid-resort` carrying the refinement message). ✅
 - **Tier 4 → 5 gate (after 4.5a → 4.5b merged):**
   - Publish dialog → POST → `data/published/history/` grows (verified via bridge test); Toast on success/failure; PublishHistory shows the new version.
   - Pre-publish blocking-state surface (§4.3.1) gates correctly on all four conditions: `resorts_with_failed_fields > 0`, `resorts_with_missing_provenance > 0`, `resorts_with_corrupt_workspace > 0`, `resorts_total === 0`. Each disabled-state's tooltip text verified.
@@ -595,101 +595,19 @@ Status: **DONE** — merged in [#88](https://github.com/mathvbarone/snowboard-tr
 
 ### 7.10 PR 4.4a — Server read path (resortDetail + workspace read helpers)
 
-**Goal.** Wire the read-side API: `GET /api/resorts/:slug` returns the workspace state (or fallback to published projection) with field states. No UI yet — the editor view lands in 4.4b.
-
-**Branch:** `epic-4/pr-4.4a-server-read`. **Depends on:** 4.3 merged. **README:** skip.
-
-**Files (tests first):**
-
-- Create `apps/admin/server/__tests__/resortDetail.test.ts` (happy path + draft-slug 200 per §4.2.1 + missing-slug 404 + missing-published-doc + workspace-only slug returns 200 per §10.9 + corrupt-workspace `500 workspace-corrupt` per §10.3.1).
-- Create `apps/admin/server/__tests__/workspace.test.ts` (read paths only — atomic-write tests land in 4.4c). Includes a "missing `data/published/current.v1.json`" case where the read helper returns the workspace state alone per §10.9.
-- Create `apps/admin/src/state/useResortDetail.test.ts`.
-- Implement `apps/admin/server/resortDetail.ts` — replace 4.1b's 501 stub. Read workspace file or fall back to published; build `field_states` via the new `FieldStateFor<T>` projection helpers from 4.1a; respond per §4.2 / §4.2.1; handle missing-published per §10.9 + corrupt-workspace per §10.3.1.
-- Implement `apps/admin/server/workspace.ts` — read helpers for `data/admin-workspace/<slug>.json`. Atomic-write helper deferred to 4.4c.
-- Create `apps/admin/src/state/useResortDetail.ts` — wraps `apiClient.getResort(slug)`, Suspense-friendly via React 19 `use()` (same pattern + rejected-promise pinning as Epic 3's `useDataset` per [ADR-0010](../../adr/0010-usedataset-rejected-promise-pinning.md)).
-
-**Parallel-capable with:** PR 4.4b (per §7.4 — both branch from the same base after 4.3 merges; no shared files; 4.4a is server-only and 4.4b is UI-only; 4.4b's read-only integration test stays on canned MSW until 4.4d's bridge tier).
-
-**Subagent review trigger:** YES — `apps/admin/server/**` is the Phase 2 portability surface; review verifies wire-contract conformance and that draft slugs are handled per §4.2.1. Per D1 P1 fold, the `apps/admin/server/**` justification is sufficient on its own; no need to also cite indirect schema-touch.
-
-**Acceptance gate:** `npm run qa` green; server-handler unit tests + state-hook tests pass; both seed-dataset slugs (`kotelnica-bialczanska`, `spindleruv-mlyn`) respond correctly; draft-slug 200 verified; missing-published handler test green per §10.9.
+Status: **DONE** — shipped as two PRs: [#91](https://github.com/mathvbarone/snowboard-trip-advisor/pull/91) (commit `7ca2611`, PR 4.4a-1) + [#92](https://github.com/mathvbarone/snowboard-trip-advisor/pull/92) (commit `4364a2b`, PR 4.4a-2). Delivered (4.4a-1): `projectFieldStates(resort, live, modes, now)` + `FRESHNESS_TTL_DAYS` reuse in `packages/schema/src/resortView.ts` + recovered seed fixtures at `tests/fixtures/admin-workspace/{kotelnica-bialczanska,spindleruv-mlyn}.json` (originally a §10.8 / PR 4.1a deliverable that didn't ship). Delivered (4.4a-2): real `apps/admin/server/resortDetail.ts` handler + `apps/admin/server/workspace.ts` read helpers + `apps/admin/src/state/useResortDetail.ts` hook with React-19 `use()` + Suspense + dual-cache (`cachedPromises` for Suspense reads, `cachedFulfilled` for sync sequel renders) per [ADR-0010](../../adr/0010-usedataset-rejected-promise-pinning.md) + HMR reset hook (`useResortDetail.hmr.ts`, coverage-excluded via `apps/admin/vite.config.ts` glob update). The spec originally scoped one PR; execution split for file-budget reasons. **Behavioural change to remember for Tier 4+:** `useResortDetail` now subscribes consumers via `useSyncExternalStore` (PR 4.4d round-2 P2-C fold uncovered a latent 4.4a-2 oversight — `prepopulateResortDetail` / `invalidateResortDetail` did not wake mounted consumers). Tier 4 publish-success can rely on `invalidateResortDetail()` (or per-slug variant) to re-render the editor cleanly.
 
 ### 7.11 PR 4.4b — Editor view (read-only)
 
-**Goal.** Editor route renders durable + live panels read-only; ModeToggle visible but disabled (no PUT yet — adapter actions are Epic 5; interactive ModeToggle lands in 4.4d); StatusPill per field.
-
-**Branch:** `epic-4/pr-4.4b-editor-view`. **Depends on:** 4.3 merged (NOT 4.4a — see §7.4 / parallel-capable note below). **README:** skip.
-
-**Parallel-capable with:** PR 4.4a (per §7.4 — both branch from `main` after 4.3 merges; no shared files; 4.4b's `resort-editor-read.test.tsx` uses canned MSW so it does not depend on 4.4a's real handler. The `dev:admin` browser smoke does require 4.4a's handler to render the editor — the gate at the end of Tier 3 covers that).
-
-**Files (tests first):**
-
-- Create `apps/admin/src/views/ResortEditor.test.tsx`.
-- Create `apps/admin/src/views/ResortEditor/DurablePanel.test.tsx`.
-- Create `apps/admin/src/views/ResortEditor/LivePanel.test.tsx`.
-- Create `apps/admin/src/views/ResortEditor/FieldRow.test.tsx` (render-only mode).
-- Create `apps/admin/src/views/ResortEditor/ModeToggle.test.tsx` (disabled visible state).
-- Create `tests/integration/apps/admin/resort-editor-read.test.tsx` — verifies editor opens, both panels render with sample data, StatusPill states correct.
-- Create `apps/admin/src/views/ResortEditor.tsx` (composition shell).
-- Create `apps/admin/src/views/ResortEditor/DurablePanel.tsx`.
-- Create `apps/admin/src/views/ResortEditor/LivePanel.tsx`.
-- Create `apps/admin/src/views/ResortEditor/FieldRow.tsx` — render-only mode (StatusPill + value display + SourceBadge); no edit affordance yet.
-- Create `apps/admin/src/views/ResortEditor/ModeToggle.tsx` — render-only AUTO/MANUAL toggle visible but disabled (interactive in 4.4d).
-- Modify `apps/admin/src/lib/urlState.ts` — extend with `resort/:slug` route.
-
-**Subagent review trigger:** NO (UI components only; design-system primitives already shipped under 4.1c review).
-
-**Acceptance gate:** Editor renders for both seed-dataset slugs; durable + live panels show all fields with correct StatusPill states; integration test passes.
+Status: **DONE** — merged in [#93](https://github.com/mathvbarone/snowboard-trip-advisor/pull/93) (commit `8cfd5fd`). Delivered: `apps/admin/src/views/ResortEditor.tsx` composition shell + co-located `<EditorErrorBoundary>` (404 + `workspace-corrupt` 500 + retry) + parametrized `apps/admin/src/views/ResortEditor/MetricPanel.tsx` (spec planned separate `DurablePanel.tsx` + `LivePanel.tsx`; execution collapsed them into one `<MetricPanel kind="durable" | "live">` component) + `FieldRow.tsx` (StatusPill + value display + SourceBadge, render-only mode) + an inline render-only `<span role="switch">` ModeToggle inside FieldRow (PR 4.4d later replaced this with a button-based `<ModeToggle>` standalone component) + `tests/integration/apps/admin/resort-editor-read.test.tsx`. **Spec deviations:** parallelism with 4.4a (spec §7.4 marked `4.4a ‖ 4.4b`) was dropped — 4.4b shipped strictly serial after 4.4a-2 once 4.4a was split. `urlState.ts` MODIFY omitted — the editor route already shipped in PR 4.3, so no further extension was needed.
 
 ### 7.12 PR 4.4c — Server write path + workspace atomic-write
 
-**Goal.** Wire the write-side API: `PUT /api/resorts/:slug` validates and atomically writes a workspace file. Adds the atomic-write helper to `workspace.ts`. Server-only PR — the client-side `useWorkspaceState` hook lands in 4.4d alongside the interactive ModeToggle (per P1-6 fold) so the subagent review here stays focused on server-write semantics.
-
-**Branch:** `epic-4/pr-4.4c-server-write`. **Depends on:** (4.4a ‖ 4.4b) merged. **README:** skip.
-
-**Files (tests first):**
-
-- Create `apps/admin/server/__tests__/resortUpsert.test.ts`:
-  - Validation failures (per-document `Resort` parse rejects).
-  - Happy path + idempotency.
-  - `modified_at` is set to `ISODateTimeString.parse(new Date().toISOString())` before the atomic write (per G3 P1 fold; the brand parse is required because `ISODateTimeString` is a branded Zod type per `packages/schema/src/branded.ts:12`).
-  - `editor_modes` shallow-merge happy path (per §4.3 / Codex P1 fold on `b45348d`): existing workspace has `editor_modes: {a: 'manual', b: 'manual'}`; PUT body has `editor_modes: {a: 'auto', c: 'manual'}` (where `c` is a valid path in `field_sources`); post-merge state is `{a: 'auto', b: 'manual', c: 'manual'}` — incoming entries override per key, missing-from-incoming keys preserved.
-  - `editor_modes` "reset via 'auto'" semantics: PUT body `editor_modes: {a: 'auto'}` is the documented way to reset path `a` to AUTO (semantically equivalent to clearing per §10.2 default-on-missing projection).
-  - `editor_modes` cross-key invariant — reject case (per P0-2 fold): PUT with `editor_modes: {ghost: 'manual'}` when `field_sources` has no `ghost` returns `400 invalid-resort` carrying the refinement message in `details`.
-  - `editor_modes` field-source-removal reject case (per P0-2 fold): PUT that drops `field_sources.a` while keeping `editor_modes.a` returns `400 invalid-resort` (the merged document fails the refinement).
-  - Empty-body reject case (per Codex P1 fold on `0b235e3`): PUT with `{}` (none of `resort` / `live_signal` / `editor_modes` present) returns `400 invalid-request` carrying the body refinement message ("ResortUpsertBody must contain at least one of: resort, live_signal, editor_modes"). Mirrors the `apiClient.test.ts` case from PR 4.1a.
-  - Corrupt-workspace handling (per §10.3.1): if the target workspace file is unparseable, the handler returns `500 workspace-corrupt` and refuses to overwrite (preserves the corrupt file for forensic recovery).
-- Extend `apps/admin/server/__tests__/workspace.test.ts` — add atomic-write helper tests asserting all four steps from §10.3 (write tmp → fsync(fd) → rename → fsync(parent_dir)) and the macOS APFS `EBADF` tolerance.
-- Implement `apps/admin/server/resortUpsert.ts` — replace 4.1b's 501 stub. Read existing workspace; merge incoming partial per §4.3 (deep merge for `Resort.field_sources`, shallow merge for top-level `Resort` + `live_signal`, **shallow merge for `editor_modes` per Codex P1 fold on `b45348d`** — incoming entries override per key, missing-from-incoming keys preserved); per-`WorkspaceFile` schema validation including the `.refine()` cross-key invariant; set `modified_at = ISODateTimeString.parse(new Date().toISOString())`; atomic-write workspace file.
-- Modify `apps/admin/server/workspace.ts` — add atomic-write helper matching `packages/schema/src/publishDataset.ts:162-211` (`atomicWriteText`) byte-for-byte (§10.3).
-
-**Subagent review trigger:** YES — `apps/admin/server/**` (validation contract + atomic-write semantics; review verifies the atomic-write helper matches `publishDataset.ts:162-211` byte-for-byte AND that PUT validation enforces the `editor_modes` refinement AND that corrupt-workspace handling preserves the file rather than overwriting).
-
-**Acceptance gate:** `npm run qa` green; PUT round-trip verified in unit tests; atomic-write semantics verified (tmp file cleanup, parent-dir fsync EBADF tolerance on macOS APFS); `editor_modes` reject cases produce the documented `400 invalid-resort` envelopes.
+Status: **DONE** — merged in [#94](https://github.com/mathvbarone/snowboard-trip-advisor/pull/94) (commit `1a2c52e`). Delivered: `apps/admin/server/resortUpsert.ts` real handler (replaces 4.1b's 501 stub) with deep-merge for `Resort.field_sources`, shallow-merge for top-level `Resort` / `live_signal` / `editor_modes`, branded `modified_at` stamping, `WorkspaceFile.refine()` cross-key invariant rejecting unknown `editor_modes` keys as `400 invalid-resort`, empty-body reject as `400 invalid-request`, and corrupt-workspace handling returning `500 workspace-corrupt` while refusing to overwrite (per §10.3.1). `apps/admin/server/workspace.ts` gains `atomicWriteWorkspaceFile` consuming the now-exported `atomicWriteText` from `@snowboard-trip-advisor/schema/node` (single canonical implementation per §10.3 — write tmp → fsync(fd) → rename → fsync(parent_dir) with macOS APFS `EBADF` tolerance). `apps/admin/server/dispatch.ts` MODIFIED to read `(err as Error & { details? }).details` and pass it into the error envelope (per spec §4.10's `{ error: { code, message, details? } }` shape — required for the cross-key refinement to surface its actionable list of bad keys).
 
 ### 7.13 PR 4.4d — Editor edit interaction
 
-**Goal.** Editor becomes edit-interactive: `useWorkspaceState` carries the in-flight draft + debounced PUT, `useModeToggle` flips AUTO↔MANUAL via `editor_modes`, MANUAL exposes the edit input, integration write round-trip via `bridgeHandlers(tmpdir)` proves the workspace file is actually written and survives reload.
-
-**Branch:** `epic-4/pr-4.4d-editor-write`. **Depends on:** 4.4c merged. **README:** skip.
-
-**Files (tests first):**
-
-- Create `apps/admin/src/state/useModeToggle.test.ts` — verifies the `validPaths` guard per §6.1 / P0-2 fold:
-  - Calling `toggleMode('a')` when `'a' ∈ Object.keys(resort.field_sources)` emits a PUT with the new `editor_modes` map.
-  - Calling `toggleMode('ghost')` when `'ghost' ∉ field_sources` is a **silent no-op** (no PUT emitted, no `console` call, no thrown error) — per Codex P2 fold on `e8a2374` (`eslint.config.js:90` `no-console: error` precludes diagnostic logging in app code; the schema refinement on the server is the load-bearing safety).
-  - Default: missing `editor_modes` entry projects as `'auto'`.
-- Create `apps/admin/src/state/useWorkspaceState.test.ts` (moved from 4.4c per P1-6 fold) — unit tests for in-flight draft state + debounced PUT.
-- Create `tests/integration/apps/admin/resort-editor-write.test.tsx` — **bridge tier per §6.3 / P0-3 fold**: `beforeEach` creates a per-test workspace tmpdir, calls `server.use(...bridgeHandlers(tmpdir))`. The test then verifies ModeToggle flips, MANUAL edit triggers PUT, **the workspace file is written to the tmpdir** (filesystem assertion, NOT just MSW request log), `editor_modes` map persists, and page reload (re-mounting the editor) preserves the workspace state through the bridge.
-- Create `apps/admin/src/state/useModeToggle.ts` — per-field AUTO/MANUAL state. Reads from `WorkspaceFile.editor_modes`; computes `validPaths = Object.keys(resort.field_sources)`; **silently no-ops** when the requested path is not in `validPaths` per the test deliverable above (NO `console.warn` — `eslint.config.js:90` blocks `console` in app code).
-- Create `apps/admin/src/state/useWorkspaceState.ts` (moved from 4.4c per P1-6 fold) — local UI state for in-flight edits with debounced PUT (default debounce: 500ms). Reads / writes `editor_modes` as part of the workspace state.
-- Modify `apps/admin/src/views/ResortEditor/FieldRow.tsx` — add edit input affordance in MANUAL mode; debounced auto-save via `useWorkspaceState`.
-- Modify `apps/admin/src/views/ResortEditor/ModeToggle.tsx` — interactive (AUTO ↔ MANUAL); reads/writes `editor_modes` via `useModeToggle`.
-- Modify `apps/admin/src/test-setup.ts` if needed for the workspace-file test fixture loading.
-
-**Subagent review trigger:** NO (the schema + write surface already shipped under review in 4.1a + 4.4c).
-
-**Acceptance gate:** End-to-end MANUAL edit → PUT → workspace file written **on disk** (verified via bridge tmpdir assertion); page reload preserves `editor_modes`; per-field round-trip verified; `validPaths` guard prevents invalid PUTs.
+Status: **DONE** — merged in [#95](https://github.com/mathvbarone/snowboard-trip-advisor/pull/95) (commit `07f2196`). Delivered: `apps/admin/src/state/useWorkspaceState.ts` (module-scoped per-slug `Map<ResortSlug, SlugStore>` singleton subscribed via `useSyncExternalStore`, 500ms debounce, in-flight token + revision counter + concurrent-PUT queue, draft reset + `prepopulateResortDetail` on PUT success per Decision D13, manual `FieldSource` provenance written on value edit per Decision D12) + `apps/admin/src/state/useModeToggle.ts` (silent no-op when path ∉ `validPaths`, since `eslint.config.js:90` blocks `console` in app code) + button-based `<ModeToggle>` (DS-Button-based, replacing 4.4b's inline `<span role="switch">` to comply with `RAW_HTML_ELS`) + MANUAL edit input via DS `Input type="text"` with JS-side numeric/range/integer validation for the 7 durable numeric paths + a minimal responsive read-only gate below the `md` breakpoint (Decision D11, polished in PR 4.6a) + `tests/integration/apps/admin/resort-editor-write.test.tsx` bridge integration asserting workspace files land on disk in a per-test tmpdir. **Spec deviations:** `useWorkspaceState` / `useModeToggle` derive `slug` internally via `useURLState` (Decision D7, avoids prop-drilling through `MetricPanel.tsx`); `<EditorErrorBoundary>` co-located inside `ResortEditor.tsx` rather than as a separate file (file budget); `useResortList.__resetForTests` remains unwired into `apps/admin/src/test-setup.ts` — pre-existing technical debt explicitly out-of-scope for Tier 3. **Phase-1 limitation carried forward (PR 4.6a polish):** `useWorkspaceState` in-flight-clear race (Codex P2-B family, surfaced across 3 of the 4 Codex review rounds on PR #95) — see [`docs/superpowers/handoffs/2026-05-11-post-epic-4-tier-3.md`](../handoffs/2026-05-11-post-epic-4-tier-3.md) for full reproducer + recovery + architectural-fix tradeoffs.
 
 ### 7.14 PR 4.5a — Publish handler + listPublishes handler
 
