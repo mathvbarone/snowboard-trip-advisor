@@ -48,6 +48,14 @@ export function Toast(props: ToastProps): JSX.Element {
   const remainingRef = useRef<number>(dismissAfterMs)
   const startedAtRef = useRef<number>(Date.now())
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Codex round 5 PR #100 P2 fold: track the previously-rendered
+  // `dismissAfterMs` so the main effect can distinguish "duration swap"
+  // (must reset `remainingRef` to the full new duration) from
+  // "onDismiss-only swap" (must preserve elapsed progress). Without this,
+  // a parent re-rendering more often than `dismissAfterMs` with an inline
+  // `onDismiss` arrow kept resetting `remainingRef` to full and the toast
+  // lived indefinitely.
+  const prevDismissAfterMsRef = useRef<number>(dismissAfterMs)
   // Codex round 2 PR #100 P2 fold: track hover + focus independently so a
   // mouseleave-after-mouseenter does NOT resume the timer while the
   // keyboard user is still focused (and vice versa). The timer resumes only
@@ -56,28 +64,40 @@ export function Toast(props: ToastProps): JSX.Element {
   const isFocusedRef = useRef<boolean>(false)
 
   // Codex round 1 PR #100 P2 fold: include `dismissAfterMs` in the effect
-  // dep-array and reset `remainingRef` at the top of each run so consumers
-  // re-rendering <Toast> in place with a new variant or `dismissAfterMs`
-  // adopt the new duration. The single-slot <ToastProvider> path remounts
-  // <Toast> via the per-show key (Decision C2), so this effect only re-runs
-  // for direct-consumer use; that path was previously stuck on the
-  // first-render duration.
+  // dep-array so consumers re-rendering <Toast> in place with a new variant
+  // or `dismissAfterMs` adopt the new duration. The single-slot
+  // <ToastProvider> path remounts <Toast> via the per-show key
+  // (Decision C2), so this effect only re-runs for direct-consumer use;
+  // that path was previously stuck on the first-render duration.
   //
   // Codex round 3 PR #100 P2 fold: when the effect restarts while either
   // pause flag is active (e.g. consumer passes a new inline `onDismiss`
   // identity during a parent re-render, or swaps `dismissAfterMs` while the
   // user is still hovering / focused), leave the timer cleared instead of
   // unconditionally scheduling. Resume runs from `handleMouseLeave` /
-  // `handleBlur` when both flags clear, using the fresh `remainingRef`
-  // captured above for the full new duration.
+  // `handleBlur` when both flags clear.
+  //
+  // Codex round 5 PR #100 P2 fold: only reset `remainingRef` when
+  // `dismissAfterMs` ACTUALLY changes — onDismiss-identity-only swaps must
+  // preserve elapsed progress, otherwise a parent that re-renders more
+  // often than `dismissAfterMs` keeps the toast alive indefinitely. The
+  // cleanup snapshots elapsed time into `remainingRef` BEFORE clearing the
+  // timer so the next effect run picks up where this one left off.
   useEffect((): (() => void) => {
-    remainingRef.current = dismissAfterMs
+    if (prevDismissAfterMsRef.current !== dismissAfterMs) {
+      remainingRef.current = dismissAfterMs
+      prevDismissAfterMsRef.current = dismissAfterMs
+    }
     startedAtRef.current = Date.now()
     if (!isHoveredRef.current && !isFocusedRef.current) {
       timerRef.current = setTimeout(onDismiss, remainingRef.current)
     }
     return (): void => {
       if (timerRef.current !== null) {
+        remainingRef.current = Math.max(
+          0,
+          remainingRef.current - (Date.now() - startedAtRef.current),
+        )
         clearTimeout(timerRef.current)
         timerRef.current = null
       }

@@ -390,6 +390,77 @@ describe('Toast — variants + ARIA', (): void => {
       vi.useRealTimers()
     }
   })
+
+  // Codex round 5 PR #100 P2 fold: when only the onDismiss callback
+  // identity changes (e.g. a parent re-rendering with an inline arrow
+  // every N seconds), the effect must preserve elapsed progress. Otherwise
+  // a parent that re-renders more often than `dismissAfterMs` keeps the
+  // toast alive indefinitely.
+  it('preserves elapsed time when onDismiss identity changes without dismissAfterMs change', (): void => {
+    vi.useFakeTimers()
+    try {
+      const onDismissA = vi.fn()
+      const onDismissB = vi.fn()
+      const { rerender } = render(
+        <Toast variant="info" message="X" onDismiss={onDismissA} dismissAfterMs={5000} />,
+      )
+      // 3s pass on the first callback.
+      act((): void => {
+        vi.advanceTimersByTime(3000)
+      })
+      // Parent re-renders with a fresh callback identity (e.g. inline arrow).
+      // dismissAfterMs is UNCHANGED — toast must respect the 5000ms boundary
+      // from mount, NOT reset to a fresh 5000ms.
+      rerender(<Toast variant="info" message="X" onDismiss={onDismissB} dismissAfterMs={5000} />)
+      act((): void => {
+        vi.advanceTimersByTime(1999)
+      })
+      expect(onDismissA).not.toHaveBeenCalled()
+      expect(onDismissB).not.toHaveBeenCalled()
+      act((): void => {
+        vi.advanceTimersByTime(1)
+      })
+      // 5000ms total from mount → fires the CURRENT callback identity.
+      expect(onDismissA).not.toHaveBeenCalled()
+      expect(onDismissB).toHaveBeenCalledOnce()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not extend toast lifetime when parent re-renders more often than dismissAfterMs (codex round 5 regression)', (): void => {
+    vi.useFakeTimers()
+    try {
+      const onDismiss = vi.fn()
+      const { rerender } = render(
+        <Toast variant="info" message="X" onDismiss={onDismiss} dismissAfterMs={5000} />,
+      )
+      // Simulate a chatty parent: re-render every 1000ms with a fresh
+      // inline callback identity. After 5 re-renders (5000ms elapsed), the
+      // toast must dismiss on its original schedule.
+      for (let i = 0; i < 5; i += 1) {
+        act((): void => {
+          vi.advanceTimersByTime(1000)
+        })
+        // Fresh callback identity every iteration — simulates an inline
+        // arrow that the parent re-creates on each render.
+        rerender(
+          <Toast
+            variant="info"
+            message="X"
+            onDismiss={(): void => {
+              onDismiss()
+            }}
+            dismissAfterMs={5000}
+          />,
+        )
+      }
+      // Cumulative wall time = 5000ms (5 × 1000) → exactly at the boundary.
+      expect(onDismiss).toHaveBeenCalledOnce()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
 
 describe('ToastProvider + useToast', (): void => {
