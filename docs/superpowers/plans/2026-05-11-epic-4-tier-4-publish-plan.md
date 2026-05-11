@@ -33,7 +33,7 @@ Per [spec §7.4](../specs/2026-05-01-epic-4-admin-app-design.md), after PRs 4.5a
 | **D1** | `usePublish` returns `{ submit, status, response, error, reset }`. `status` is `'idle' \| 'submitting' \| 'success' \| 'error'`. `submit(): Promise<void>` calls `apiClient.publish()` and updates state. `reset()` clears back to `'idle'` (used by the dialog to dismiss the error indicator before the user re-tries). **NOT** Suspense-based — publish is a mutation, not a render-time read. | Locality + ai-clean-code-adherence §2: Suspense for reads, callbacks for mutations. Don't reuse `useResortDetail`'s `use()` pattern for an action. |
 | **D2** | On successful publish, `usePublish` calls `invalidateListPublishes()` so the PublishHistory list reflects the new state. **NOT** `invalidateHealth()` — PublishDialog unmounts on success (it calls `onClose()`); next time it opens it re-fetches health from scratch via the existing `useHealth` `useEffect`-on-mount pattern (no cache, no stale read). The Dashboard's persistent health-card display lags one navigation cycle behind a publish; tracked as Phase-1 limitation for PR 4.6a Tier 5 polish per spec §7.16. **NOT** `invalidateResortDetail()` — workspace files weren't mutated. Per-resort detail caches stay valid. | Cache coherence + tight scope. Only invalidate what the publish mutation actually affects within the open user session. Dashboard staleness deferred. (Decision originally added `invalidateHealth()` per Tier 3 precedent; Codex round 2 PR #97 P2 fold revealed it pushes PR 4.5c over the 8-file budget without buying anything load-bearing for the publish flow.) |
 | ~~**D3**~~ | **Removed** per Codex round 2 PR #97 P2 fold. Original D3 extended `useHealth` with `invalidateHealth` + `useSyncExternalStore` subscription mirroring `useResortDetail`'s round-2 P2-C pattern. Dropped because (a) `useHealth.ts` + `useHealth.test.ts` would be 2 paths counted toward PR 4.5c's budget per AGENTS.md PR-sizing rule (paths, not concerns), pushing PR 4.5c to 9 files (over the ≤8 ceiling); (b) PublishDialog re-fetches health on each mount via the existing `useEffect` pattern, so the subscription wasn't load-bearing for the publish flow. Dashboard's persistent health-card display will lag a publish by one navigation cycle (acceptable Phase-1 limitation, tagged for PR 4.6a Tier 5 polish). | File budget + scope correctness. |
-| **E1** | `useListPublishes` is Suspense-friendly via React 19 `use()` + a single-promise cache (`Map<string, Promise<...>>` keyed by serialised query string, mirroring `useResortList`'s pattern). Consumer subscription via `useSyncExternalStore` for `invalidateListPublishes()` (NEW module export). Rejected-promise pinning per [ADR-0010](../../adr/0010-usedataset-rejected-promise-pinning.md). | Consistency with `useResortList`. `__resetForTests()` exposed for test isolation. |
+| **E1** | `useListPublishes` uses **`useState` + `useEffect` + module-level `inFlight: Map<string, Promise<...>>` cache** — matching the **actual** `useResortList` pattern (verified at `apps/admin/src/state/useResortList.ts:2-16`). **NOT** Suspense-based. Returns the 3-state discriminated union `{ value, error }` ∈ `{ value: ListPublishesResponse, error: null } \| { value: null, error: Error } \| { value: null, error: null }`. Exposes `invalidateListPublishes(): void` module export that clears the in-flight Map AND any cached state via a per-key subscriber-set (so post-publish mounts re-fetch). `__resetForTests()` clears caches. Codex round 9 PR #97 P1 fold: the original Decision E1 misread `useResortList`'s pattern as Suspense-based; correcting that eliminates the need for any `<Suspense>` boundary in `App.tsx`/`PublishHistory`. | Consistency with `useResortList` (verified). No Suspense boundary needed — App.tsx's `?route=publishes` branch can be plain `<Shell><PublishHistory /></Shell>` like the dashboard/resorts branches. |
 | **F1** | `PublishDialog` is a `<div role="dialog" aria-modal="true" aria-labelledby="publish-dialog-title">` overlay (raw `<dialog>` JSX banned by `RAW_HTML_ELS`). Backdrop: sibling `<div className="publish-dialog__backdrop">` with `onClick` → close. **Focus management** (Phase 1, P1-6 fold — scope reduced from full trap to MVP):
 - `useEffect` on mount focuses the first focusable element via ref.
 - `Escape` key handler closes the dialog.
@@ -1128,16 +1128,18 @@ export type { ToastProps, ToastVariant, ToastInput } from './components/Toast'
 
 **MSW handlers** for the new `getHealth` blocker fixtures live inline in `PublishDialog.test.tsx` (via `server.use(...)` per the existing apps/admin test-setup convention); no global `test-setup.ts` modification needed.
 
-#### Task 4.5c-1: `useListPublishes.test.ts` — Suspense + cache + invalidation (ships BEFORE usePublish per A1 P0-1 fold)
+#### Task 4.5c-1: `useListPublishes.test.ts` — useState/useEffect + cache + invalidation (ships BEFORE usePublish per A1 P0-1 fold)
 
 **Files:** Create `apps/admin/src/state/useListPublishes.test.ts`.
 
-- [ ] **Step 1: Write failing tests.** Test cases per Decision E1:
-  - First read suspends; second read for same query key returns synchronously from `cachedFulfilled`.
-  - Different `page` → different cache key → different promise.
-  - `invalidateListPublishes()` clears both maps; consumers re-fetch (verify via mounted-component re-render assertion using `useSyncExternalStore`).
-  - Rejected promise stays pinned in `cachedPromises` per ADR-0010; retry mounts re-throw the same rejection.
-  - `__resetForTests()` clears all maps + subscribers + revisions.
+- [ ] **Step 1: Write failing tests.** Test cases per Decision E1 (post-round-9 fold — useState pattern, NOT Suspense):
+  - Initial mount: `value === null` and `error === null` (loading state).
+  - After fetch resolves: `value === <response>`, `error === null`.
+  - Different `page` → different cache key → different inFlight promise → independent fetch.
+  - Fetch error: `value === null`, `error === <Error>`.
+  - `invalidateListPublishes()` triggers re-fetch in subscribed consumers (verify via mounted-component re-render assertion: render the hook, await initial settle, swap the MSW handler to return a new response, call `invalidateListPublishes()`, assert the new response is visible).
+  - Subscriber cleanup on unmount: unmounted consumer does NOT re-fetch on invalidation.
+  - `__resetForTests()` clears inFlight + subscribers maps.
 
 - [ ] **Step 2: Run — expect FAIL** (`useListPublishes.ts` does not yet exist).
 
@@ -1491,80 +1493,116 @@ export function Shell({ children }: { children: ReactNode }): JSX.Element {
 
 ```ts
 // apps/admin/src/state/useListPublishes.ts (shipped in PR 4.5c, kept here as reference)
-import { use, useSyncExternalStore } from 'react'
+// Codex round 9 PR #97 P1 fold: matches `useResortList.ts:2-16` pattern —
+// useState + useEffect + module-level inFlight Map. NOT Suspense-based.
+// Eliminates the need for any <Suspense> boundary in App.tsx / PublishHistory.
+import { useEffect, useState } from 'react'
 
 import type { ListPublishesQuery, ListPublishesResponse } from '@snowboard-trip-advisor/schema/api'
 
 import { apiClient } from '../lib/apiClient'
 
-const cachedPromises = new Map<string, Promise<ListPublishesResponse>>()
-const cachedFulfilled = new Map<string, ListPublishesResponse>()
-const subscribers = new Map<string, Set<() => void>>()
-const revisions = new Map<string, number>()
+export type UseListPublishesResult =
+  | { value: ListPublishesResponse; error: null }
+  | { value: null; error: Error }
+  | { value: null; error: null }
 
+// Module-level: keyed in-flight cache — same shape as useResortList.ts:16 +
+// useHealth.ts (per the existing project convention). Cleared on settle so a
+// second mount AFTER the first resolves triggers a fresh fetch.
+const inFlight = new Map<string, Promise<ListPublishesResponse>>()
+
+// Recursive-key-sorted JSON for stable cache keys across caller construction order
+// (per useResortList.ts's documented "queryKey deeply sorts nested object keys" invariant).
 function keyOf(q: ListPublishesQuery): string {
-  return JSON.stringify(q.page ?? { offset: 0, limit: 20 })
-}
-
-function loadOnce(q: ListPublishesQuery): Promise<ListPublishesResponse> {
-  const key = keyOf(q)
-  let p = cachedPromises.get(key)
-  if (p !== undefined) { return p }
-  p = apiClient.listPublishes(q).then((r): ListPublishesResponse => {
-    cachedFulfilled.set(key, r)
-    return r
-  })
-  cachedPromises.set(key, p)
-  return p
-}
-
-export function useListPublishes(q: ListPublishesQuery): ListPublishesResponse {
-  const key = keyOf(q)
-  useSyncExternalStore(
-    (cb): (() => void) => {
-      let set = subscribers.get(key)
-      if (set === undefined) { set = new Set(); subscribers.set(key, set) }
-      set.add(cb)
-      return (): void => { set!.delete(cb) }
-    },
-    (): number => revisions.get(key) ?? 0,
-    (): number => revisions.get(key) ?? 0,
+  return JSON.stringify(q, (_k, v): unknown =>
+    v && typeof v === 'object' && !Array.isArray(v)
+      ? Object.fromEntries(Object.entries(v).sort(([a], [b]): number => a.localeCompare(b)))
+      : v
   )
-  const fulfilled = cachedFulfilled.get(key)
-  if (fulfilled !== undefined) { return fulfilled }
-  return use(loadOnce(q))
 }
 
+// Per-key subscribers for `invalidateListPublishes()` post-publish refresh.
+const subscribers = new Map<string, Set<() => void>>()
+
+export function useListPublishes(q: ListPublishesQuery): UseListPublishesResult {
+  const [value, setValue] = useState<ListPublishesResponse | null>(null)
+  const [error, setError] = useState<Error | null>(null)
+  const key = keyOf(q)
+
+  useEffect((): (() => void) => {
+    let cancelled = false
+    let p = inFlight.get(key)
+    if (p === undefined) {
+      p = apiClient.listPublishes(q).finally((): void => { inFlight.delete(key) })
+      inFlight.set(key, p)
+    }
+    p.then((r): void => {
+      if (!cancelled) { setValue(r); setError(null) }
+    }, (e: unknown): void => {
+      if (!cancelled) { setError(e instanceof Error ? e : new Error(String(e))); setValue(null) }
+    })
+
+    // Subscribe to invalidations so post-publish kicks a re-fetch.
+    function onInvalidate(): void {
+      if (cancelled) { return }
+      setValue(null); setError(null)
+      const p2 = apiClient.listPublishes(q).finally((): void => { inFlight.delete(key) })
+      inFlight.set(key, p2)
+      p2.then((r): void => {
+        if (!cancelled) { setValue(r); setError(null) }
+      }, (e: unknown): void => {
+        if (!cancelled) { setError(e instanceof Error ? e : new Error(String(e))); setValue(null) }
+      })
+    }
+    let set = subscribers.get(key)
+    if (set === undefined) { set = new Set(); subscribers.set(key, set) }
+    set.add(onInvalidate)
+
+    return (): void => {
+      cancelled = true
+      set?.delete(onInvalidate)
+    }
+  }, [key])
+
+  return { value, error } as UseListPublishesResult
+}
+
+// usePublish.ts calls this on successful publish so the PublishHistory view re-fetches.
 export function invalidateListPublishes(): void {
-  cachedPromises.clear()
-  cachedFulfilled.clear()
-  for (const [key, set] of subscribers.entries()) {
-    revisions.set(key, (revisions.get(key) ?? 0) + 1)
+  inFlight.clear()
+  for (const set of subscribers.values()) {
     for (const cb of set) { cb() }
   }
 }
 
 export function __resetForTests(): void {
-  cachedPromises.clear()
-  cachedFulfilled.clear()
+  inFlight.clear()
   subscribers.clear()
-  revisions.clear()
 }
 ```
 
 #### Task 4.5d-1: `PublishHistory.test.tsx` + impl
 
 ```tsx
-// Test cases:
-//   - Renders empty state when ListPublishesResponse.items is [].
-//   - Renders N rows for N items; each shows version_id + published_at + resort_count + file_size_bytes.
+// Test cases (post-round-9 fold — view is a <section>, hook returns { value, error }):
+//   - Loading state: useListPublishes returns { value: null, error: null } → renders <p role="status">Loading…</p>.
+//   - Error state: useListPublishes returns { value: null, error } → renders <p role="alert"> with the error message.
+//   - Renders empty state when ListPublishesResponse.items is [] AND offset === 0.
+//   - Renders paginated-past-total empty state when items === [] AND offset > 0 (with "Back to first page" button).
+//   - Renders N rows for N items; each shows version_id + <time dateTime> + pluralized resort count + published_by.
 //   - Sorted desc by published_at (handler returns newest-first; component just renders).
 //   - Pagination: Next button → setRoute({ route: 'publishes', page: page + 1 }); disabled when offset + limit >= total.
 //   - Previous button → setRoute({ route: 'publishes', page: page - 1 }); disabled when page === 0.
+//   - Root element is <section aria-label="Publish history"> — NOT <main> — so it nests cleanly inside Shell's <main>{children}</main>.
 ```
 
 ```tsx
 // apps/admin/src/views/PublishHistory.tsx
+// Codex round 9 PR #97 P2 fold: root element is <section>, NOT <main>.
+// Shell already wraps children in <main>{children}</main> at Shell.tsx:42;
+// returning another <main> would nest the landmark — invalid HTML +
+// confusing for AT navigation. Dashboard.tsx uses <section> too.
 import { Button } from '@snowboard-trip-advisor/design-system'
 import type { JSX } from 'react'
 
@@ -1579,32 +1617,52 @@ export function PublishHistory(): JSX.Element {
   const page = route.page ?? 0
   const offset = page * PAGE_SIZE
 
-  const r = useListPublishes({ page: { offset, limit: PAGE_SIZE } })
+  // Codex round 9 PR #97 P1 fold: useListPublishes is useState-based (NOT
+  // Suspense); returns `{ value, error }`. Handle loading + error states inline
+  // — no <Suspense> boundary required upstream.
+  const { value, error } = useListPublishes({ page: { offset, limit: PAGE_SIZE } })
 
-  // P1-7 fold: split the empty-state branches.
-  if (r.items.length === 0 && offset === 0) {
+  if (error !== null) {
     return (
-      <main>
+      <section aria-label="Publish history">
         <h1>Publish history</h1>
-        <p>No publishes yet. Use the Publish button in the header to publish for the first time.</p>
-      </main>
+        <p role="alert">Could not load publish history: {error.message}</p>
+      </section>
     )
   }
-  if (r.items.length === 0 && offset > 0) {
+  if (value === null) {
     return (
-      <main>
+      <section aria-label="Publish history">
+        <h1>Publish history</h1>
+        <p role="status" aria-live="polite">Loading…</p>
+      </section>
+    )
+  }
+
+  // P1-7 fold: split the empty-state branches.
+  if (value.items.length === 0 && offset === 0) {
+    return (
+      <section aria-label="Publish history">
+        <h1>Publish history</h1>
+        <p>No publishes yet. Use the Publish button in the header to publish for the first time.</p>
+      </section>
+    )
+  }
+  if (value.items.length === 0 && offset > 0) {
+    return (
+      <section aria-label="Publish history">
         <h1>Publish history</h1>
         <p>No publishes on this page.</p>
         <Button onClick={(): void => { setRoute({ route: 'publishes' }) }}>Back to first page</Button>
-      </main>
+      </section>
     )
   }
 
   return (
-    <main>
+    <section aria-label="Publish history">
       <h1>Publish history</h1>
       <ul className="publish-history">
-        {r.items.map((item): JSX.Element => (
+        {value.items.map((item): JSX.Element => (
           <li key={item.version_id}>
             <span>{item.version_id}</span>
             <time dateTime={item.published_at}>{item.published_at}</time>
@@ -1623,11 +1681,11 @@ export function PublishHistory(): JSX.Element {
         >Previous</Button>
         <Button
           variant="ghost"
-          disabled={offset + PAGE_SIZE >= r.page.total}
+          disabled={offset + PAGE_SIZE >= value.page.total}
           onClick={(): void => { setRoute({ route: 'publishes', page: page + 1 }) }}
         >Next</Button>
       </nav>
-    </main>
+    </section>
   )
 }
 ```
@@ -1798,6 +1856,8 @@ _Populate as Codex / subagent / maintainer / user findings land per round. Carry
 | 8 | 4.5d | Codex round 7 PR #97 | **P2** `publish-flow.test.tsx` integration test imports used `../../../apps/admin/...` (3 segments — resolves to `tests/apps/admin/`, not repo-root `apps/admin/`); existing tests in the same directory (`resort-editor-write.test.tsx:13`, `resort-editor-read.test.tsx:20`, `shell.test.tsx:11`) use **4** segments. Also imported `{ App }` (named) but `apps/admin/src/App.tsx:9` declares `export default function App()`. Plan as-written would fail module resolution. | Corrected to `../../../../apps/admin/...` (4 segments) + `import App from '...'` (default). Comment cites the existing-test reference paths so an executing agent can verify. |
 | 9 | 4.5c | Codex round 8 PR #97 | **P2** `usePublish.submit()` only set state before the await — a double-click on Confirm (or any second `submit()` call before React commits the `setStatus('submitting')` render) would launch a second `apiClient.publish()`. Phase 1 does NOT deduplicate Idempotency-Keys server-side (per Decision J1), so two POSTs = two history archives + two `current.v1.json` writes for one user intent. | Added a synchronous in-flight guard via `useRef<boolean>(false)`: `submit()` returns early if the ref is true; sets the ref true before awaiting; clears in `finally`. Added a regression test that fires two concurrent `submit()`s and asserts `apiClient.publish` was called exactly once. |
 | 9 | 4.5a | Codex round 8 PR #97 | **P2** `dispatch.test.ts` test for pagination used dotted query keys (`?page.offset=5&page.limit=10`). The existing `apiClient.serializeQuery()` (`apps/admin/src/lib/apiClient.ts:64-73`) JSON-stringifies nested values as a single top-level param, so dotted keys would be silently ignored by `ListPublishesQuery.parse()`, defaulting to the first page. | Updated the test case to use the JSON-encoded format `?page={"offset":5,"limit":10}` (matching the apiClient serializer shape). Comment cites the serializer line numbers. |
+| 10 | 4.5c+d | Codex round 9 PR #97 (post-main-merge) | **P1** Decision E1 said `useListPublishes` was Suspense-based "mirroring `useResortList`'s pattern" — but `useResortList.ts:2-16` is actually `useState`+`useEffect`+inFlight Map, NOT Suspense. With my Suspense-based impl, `App.tsx`'s `?route=publishes` branch (`<Shell><PublishHistory /></Shell>`) lacked any `<Suspense>` boundary → first cold load would throw a suspension promise to React root and crash. | Rewrote `useListPublishes` to match the **actual** `useResortList` pattern: `useState` + `useEffect` + module-level `inFlight: Map<string, Promise<...>>` + per-key subscriber set for `invalidateListPublishes()`. Returns `{ value, error }` 3-state union. **No `<Suspense>` boundary needed** — PublishHistory handles loading/error inline (`role="status"` / `role="alert"`). Updated Decision E1, the impl reference block, the test outline, and the PublishHistory consumer accordingly. |
+| 10 | 4.5d | Codex round 9 PR #97 (post-main-merge) | **P2** `PublishHistory` returned `<main>...</main>` but `Shell.tsx:42` already wraps children in `<main>{children}</main>` → nested `main` landmarks (invalid HTML + AT navigation confusion). Other views (`Dashboard.tsx`, `ResortsTable.tsx`) use `<section>` instead. | Changed all four PublishHistory branches (loading, error, two empty states, content) to `<section aria-label="Publish history">`. Test outline updated to assert the root element is `<section>` not `<main>`. |
 
 ---
 
