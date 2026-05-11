@@ -7,18 +7,24 @@ import { invalidateListPublishes } from './useListPublishes'
 
 export type PublishStatus = 'idle' | 'submitting' | 'success' | 'error'
 
-export interface UsePublishResult {
-  readonly status: PublishStatus
-  readonly response: PublishResponse | null
-  readonly error: Error | null
+// Discriminated state. Encoding response/error in the variant lets the
+// dialog narrow on `status` without optional chaining or nullish-coalesce
+// fallbacks against impossible runtime states.
+type UsePublishState =
+  | { readonly status: 'idle'; readonly response: null; readonly error: null }
+  | { readonly status: 'submitting'; readonly response: null; readonly error: null }
+  | { readonly status: 'success'; readonly response: PublishResponse; readonly error: null }
+  | { readonly status: 'error'; readonly response: null; readonly error: Error }
+
+export type UsePublishResult = UsePublishState & {
   readonly submit: () => Promise<void>
   readonly reset: () => void
 }
 
+const INITIAL_STATE: UsePublishState = { status: 'idle', response: null, error: null }
+
 export function usePublish(): UsePublishResult {
-  const [status, setStatus] = useState<PublishStatus>('idle')
-  const [response, setResponse] = useState<PublishResponse | null>(null)
-  const [error, setError] = useState<Error | null>(null)
+  const [state, setState] = useState<UsePublishState>(INITIAL_STATE)
   // Synchronous in-flight guard. Without it, a double-click on Confirm (or
   // any second submit() before React commits `setStatus('submitting')`) would
   // launch a second apiClient.publish() — Phase 1 does NOT deduplicate
@@ -31,29 +37,28 @@ export function usePublish(): UsePublishResult {
       return
     }
     inFlightRef.current = true
-    setStatus('submitting')
-    setError(null)
+    setState({ status: 'submitting', response: null, error: null })
     try {
       const r = await apiClient.publish()
-      setResponse(r)
-      setStatus('success')
+      setState({ status: 'success', response: r, error: null })
       // Decision D2: only invalidate listPublishes — NOT useHealth (D3 dropped).
       invalidateListPublishes()
     } catch (e: unknown) {
-      setError(e instanceof Error ? e : new Error(String(e)))
-      setStatus('error')
+      setState({
+        status: 'error',
+        response: null,
+        error: e instanceof Error ? e : new Error(String(e)),
+      })
     } finally {
       inFlightRef.current = false
     }
   }
 
   function reset(): void {
-    setStatus('idle')
-    setResponse(null)
-    setError(null)
+    setState(INITIAL_STATE)
   }
 
-  return { status, response, error, submit, reset }
+  return { ...state, submit, reset }
 }
 
 /** Test-only: symmetry with module-state-bearing hooks (no module state here). */
