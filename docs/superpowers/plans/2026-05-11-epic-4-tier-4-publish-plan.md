@@ -919,9 +919,14 @@ describe('ToastProvider + useToast', (): void => {
     vi.useFakeTimers()
     function ReRenderParent({ tick }: { tick: number }): React.ReactElement {
       // Forces a re-render of ToastProvider's children via the `tick` prop.
+      // Codex round 25 PR #97 P2 fold: trigger the toast from useEffect, NOT
+      // during render — calling show() (which updates ToastProvider state)
+      // during a child render would warn "Cannot update a component while
+      // rendering a different component" and could loop.
       const { show } = useToast()
-      // Fire once on first render.
-      if (tick === 0) { show({ variant: 'info', message: 'X', dismissAfterMs: 5000 }) }
+      useEffect((): void => {
+        if (tick === 0) { show({ variant: 'info', message: 'X', dismissAfterMs: 5000 }) }
+      }, [tick, show])
       return <div data-tick={tick} />
     }
     const { rerender } = render(<ToastProvider><ReRenderParent tick={0} /></ToastProvider>)
@@ -1918,7 +1923,17 @@ describe('publish flow — bridge tier', (): void => {
 
     await user.click(await screen.findByRole('button', { name: 'Publish' }))
     expect(await screen.findByRole('dialog')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Confirm' }))
+    // Codex round 25 PR #97 P2 fold: useHealth is still pending right after
+    // open; the round-1 P2 fold makes PublishDialog fail-closed (`disabled`
+    // while `health.value === null`), so clicking Confirm immediately is a
+    // no-op and subsequent assertions flake. Wait for the loading copy to
+    // disappear (health resolved) AND for Confirm to be enabled before clicking.
+    await waitFor((): void => {
+      expect(screen.queryByText(/Loading pre-publish checks/)).toBeNull()
+    })
+    const confirm = await screen.findByRole('button', { name: 'Confirm' })
+    await waitFor((): void => { expect(confirm).not.toBeDisabled() })
+    await user.click(confirm)
 
     // Success Toast appears.
     // Codex round 21 PR #97 P2 fold: Toast renders `<div role="status"><span>{message}</span>…</div>`
@@ -2051,6 +2066,8 @@ _Populate as Codex / subagent / maintainer / user findings land per round. Carry
 | 24 | 4.5b | Codex round 23 PR #97 | **P2** `ToastProvider` passed an inline arrow `onDismiss={(): void => { setCurrent(null) }}` to `<Toast>`. Toast's timer `useEffect` depends on `onDismiss`; every ambient parent re-render (e.g., URL state changes immediately after a publish) gave `onDismiss` a new identity, triggered the effect cleanup (clearTimeout) + restart with `remainingRef.current` still at the full duration → auto-dismiss window kept resetting; Toast effectively never auto-dismissed if anything re-rendered nearby. | Wrapped the dismiss callback in `useCallback(..., [])` (setCurrent is stable) so its identity is stable across renders. Added a regression test that fires a Toast, then re-renders the ToastProvider parent 4 times during the 5s window (advancing fake timers each time) and asserts the Toast auto-dismisses at the configured 5s mark, NOT later. |
 | 25 | 4.5d | Codex round 24 PR #97 | **P2** Changing `Shell.tsx`'s SIDEBAR_ITEMS Publishes `href` to `/?route=publishes` would break the existing `tests/integration/apps/admin/shell.test.tsx:60` assertion (`toHaveAttribute('href', '/publishes')`). PR 4.5d's file list didn't include the test → `npm run qa` would fail on merge. | Added `tests/integration/apps/admin/shell.test.tsx` MODIFY to PR 4.5d's file list (now 8/8 budget); update the assertion from `'/publishes'` → `'/?route=publishes'` alongside the Shell.tsx change. |
 | 25 | 4.5c | Codex round 24 PR #97 | **P2** `useListPublishes`'s standalone `p.finally(...)` chained off the stored promise created a second promise that rejects with the same error AND is never caught. The `p.then(_, rejectHandler)` attached the rejection handler to the ORIGINAL promise, not to the `.finally`-chained one, so a fetch rejection produces an unhandled rejection. | Chained `.finally(...)` INTO the stored promise (mirrors `useResortList.ts:58-61` shape): `p = apiClient.listPublishes(q).finally((): void => { if (inFlight.get(key) === p) inFlight.delete(key) })`. The stored `p` is now the .finally-chained promise; `p.then(_, rejectHandler)` attaches to the same one that rejects. Same fix for the `onInvalidate` path (`p2`). |
+| 26 | 4.5b | Codex round 25 PR #97 | **P2** Round-23 regression test's `ReRenderParent` called `show()` during render (`if (tick === 0) { show(...) }`). `show()` updates `ToastProvider` state — updating a parent during a child render triggers React's "Cannot update a component while rendering" warning and can loop. | Moved the `show()` call into `useEffect((): void => { if (tick === 0) show(...) }, [tick, show])`. |
+| 26 | 4.5d | Codex round 25 PR #97 | **P2** Bridge test clicked Confirm immediately after opening the dialog, but `useHealth` is still pending → fail-closed disable (round-1 P2 fold) makes the click a no-op. Subsequent Toast/history assertions would flake. | Added `await waitFor(() => expect(screen.queryByText(/Loading pre-publish checks/)).toBeNull())` + `await waitFor(() => expect(confirm).not.toBeDisabled())` before the click. |
 
 ---
 
