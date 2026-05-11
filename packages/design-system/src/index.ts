@@ -80,3 +80,8 @@ export {
   type DropdownMenuProps,
   type DropdownMenuItem,
 } from './components/DropdownMenu'
+// PR 4.5b: Toast primitive lands for the Tier 4 publish flow (success /
+// failure notifications). `ToastProvider` wraps Shell's main content; the
+// publish dialog (PR 4.5c) calls `useToast().show` to surface the outcome.
+export { Toast, ToastProvider, useToast } from './components/Toast'
+export type { ToastInput, ToastProps, ToastVariant } from './components/Toast'

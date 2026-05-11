@@ -10,7 +10,10 @@ import {
   formatPercent,
   Shell,
   Skeleton,
+  Toast,
+  ToastProvider,
   tokens,
+  useToast,
 } from './index'
 
 describe('package barrel (index.ts)', (): void => {
@@ -27,5 +30,15 @@ describe('package barrel (index.ts)', (): void => {
     expect(Skeleton).toBeDefined()
     expect(EmptyStateLayout).toBeDefined()
     expect(Button).toBeDefined()
+  })
+
+  // PR 4.5b: Toast primitive lands; the admin app's publish flow (PR 4.5c)
+  // imports `Toast`, `ToastProvider`, `useToast` (and the three types
+  // re-exported via `export type`). Pin the runtime re-exports here so
+  // accidental drops in the barrel surface as a test failure.
+  it('re-exports Toast, ToastProvider, and useToast for the Tier 4 publish flow', (): void => {
+    expect(Toast).toBeDefined()
+    expect(ToastProvider).toBeDefined()
+    expect(useToast).toBeDefined()
   })
 })
