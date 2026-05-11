@@ -107,6 +107,47 @@ describe('apiClient (PR 4.1a, spec §3.2 + §7.5)', (): void => {
     expect(r.resort_count).toBe(1)
   })
 
+  it('publish() sends an Idempotency-Key header matching UUID v4 regex (spec §4.9 invariant 5)', async (): Promise<void> => {
+    let capturedHeader: string | null = null
+    server.use(
+      http.post('/api/resorts/__all__/publish', ({ request }) => {
+        capturedHeader = request.headers.get('Idempotency-Key')
+        return HttpResponse.json({
+          version_id: 'v1',
+          archive_path: 'data/published/history/v1.json',
+          published_at: OBS_AT,
+          resort_count: 0,
+        })
+      }),
+    )
+    await apiClient.publish()
+    expect(capturedHeader).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    )
+  })
+
+  it('publish() generates a fresh Idempotency-Key per call', async (): Promise<void> => {
+    const captured: string[] = []
+    server.use(
+      http.post('/api/resorts/__all__/publish', ({ request }) => {
+        const v = request.headers.get('Idempotency-Key')
+        if (v !== null) {
+          captured.push(v)
+        }
+        return HttpResponse.json({
+          version_id: 'v1',
+          archive_path: 'data/published/history/v1.json',
+          published_at: OBS_AT,
+          resort_count: 0,
+        })
+      }),
+    )
+    await apiClient.publish()
+    await apiClient.publish()
+    expect(captured).toHaveLength(2)
+    expect(captured[0]).not.toBe(captured[1])
+  })
+
   it('listPublishes() returns parsed list', async (): Promise<void> => {
     server.use(
       http.get('/api/publishes', () =>
