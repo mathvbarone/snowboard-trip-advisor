@@ -1140,6 +1140,7 @@ export type { ToastProps, ToastVariant, ToastInput } from './components/Toast'
   - `invalidateListPublishes()` triggers re-fetch in subscribed consumers (verify via mounted-component re-render assertion: render the hook, await initial settle, swap the MSW handler to return a new response, call `invalidateListPublishes()`, assert the new response is visible).
   - Subscriber cleanup on unmount: unmounted consumer does NOT re-fetch on invalidation.
   - `__resetForTests()` clears inFlight + subscribers maps.
+  - **Stale-request identity guard** (Codex round 10 PR #97 P2 fold): start fetch `p1` (returns response A after 50ms); call `invalidateListPublishes()` 10ms in (clears inFlight + fires onInvalidate which starts `p2` returning response B after 5ms); assert that after `p1` resolves, the component state still holds B (not A). Mirrors `useResortDetail.ts:94` `cachedPromises.get(slug) === next` pattern.
 
 - [ ] **Step 2: Run — expect FAIL** (`useListPublishes.ts` does not yet exist).
 
@@ -1476,7 +1477,7 @@ export function Shell({ children }: { children: ReactNode }): JSX.Element {
 
 **Subagent review trigger:** **NO** (no CODEOWNERS-protected paths; integration test is in `tests/integration/**`).
 
-**File budget:** 6 files (within ≤8 budget — `useListPublishes` moved to PR 4.5c per A1 P0-1 fold).
+**File budget:** 7 files (within ≤8 budget; Codex round 10 PR #97 P2 fold added Shell.tsx MODIFY for the Sidebar Publishes-link href fix).
 
 **Files (tests first):**
 
@@ -1485,7 +1486,8 @@ export function Shell({ children }: { children: ReactNode }): JSX.Element {
 3. **Modify** `apps/admin/src/lib/urlState.ts` — add `{ route: 'publishes'; page?: number }` variant.
 4. **Modify** `apps/admin/src/lib/urlState.test.ts` — round-trip case for `?route=publishes&page=2`.
 5. **Modify** `apps/admin/src/App.tsx` — mount `<PublishHistory />` on `publishes` route.
-6. **Create** `tests/integration/apps/admin/publish-flow.test.tsx` — bridge-tier end-to-end (per Decision I1).
+6. **Modify** `apps/admin/src/views/Shell.tsx` — change the SIDEBAR_ITEMS `Publishes` entry's `href` from `/publishes` to `/?route=publishes` so clicking the sidebar link reaches the new route via urlState's query-string parser (Codex round 10 PR #97 P2 fold). **Pre-existing Sidebar pathname-vs-query mismatch for the other links (`/`, `/resorts`) stays Tier 5 polish per the post-Tier-2 handoff** — fixing all of them is out of scope for this PR.
+7. **Create** `tests/integration/apps/admin/publish-flow.test.tsx` — bridge-tier end-to-end (per Decision I1). Add an assertion that clicking the Sidebar "Publishes" link navigates to `?route=publishes` and renders `<PublishHistory />`.
 
 #### Reference — `useListPublishes.ts` impl
 
@@ -1534,25 +1536,43 @@ export function useListPublishes(q: ListPublishesQuery): UseListPublishesResult 
     let cancelled = false
     let p = inFlight.get(key)
     if (p === undefined) {
-      p = apiClient.listPublishes(q).finally((): void => { inFlight.delete(key) })
+      p = apiClient.listPublishes(q).finally((): void => {
+        // Codex round 10 PR #97 P2 fold: identity-guard the inFlight delete.
+        // After invalidateListPublishes() clears the Map and a new promise
+        // takes this slot, we must NOT delete the new one when the stale
+        // promise settles.
+        if (inFlight.get(key) === p) { inFlight.delete(key) }
+      })
       inFlight.set(key, p)
     }
+    const currentP = p
     p.then((r): void => {
-      if (!cancelled) { setValue(r); setError(null) }
+      // Codex round 10 PR #97 P2 fold: stale-request identity guard
+      // (mirrors useResortDetail.ts:94 `cachedPromises.get(slug) === next`).
+      // If invalidate kicked a fresh fetch while this older one was in
+      // flight, the older response MUST NOT overwrite component state with
+      // stale data. Guard via both `cancelled` (unmount) and identity check.
+      if (cancelled || inFlight.get(key) !== currentP) { return }
+      setValue(r); setError(null)
     }, (e: unknown): void => {
-      if (!cancelled) { setError(e instanceof Error ? e : new Error(String(e))); setValue(null) }
+      if (cancelled || inFlight.get(key) !== currentP) { return }
+      setError(e instanceof Error ? e : new Error(String(e))); setValue(null)
     })
 
     // Subscribe to invalidations so post-publish kicks a re-fetch.
     function onInvalidate(): void {
       if (cancelled) { return }
       setValue(null); setError(null)
-      const p2 = apiClient.listPublishes(q).finally((): void => { inFlight.delete(key) })
+      const p2 = apiClient.listPublishes(q).finally((): void => {
+        if (inFlight.get(key) === p2) { inFlight.delete(key) }
+      })
       inFlight.set(key, p2)
       p2.then((r): void => {
-        if (!cancelled) { setValue(r); setError(null) }
+        if (cancelled || inFlight.get(key) !== p2) { return }
+        setValue(r); setError(null)
       }, (e: unknown): void => {
-        if (!cancelled) { setError(e instanceof Error ? e : new Error(String(e))); setValue(null) }
+        if (cancelled || inFlight.get(key) !== p2) { return }
+        setError(e instanceof Error ? e : new Error(String(e))); setValue(null)
       })
     }
     let set = subscribers.get(key)
@@ -1714,13 +1734,25 @@ if (route === 'publishes') {
 // urlState.test.ts: round-trip cases for ?route=publishes (page=0 default) and ?route=publishes&page=2.
 ```
 
-#### Task 4.5d-3: `App.tsx` MODIFY — mount PublishHistory on `publishes` route
+#### Task 4.5d-3: `App.tsx` MODIFY — mount PublishHistory on `publishes` route + Shell.tsx Sidebar href fix
 
 ```tsx
+// apps/admin/src/App.tsx
 if (route.route === 'publishes') {
   return <Shell><PublishHistory /></Shell>
 }
 ```
+
+```tsx
+// apps/admin/src/views/Shell.tsx — SIDEBAR_ITEMS Publishes-link fix per Codex round 10 PR #97 P2 fold.
+const SIDEBAR_ITEMS = [
+  { href: '/', label: 'Dashboard' },
+  { href: '/resorts', label: 'Resorts' },
+  { href: '/?route=publishes', label: 'Publishes' },  // ← was '/publishes'; query-string form so urlState routes correctly.
+] as const
+```
+
+The other two sidebar items (`/` for Dashboard and `/resorts` for Resorts) keep their pathname-form hrefs — fixing the full Sidebar pathname-vs-query mismatch is **Tier 5 polish** per the post-Tier-2 handoff and out of scope here. Only the Publishes link gets the in-scope fix since it's the new route this PR adds.
 
 #### Task 4.5d-4: `publish-flow.test.tsx` bridge integration
 
@@ -1858,6 +1890,8 @@ _Populate as Codex / subagent / maintainer / user findings land per round. Carry
 | 9 | 4.5a | Codex round 8 PR #97 | **P2** `dispatch.test.ts` test for pagination used dotted query keys (`?page.offset=5&page.limit=10`). The existing `apiClient.serializeQuery()` (`apps/admin/src/lib/apiClient.ts:64-73`) JSON-stringifies nested values as a single top-level param, so dotted keys would be silently ignored by `ListPublishesQuery.parse()`, defaulting to the first page. | Updated the test case to use the JSON-encoded format `?page={"offset":5,"limit":10}` (matching the apiClient serializer shape). Comment cites the serializer line numbers. |
 | 10 | 4.5c+d | Codex round 9 PR #97 (post-main-merge) | **P1** Decision E1 said `useListPublishes` was Suspense-based "mirroring `useResortList`'s pattern" — but `useResortList.ts:2-16` is actually `useState`+`useEffect`+inFlight Map, NOT Suspense. With my Suspense-based impl, `App.tsx`'s `?route=publishes` branch (`<Shell><PublishHistory /></Shell>`) lacked any `<Suspense>` boundary → first cold load would throw a suspension promise to React root and crash. | Rewrote `useListPublishes` to match the **actual** `useResortList` pattern: `useState` + `useEffect` + module-level `inFlight: Map<string, Promise<...>>` + per-key subscriber set for `invalidateListPublishes()`. Returns `{ value, error }` 3-state union. **No `<Suspense>` boundary needed** — PublishHistory handles loading/error inline (`role="status"` / `role="alert"`). Updated Decision E1, the impl reference block, the test outline, and the PublishHistory consumer accordingly. |
 | 10 | 4.5d | Codex round 9 PR #97 (post-main-merge) | **P2** `PublishHistory` returned `<main>...</main>` but `Shell.tsx:42` already wraps children in `<main>{children}</main>` → nested `main` landmarks (invalid HTML + AT navigation confusion). Other views (`Dashboard.tsx`, `ResortsTable.tsx`) use `<section>` instead. | Changed all four PublishHistory branches (loading, error, two empty states, content) to `<section aria-label="Publish history">`. Test outline updated to assert the root element is `<section>` not `<main>`. |
+| 11 | 4.5c | Codex round 10 PR #97 | **P2** `useListPublishes` round-9 rewrite lacked the stale-request identity guard. After `invalidateListPublishes()` clears the inFlight Map and a fresh fetch starts, the older promise's `.then` could still resolve and overwrite component state with stale data — the `useResortDetail.ts:94` `cachedPromises.get(slug) === next` guard the previous Suspense-based impl had. | Captured `currentP = p` reference; gated all `.then` writes on `inFlight.get(key) === currentP` (and same for `p2` in `onInvalidate`). Also identity-guarded the `inFlight.delete()` in `.finally` so a stale settle doesn't evict a fresh promise. Added a test case asserting that after invalidating mid-flight, the stale response cannot overwrite the fresh response in component state. |
+| 11 | 4.5d | Codex round 10 PR #97 | **P2** `Shell.tsx`'s SIDEBAR_ITEMS Publishes link still pointed at the pathname `/publishes`, but urlState is query-string-driven (`?route=publishes`). Clicking the sidebar Publishes link would navigate to `/publishes` with no `route` query → `parseURL` falls back to dashboard → PublishHistory never mounts via sidebar nav. | Added `apps/admin/src/views/Shell.tsx` MODIFY to PR 4.5d's file list (now 7/8 budget). Change is one line: `href: '/publishes'` → `href: '/?route=publishes'` for the Publishes item only. Other sidebar items keep their pathname-form hrefs — fixing the full Sidebar pathname-vs-query mismatch stays **Tier 5 polish per the post-Tier-2 handoff** as previously documented (out of scope here). publish-flow.test.tsx gains a sidebar-click assertion that the Publishes link routes correctly. |
 
 ---
 
