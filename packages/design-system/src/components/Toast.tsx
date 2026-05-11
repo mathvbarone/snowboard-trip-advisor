@@ -261,6 +261,17 @@ export function ToastProvider({ children }: { children: ReactNode }): JSX.Elemen
   // MDN's dynamic-insertion exception.
   const [politeAnnouncement, setPoliteAnnouncement] = useState<string>('')
   const keyRef = useRef<number>(0)
+  // Codex round 12 PR #100 P2 fold: per-show counter used to invalidate
+  // stale queueMicrotask populate callbacks. When show() is called
+  // repeatedly before the deferred populate fires (e.g. show(success)
+  // immediately followed by show(error) in the same event/effect tick),
+  // the earlier microtask would otherwise write the now-stale message
+  // into the polite region after the visible toast has already been
+  // replaced. The microtask captures the counter at schedule time and
+  // skips the populate if the counter has advanced. Bumped by EVERY
+  // show() — including error replacements — so error invalidates a
+  // prior info/success microtask too.
+  const politeShowCounterRef = useRef<number>(0)
 
   // Codex round 23 (PR #97) P2 fold: useCallback-stable `onDismiss`.
   // Without this, the inline arrow we previously passed to <Toast> got a new
@@ -304,10 +315,22 @@ export function ToastProvider({ children }: { children: ReactNode }): JSX.Elemen
         // commits the cleared state to the DOM, so the empty
         // intermediate is observable to AT in both event-handler and
         // effect contexts.
+        //
+        // Codex round 12 PR #100 P2 fold: bump the show-counter on
+        // EVERY show() (including error) and clear the region on every
+        // show(). Each queueMicrotask captures the counter at schedule
+        // time and skips the populate if a later show() has bumped it.
+        // Without this, a queued info/success populate could fire AFTER
+        // a subsequent error replacement and write the now-stale message
+        // into the polite region.
+        politeShowCounterRef.current += 1
+        const myShowKey = politeShowCounterRef.current
+        setPoliteAnnouncement('')
         if (input.variant !== 'error') {
-          setPoliteAnnouncement('')
           queueMicrotask((): void => {
-            setPoliteAnnouncement(input.message)
+            if (myShowKey === politeShowCounterRef.current) {
+              setPoliteAnnouncement(input.message)
+            }
           })
         }
       },

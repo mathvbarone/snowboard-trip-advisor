@@ -969,4 +969,111 @@ describe('ToastProvider + useToast', (): void => {
     expect(additions).toContain('Published successfully')
     expect(region.textContent).toBe('Published successfully')
   })
+
+  // Codex round 12 PR #100 P2 fold: when show() is called repeatedly
+  // before the deferred populate microtask fires (e.g. a publish flow
+  // resolves with a transient success and then an immediate error in
+  // the same tick), the earlier microtask would otherwise write its
+  // now-stale message into the polite region AFTER the visible toast
+  // has already been replaced. The show-counter gate skips stale writes.
+  it('does NOT write a stale success message to the polite region when error replacement follows in the same tick', async (): Promise<void> => {
+    function SuccessThenError(): ReactElement {
+      const { show } = useToast()
+      return (
+        <button
+          type="button"
+          onClick={(): void => {
+            show({ variant: 'success', message: 'Yay' })
+            show({ variant: 'error', message: 'Oops' })
+          }}
+        >
+          rapid-fire
+        </button>
+      )
+    }
+    render(
+      <ToastProvider>
+        <SuccessThenError />
+      </ToastProvider>,
+    )
+
+    // Track text-node additions to the polite region.
+    const region = getPoliteRegion()
+    const additions: Array<string> = []
+    const observer = new MutationObserver((records): void => {
+      for (const record of records) {
+        for (const node of record.addedNodes) {
+          additions.push(node.textContent ?? '')
+        }
+      }
+    })
+    observer.observe(region, { characterData: true, childList: true, subtree: true })
+
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'rapid-fire' }))
+      // Wait for the visible error toast (proves both shows landed).
+      await waitFor((): void => {
+        expect(screen.getByRole('alert')).toHaveTextContent('Oops')
+      })
+      // Drain any pending microtasks before disconnecting.
+      await Promise.resolve()
+      await Promise.resolve()
+    } finally {
+      observer.disconnect()
+    }
+
+    // The pending 'Yay' microtask was invalidated by the error
+    // replacement; the polite region must never have received it.
+    expect(additions).not.toContain('Yay')
+    // The polite region is empty (error path doesn't populate it; the
+    // pending success microtask was skipped).
+    expect(region.textContent).toBe('')
+  })
+
+  it('does NOT write a stale earlier message to the polite region when a second success follows in the same tick', async (): Promise<void> => {
+    function DoubleSuccess(): ReactElement {
+      const { show } = useToast()
+      return (
+        <button
+          type="button"
+          onClick={(): void => {
+            show({ variant: 'success', message: 'First' })
+            show({ variant: 'success', message: 'Second' })
+          }}
+        >
+          rapid-fire
+        </button>
+      )
+    }
+    render(
+      <ToastProvider>
+        <DoubleSuccess />
+      </ToastProvider>,
+    )
+
+    const region = getPoliteRegion()
+    const additions: Array<string> = []
+    const observer = new MutationObserver((records): void => {
+      for (const record of records) {
+        for (const node of record.addedNodes) {
+          additions.push(node.textContent ?? '')
+        }
+      }
+    })
+    observer.observe(region, { characterData: true, childList: true, subtree: true })
+
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'rapid-fire' }))
+      await waitFor((): void => {
+        expect(region.textContent).toBe('Second')
+      })
+    } finally {
+      observer.disconnect()
+    }
+
+    // 'First' must never have been written to the polite region — its
+    // microtask was invalidated by the 'Second' show's counter bump.
+    expect(additions).not.toContain('First')
+    expect(additions).toContain('Second')
+  })
 })
