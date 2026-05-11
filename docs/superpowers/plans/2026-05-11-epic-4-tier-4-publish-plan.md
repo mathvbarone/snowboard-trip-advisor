@@ -69,18 +69,19 @@ Per [spec §7.4](../specs/2026-05-01-epic-4-admin-app-design.md), after PRs 4.5a
 
 **Subagent review trigger:** **YES** — `apps/admin/server/**` is the Phase 2 portability surface. Brief the reviewer to verify: (a) `composePublishInput` correctly merges workspace ∪ published (workspace overrides per slug; published-only resorts kept), (b) the handler calls `publishDataset()` from `@snowboard-trip-advisor/schema/node` (NOT a subprocess), (c) `slug === '__all__'` assertion catches per-slug calls in Phase 1, (d) listPublishes parses the `${counter}-${iso}.json` filename pattern (NOT `v_<iso>`) per `packages/schema/src/publishDataset.ts:81`, (e) `dispatch.ts` route registration uses the wire-schema's `PublishSlugParam` union.
 
-**File budget:** 8 files (at ≤8 budget; Codex round 1 PR #97 fold added the `apiClient` Idempotency-Key wiring per Decision J1).
+**File budget:** 7 files (within ≤8 budget; Codex round 28 PR #97 P2 fold dropped `dispatch.ts` MODIFY — no change needed; routes + STATUS_FOR_CODE already cover the publish handler's surface).
 
 **Files (tests first):**
 
 1. **Create** `apps/admin/server/__tests__/publish.test.ts` — handler unit tests.
 2. **Create** `apps/admin/server/__tests__/listPublishes.test.ts` — handler unit tests.
-3. **Modify** `apps/admin/server/__tests__/dispatch.test.ts` — add bridge-routed positive controls for `POST /api/resorts/__all__/publish` and `GET /api/publishes`. **No Idempotency-Key passthrough test** — `DispatchInput` (`apps/admin/server/dispatch.ts:27-32`) has no `headers` field, so the dispatcher can't observe the header until Phase 2 plumbing lands (Codex round 16 PR #97 P2 fold revised Decision J1; round 20 P2 fold caught this stale file-list line).
+3. **Modify** `apps/admin/server/__tests__/dispatch.test.ts` — add bridge-routed positive controls for `POST /api/resorts/__all__/publish` and `GET /api/publishes`. **No Idempotency-Key passthrough test** — `DispatchInput` (`apps/admin/server/dispatch.ts:27-32`) has no `headers` field. (Codex round 16 + round 20 PR #97 P2 folds.)
 4. **Modify** `apps/admin/server/publish.ts` — replace 4.1b's 501 stub with the real handler.
 5. **Modify** `apps/admin/server/listPublishes.ts` — replace 4.1b's 501 stub with the real handler.
-6. **Modify** `apps/admin/server/dispatch.ts` — routes for `POST /api/resorts/:slug/publish` (line 92) + `GET /api/publishes` (line 100) are **already registered** against the 501 stubs (Codex round 14 PR #97 P2 fold); the only required change is adding `workspace-corrupt → 500` to `STATUS_FOR_CODE` (Codex round 1 PR #97 P1 fold per spec §10.3.1). The handler stub→real swap happens via the `publish.ts` / `listPublishes.ts` MODIFY entries (#4 and #5 below); the existing route entries pick up the real handlers automatically.
-7. **Modify** `apps/admin/src/lib/apiClient.ts` — inject `Idempotency-Key: ${crypto.randomUUID()}` header in `publish()` per Decision J1.
-8. **Modify** `apps/admin/src/lib/apiClient.test.ts` — assert the header is present + matches UUID regex.
+6. **Modify** `apps/admin/src/lib/apiClient.ts` — inject `Idempotency-Key: ${crypto.randomUUID()}` header in `publish()` per Decision J1.
+7. **Modify** `apps/admin/src/lib/apiClient.test.ts` — assert the header is present + matches UUID regex.
+
+**No `dispatch.ts` MODIFY** (Codex round 28 PR #97 P2 fold): the route entries + `STATUS_FOR_CODE` mappings (`publish-validation-failed`, `invalid-request`, `workspace-corrupt`) all already exist at `dispatch.ts` lines 91–103 and 199–205. The stub→real swap is handled entirely through `publish.ts` + `listPublishes.ts`.
 
 #### Task 4.5a-1: `publish.test.ts` happy path + slug assertion
 
@@ -650,9 +651,9 @@ it('routes GET /api/publishes?page={"offset":5,"limit":10} → respects paginati
 // section for the updated Phase 1/2 framing.
 ```
 
-- [ ] **Step 2: Run** `npx vitest run apps/admin/server/__tests__/dispatch.test.ts`. Expected: 5 new tests FAIL (routes not registered).
+- [ ] **Step 2: Run** `npx vitest run apps/admin/server/__tests__/dispatch.test.ts`. **Expected:** the new bridge-routed cases FAIL because the publish/listPublishes handlers are still 501 stubs that throw `not-implemented` (NOT because routes are missing — `dispatch.ts` already has the route entries per Codex round 14 + round 28 PR #97 P2 folds; verified at lines 91-103). The tests fail at the 200-vs-501 assertion. Tests for `POST /api/resorts/non-all-slug/publish → 400 invalid-request (Phase 1)` and the bridge-routed GET pagination also fail until 4.5a-4's listPublishes impl lands. After Task 4.5a-2 + 4.5a-4 ship the real handlers, this step's tests pass without any `dispatch.ts` change.
 
-- [ ] **Step 3: Modify dispatch.ts STATUS_FOR_CODE only.** Codex round 14 PR #97 P2 fold: the route entries for `POST /api/resorts/:slug/publish` (line 92) and `GET /api/publishes` (line 100) are **already registered** in `apps/admin/server/dispatch.ts` against the existing 501-stub handlers; the bridge tests verify the stub→real swap works end-to-end (no route-table change). `STATUS_FOR_CODE` already maps `publish-validation-failed` → 400 (line 204) and `invalid-request` → 400. **Only new map entry to ADD**: `workspace-corrupt` → 500 (Codex round 1 PR #97 P1 fold — per spec §10.3.1 the publish handler throws this when any workspace file fails JSON parse or `WorkspaceFile.parse()`).
+- [ ] **Step 3: NO `dispatch.ts` change required** (Codex round 28 PR #97 P2 fold caught this). `apps/admin/server/dispatch.ts` already registers `POST /api/resorts/:slug/publish` (line 91) + `GET /api/publishes` (line 100); `STATUS_FOR_CODE` already maps `publish-validation-failed` → 400, `invalid-request` → 400, AND `workspace-corrupt` → 500 (line 205). The stub→real swap happens in `publish.ts` + `listPublishes.ts` only.
 
 - [ ] **Step 4: Run** `npx vitest run apps/admin/server/__tests__/dispatch.test.ts`. Expected: 5 new tests PASS.
 
@@ -661,8 +662,9 @@ it('routes GET /api/publishes?page={"offset":5,"limit":10} → respects paginati
 - [ ] **Step 6: Commit (do NOT push yet — Task 4.5a-6 follows with the apiClient Idempotency-Key change, then pushes the full PR at once).**
 
 ```bash
-git add apps/admin/server/__tests__/dispatch.test.ts apps/admin/server/dispatch.ts
-git commit -s -m "feat(admin-server): add workspace-corrupt status mapping + bridge-tier positive controls (PR 4.5a §4.5a-5)"
+# Codex round 28 PR #97 P2 fold: dispatch.ts is NOT staged — no code change there.
+git add apps/admin/server/__tests__/dispatch.test.ts
+git commit -s -m "test(admin-server): bridge-tier positive controls for publish + listPublishes routes (PR 4.5a §4.5a-5)"
 # Codex round 4 PR #97 P2 fold: deferred push to end of 4.5a-6 so the PR
 # branch includes the Idempotency-Key client change.
 ```
@@ -1451,14 +1453,24 @@ export function PublishDialog({ open, onOpenChange }: PublishDialogProps): JSX.E
   }, [publish, onOpenChange, toast])
 
   // Codex round 1 PR #97 P2 fold preserved: fail-CLOSED while health is unknown.
-  const healthUnknown = health.value === null
-  const blocker: Blocker | null =
-    healthUnknown ? null
-      : health.value!.resorts_with_failed_fields > 0 ? 'failed_fields'
-      : health.value!.resorts_with_missing_provenance > 0 ? 'missing_provenance'
-      : health.value!.resorts_with_corrupt_workspace > 0 ? 'corrupt_workspace'
-      : health.value!.resorts_total === 0 ? 'empty'
-      : null
+  // Codex round 28 PR #97 P2 fold: rewritten from a nested-ternary +
+  // `health.value!` non-null assertion (both banned by AGENTS.md) into an
+  // explicit guarded `healthValue` branch — TypeScript narrows inside the
+  // `if (healthValue !== null)` block so no `!` is needed; no ternaries.
+  const healthValue = health.value
+  const healthUnknown = healthValue === null
+  let blocker: Blocker | null = null
+  if (healthValue !== null) {
+    if (healthValue.resorts_with_failed_fields > 0) {
+      blocker = 'failed_fields'
+    } else if (healthValue.resorts_with_missing_provenance > 0) {
+      blocker = 'missing_provenance'
+    } else if (healthValue.resorts_with_corrupt_workspace > 0) {
+      blocker = 'corrupt_workspace'
+    } else if (healthValue.resorts_total === 0) {
+      blocker = 'empty'
+    }
+  }
 
   const disabled = healthUnknown || blocker !== null || publish.status === 'submitting'
   // Codex round 20 PR #97 P3 fold: render the descriptive `<p>` (and link Confirm
@@ -2092,6 +2104,8 @@ _Populate as Codex / subagent / maintainer / user findings land per round. Carry
 | 26 | 4.5b | Codex round 25 PR #97 | **P2** Round-23 regression test's `ReRenderParent` called `show()` during render (`if (tick === 0) { show(...) }`). `show()` updates `ToastProvider` state — updating a parent during a child render triggers React's "Cannot update a component while rendering" warning and can loop. | Moved the `show()` call into `useEffect((): void => { if (tick === 0) show(...) }, [tick, show])`. |
 | 26 | 4.5d | Codex round 25 PR #97 | **P2** Bridge test clicked Confirm immediately after opening the dialog, but `useHealth` is still pending → fail-closed disable (round-1 P2 fold) makes the click a no-op. Subsequent Toast/history assertions would flake. | Added `await waitFor(() => expect(screen.queryByText(/Loading pre-publish checks/)).toBeNull())` + `await waitFor(() => expect(confirm).not.toBeDisabled())` before the click. |
 | 27 | 4.5d | Codex round 27 PR #97 | **P2** Bridge test's `beforeEach` seeded fixtures + handlers but did NOT reset `window.history` or the module-scoped state caches (`useURLState`, `useHealth`, `useResortList`, `useListPublishes`). The happy-path test ends with `window.location` on `/?route=publishes`; the blocked-state test then starts on that URL → renders PublishHistory instead of the Dashboard → "Publish" button isn't visible → click fails. Existing admin bridge tests (`resort-editor-write.test.tsx`) reset URL state + history in both beforeEach AND afterEach. | Added imports for `__resetForTests` from `useURLState`, `useHealth`, `useResortList`, `useListPublishes`. `beforeEach`: `window.history.replaceState({}, '', '/')` + all 4 resets. `afterEach`: same + tmp dir cleanup. Symmetric so any next file's first test also starts fresh. |
+| 28 | 4.5a | Codex round 28 PR #97 | **P2** Task 4.5a-5 still instructed implementers to add `workspace-corrupt → 500` to `STATUS_FOR_CODE` and treated route registration as a needed change, but `apps/admin/server/dispatch.ts` already has both: route entries at lines 91-103 + `workspace-corrupt → 500` at line 205. The "expect FAIL (routes not registered)" guidance in Step 2 was also wrong — the stub→real swap is what actually flips the tests from 501 to 200. | Dropped `dispatch.ts` MODIFY from PR 4.5a's file list (now 7 files). Step 3 now says "NO `dispatch.ts` change required". Step 2's expected-FAIL framing rewritten to attribute the FAIL to the 501 stubs throwing `not-implemented`. Step 6 stages only `dispatch.test.ts`. |
+| 28 | 4.5c | Codex round 28 PR #97 | **P2** PublishDialog's blocker selection used a nested-ternary chain over `health.value!` — both forbidden by AGENTS.md (no nested ternaries, no non-null assertions). The implementation would pass behavior tests but fail `npm run lint`/`qa`. | Rewrote with an explicit guarded `if (healthValue !== null)` branch. TypeScript narrows inside the block, so no `!` is needed; the chain becomes a clean `if/else if` ladder over the four health blockers. |
 
 ---
 
