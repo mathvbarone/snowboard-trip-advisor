@@ -912,6 +912,33 @@ describe('ToastProvider + useToast', (): void => {
     expect(captured[0]!.show).toBe(captured[1]!.show)
   })
 
+  // Codex round 23 PR #97 P2 fold: ambient parent re-renders must NOT reset
+  // the auto-dismiss timer (the inline-arrow onDismiss bug would extend the
+  // window indefinitely; the useCallback-stabilized callback is the fix).
+  it('Toast auto-dismisses on schedule even when ToastProvider parent re-renders mid-flight', async (): Promise<void> => {
+    vi.useFakeTimers()
+    function ReRenderParent({ tick }: { tick: number }): React.ReactElement {
+      // Forces a re-render of ToastProvider's children via the `tick` prop.
+      const { show } = useToast()
+      // Fire once on first render.
+      if (tick === 0) { show({ variant: 'info', message: 'X', dismissAfterMs: 5000 }) }
+      return <div data-tick={tick} />
+    }
+    const { rerender } = render(<ToastProvider><ReRenderParent tick={0} /></ToastProvider>)
+    expect(screen.getByRole('status')).toBeInTheDocument()
+    // Re-render the parent multiple times during the 5s window.
+    for (let i = 1; i <= 4; i += 1) {
+      act((): void => { vi.advanceTimersByTime(1000) })
+      rerender(<ToastProvider><ReRenderParent tick={i} /></ToastProvider>)
+    }
+    // Total elapsed: 4s. Toast should still be visible.
+    expect(screen.getByRole('status')).toBeInTheDocument()
+    // Now advance the final second — Toast must auto-dismiss.
+    act((): void => { vi.advanceTimersByTime(1000) })
+    expect(screen.queryByRole('status')).toBeNull()
+    vi.useRealTimers()
+  })
+
   // Codex round 2 PR #97 P2 fold: replacement Toast must use its own timing,
   // not inherit the previous Toast's remainingRef.
   it('replacement Toast remounts with fresh timing (key-by-show-counter)', async (): Promise<void> => {
@@ -950,7 +977,7 @@ describe('ToastProvider + useToast', (): void => {
 - [ ] **Step 1: Implement.**
 
 ```tsx
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { JSX, ReactNode } from 'react'
 
 // Codex round 22 PR #97 P2 fold: import scoped Toast CSS (fixed top-right
@@ -1045,6 +1072,13 @@ export function ToastProvider({ children }: { children: ReactNode }): JSX.Elemen
   // PublishDialog's success/error effect).
   const [current, setCurrent] = useState<{ input: ToastInput; key: number } | null>(null)
   const keyRef = useRef<number>(0)
+  // Codex round 23 PR #97 P2 fold: stabilize `onDismiss` with useCallback.
+  // Without this, the inline arrow gets a new identity every parent render
+  // → Toast's useEffect (deps include onDismiss) cleans up + restarts the
+  // timer with the original duration → ambient re-renders (e.g. URL state
+  // changes after a publish) extend or reset the auto-dismiss window
+  // indefinitely. setCurrent is stable, so the useCallback dep array is [].
+  const dismissCurrent = useCallback((): void => { setCurrent(null) }, [])
   const value = useMemo((): ToastContextValue => ({
     // Codex round 2 PR #97 P2 fold: increment key on every show() so a replacement
     // Toast un-mounts/re-mounts (fresh `useRef(dismissAfterMs)` — otherwise the
@@ -1063,7 +1097,7 @@ export function ToastProvider({ children }: { children: ReactNode }): JSX.Elemen
           variant={current.input.variant}
           message={current.input.message}
           dismissAfterMs={current.input.dismissAfterMs}
-          onDismiss={(): void => { setCurrent(null) }}
+          onDismiss={dismissCurrent}
         />
       )}
     </ToastContext.Provider>
@@ -2004,6 +2038,7 @@ _Populate as Codex / subagent / maintainer / user findings land per round. Carry
 | 22 | 4.5d | Codex round 21 PR #97 | **P2** Bridge integration test used `findByRole('status', { name: /Published version/ })` but Toast renders `<div role="status"><span>{message}</span>…</div>` with no `aria-label`. Testing Library's `name` option matches the accessible name (aria-label/-labelledby), NOT element text — so the assertion would time out. | Split into `findByRole('status')` to locate the region, then `toHaveTextContent(/Published version/)` to assert the message. Added a comment citing the round-21 catch. |
 | 23 | 4.5a | Codex round 22 PR #97 | **P2** Hard-coded `manifest.generated_by: 'admin-workspace'` collapsed every archive's `published_by` to one value, losing per-host publish provenance. Parent spec §4.5.1 requires `generated_by = "<cli-identifier> host=<sha256(hostname)>"`. | Added `computeGeneratedBy()` helper that hashes `os.hostname()` with sha256 and formats as `admin-workspace host=<hex>`. `publish.ts` calls it instead of hard-coding the value. Imports `node:crypto` `createHash` + `node:os` `hostname` added. |
 | 23 | 4.5b | Codex round 22 PR #97 | **P2** Toast had no CSS asset/import. `Toast.tsx` assigns `sta-toast` classes but with no companion CSS, Toast renders in normal document flow → not visible as a fixed top-right notification (the single-slot promise from Decisions C1/C2 fails). | Added `Toast.css` to PR 4.5b's file list (now 7/8 budget). Mirrors `Drawer.css` pattern: scoped `.sta-toast` styles with `position: fixed`, top-right corner, z-index, padding, design tokens. `Toast.tsx` imports `./Toast.css` at top (matches `Drawer.tsx:12`). |
+| 24 | 4.5b | Codex round 23 PR #97 | **P2** `ToastProvider` passed an inline arrow `onDismiss={(): void => { setCurrent(null) }}` to `<Toast>`. Toast's timer `useEffect` depends on `onDismiss`; every ambient parent re-render (e.g., URL state changes immediately after a publish) gave `onDismiss` a new identity, triggered the effect cleanup (clearTimeout) + restart with `remainingRef.current` still at the full duration → auto-dismiss window kept resetting; Toast effectively never auto-dismissed if anything re-rendered nearby. | Wrapped the dismiss callback in `useCallback(..., [])` (setCurrent is stable) so its identity is stable across renders. Added a regression test that fires a Toast, then re-renders the ToastProvider parent 4 times during the 5s window (advancing fake timers each time) and asserts the Toast auto-dismisses at the configured 5s mark, NOT later. |
 
 ---
 
