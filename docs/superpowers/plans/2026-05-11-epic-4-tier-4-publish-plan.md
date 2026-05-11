@@ -1907,13 +1907,36 @@ async function setupTmpRoot(slugs: string[]): Promise<string> {
   return root
 }
 
+// Codex round 27 PR #97 P2 fold: reset URL state + history + module-scoped
+// caches in beforeEach AND afterEach (mirrors resort-editor-write.test.tsx's
+// pattern). Without this, the first happy-path test ends at /?route=publishes
+// and the second blocked-state test starts on that URL → renders PublishHistory
+// instead of finding the Publish button. Integration test-setup only cleans the
+// DOM + MSW handlers, NOT window.history or the per-state module caches.
+import { __resetForTests as resetURLState } from '../../../../apps/admin/src/state/useURLState'
+import { __resetForTests as resetHealth } from '../../../../apps/admin/src/state/useHealth'
+import { __resetForTests as resetResortList } from '../../../../apps/admin/src/state/useResortList'
+import { __resetForTests as resetListPublishes } from '../../../../apps/admin/src/state/useListPublishes'
+
 describe('publish flow — bridge tier', (): void => {
   let workspaceRoot: string
   beforeEach(async (): Promise<void> => {
     workspaceRoot = await setupTmpRoot(['kotelnica-bialczanska', 'spindleruv-mlyn'])
     server.use(...bridgeHandlers(workspaceRoot))
+    // Reset before each test so an earlier test's terminal URL doesn't bleed in.
+    window.history.replaceState({}, '', '/')
+    resetURLState()
+    resetHealth()
+    resetResortList()
+    resetListPublishes()
   })
   afterEach(async (): Promise<void> => {
+    // Symmetric reset: clean up so any next file's test starts fresh too.
+    window.history.replaceState({}, '', '/')
+    resetURLState()
+    resetHealth()
+    resetResortList()
+    resetListPublishes()
     await rm(workspaceRoot, { recursive: true, force: true })
   })
 
@@ -2068,6 +2091,7 @@ _Populate as Codex / subagent / maintainer / user findings land per round. Carry
 | 25 | 4.5c | Codex round 24 PR #97 | **P2** `useListPublishes`'s standalone `p.finally(...)` chained off the stored promise created a second promise that rejects with the same error AND is never caught. The `p.then(_, rejectHandler)` attached the rejection handler to the ORIGINAL promise, not to the `.finally`-chained one, so a fetch rejection produces an unhandled rejection. | Chained `.finally(...)` INTO the stored promise (mirrors `useResortList.ts:58-61` shape): `p = apiClient.listPublishes(q).finally((): void => { if (inFlight.get(key) === p) inFlight.delete(key) })`. The stored `p` is now the .finally-chained promise; `p.then(_, rejectHandler)` attaches to the same one that rejects. Same fix for the `onInvalidate` path (`p2`). |
 | 26 | 4.5b | Codex round 25 PR #97 | **P2** Round-23 regression test's `ReRenderParent` called `show()` during render (`if (tick === 0) { show(...) }`). `show()` updates `ToastProvider` state — updating a parent during a child render triggers React's "Cannot update a component while rendering" warning and can loop. | Moved the `show()` call into `useEffect((): void => { if (tick === 0) show(...) }, [tick, show])`. |
 | 26 | 4.5d | Codex round 25 PR #97 | **P2** Bridge test clicked Confirm immediately after opening the dialog, but `useHealth` is still pending → fail-closed disable (round-1 P2 fold) makes the click a no-op. Subsequent Toast/history assertions would flake. | Added `await waitFor(() => expect(screen.queryByText(/Loading pre-publish checks/)).toBeNull())` + `await waitFor(() => expect(confirm).not.toBeDisabled())` before the click. |
+| 27 | 4.5d | Codex round 27 PR #97 | **P2** Bridge test's `beforeEach` seeded fixtures + handlers but did NOT reset `window.history` or the module-scoped state caches (`useURLState`, `useHealth`, `useResortList`, `useListPublishes`). The happy-path test ends with `window.location` on `/?route=publishes`; the blocked-state test then starts on that URL → renders PublishHistory instead of the Dashboard → "Publish" button isn't visible → click fails. Existing admin bridge tests (`resort-editor-write.test.tsx`) reset URL state + history in both beforeEach AND afterEach. | Added imports for `__resetForTests` from `useURLState`, `useHealth`, `useResortList`, `useListPublishes`. `beforeEach`: `window.history.replaceState({}, '', '/')` + all 4 resets. `afterEach`: same + tmp dir cleanup. Symmetric so any next file's first test also starts fresh. |
 
 ---
 
