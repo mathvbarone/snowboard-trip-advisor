@@ -32,6 +32,13 @@ export interface ButtonProps {
   variant?: ButtonVariant
   'aria-label'?: string
   'aria-pressed'?: boolean
+  // PR 4.5b extension: PR 4.5c's PublishDialog wires the Publish button's
+  // `aria-describedby` to the blocker-tooltip description element so screen
+  // readers announce *why* the button is disabled. We deliberately do NOT
+  // add a parallel `aria-disabled` prop — the native `disabled` attribute
+  // already conveys disabled state to AT, and PublishDialog passes
+  // `disabled={blocker !== null}` directly.
+  'aria-describedby'?: string
   // Pass-through for data-detail-trigger (§5.5) and any future data-* hooks.
   // Mirrors IconButton's catch-all signature so apps/public can mark the
   // "View details" Button as the drawer-open trigger without inflating the
@@ -47,6 +54,7 @@ export function Button({
   variant = 'primary',
   'aria-label': ariaLabel,
   'aria-pressed': ariaPressed,
+  'aria-describedby': ariaDescribedBy,
   ...rest
 }: ButtonProps): JSX.Element {
   // The raw-<button> ban fires in apps/**, not in packages/design-system —
@@ -58,6 +66,7 @@ export function Button({
       disabled={disabled}
       aria-label={ariaLabel}
       aria-pressed={ariaPressed}
+      aria-describedby={ariaDescribedBy}
       data-variant={variant}
       className="sta-button"
       {...rest}
