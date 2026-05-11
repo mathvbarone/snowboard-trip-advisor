@@ -34,15 +34,7 @@ Per [spec §7.4](../specs/2026-05-01-epic-4-admin-app-design.md), after PRs 4.5a
 | **D2** | On successful publish, `usePublish` calls `invalidateListPublishes()` so the PublishHistory list reflects the new state. **NOT** `invalidateHealth()` — PublishDialog unmounts on success (it calls `onClose()`); next time it opens it re-fetches health from scratch via the existing `useHealth` `useEffect`-on-mount pattern (no cache, no stale read). The Dashboard's persistent health-card display lags one navigation cycle behind a publish; tracked as Phase-1 limitation for PR 4.6a Tier 5 polish per spec §7.16. **NOT** `invalidateResortDetail()` — workspace files weren't mutated. Per-resort detail caches stay valid. | Cache coherence + tight scope. Only invalidate what the publish mutation actually affects within the open user session. Dashboard staleness deferred. (Decision originally added `invalidateHealth()` per Tier 3 precedent; Codex round 2 PR #97 P2 fold revealed it pushes PR 4.5c over the 8-file budget without buying anything load-bearing for the publish flow.) |
 | ~~**D3**~~ | **Removed** per Codex round 2 PR #97 P2 fold. Original D3 extended `useHealth` with `invalidateHealth` + `useSyncExternalStore` subscription mirroring `useResortDetail`'s round-2 P2-C pattern. Dropped because (a) `useHealth.ts` + `useHealth.test.ts` would be 2 paths counted toward PR 4.5c's budget per AGENTS.md PR-sizing rule (paths, not concerns), pushing PR 4.5c to 9 files (over the ≤8 ceiling); (b) PublishDialog re-fetches health on each mount via the existing `useEffect` pattern, so the subscription wasn't load-bearing for the publish flow. Dashboard's persistent health-card display will lag a publish by one navigation cycle (acceptable Phase-1 limitation, tagged for PR 4.6a Tier 5 polish). | File budget + scope correctness. |
 | **E1** | `useListPublishes` uses **`useState` + `useEffect` + module-level `inFlight: Map<string, Promise<...>>` cache** — matching the **actual** `useResortList` pattern (verified at `apps/admin/src/state/useResortList.ts:2-16`). **NOT** Suspense-based. Returns the 3-state discriminated union `{ value, error }` ∈ `{ value: ListPublishesResponse, error: null } \| { value: null, error: Error } \| { value: null, error: null }`. Exposes `invalidateListPublishes(): void` module export that clears the in-flight Map AND any cached state via a per-key subscriber-set (so post-publish mounts re-fetch). `__resetForTests()` clears caches. Codex round 9 PR #97 P1 fold: the original Decision E1 misread `useResortList`'s pattern as Suspense-based; correcting that eliminates the need for any `<Suspense>` boundary in `App.tsx`/`PublishHistory`. | Consistency with `useResortList` (verified). No Suspense boundary needed — App.tsx's `?route=publishes` branch can be plain `<Shell><PublishHistory /></Shell>` like the dashboard/resorts branches. |
-| **F1** | `PublishDialog` is a `<div role="dialog" aria-modal="true" aria-labelledby="publish-dialog-title">` overlay (raw `<dialog>` JSX banned by `RAW_HTML_ELS`). Backdrop: sibling `<div className="publish-dialog__backdrop">` with `onClick` → close. **Focus management** (Phase 1, P1-6 fold — scope reduced from full trap to MVP):
-- `useEffect` on mount focuses the first focusable element via ref.
-- `Escape` key handler closes the dialog.
-- On close, focus restores to the opener button (Publish in HeaderBar) via a saved `previouslyFocused` ref captured on mount.
-- **NO Tab / Shift+Tab focus trap in Phase 1.** Tab from the Confirm button leaves the modal — acceptable because (i) `aria-modal="true"` signals modality to AT, (ii) the dialog has at most 3 focusable elements (Cancel, Confirm, backdrop is `aria-hidden`), and (iii) tab-leaving lands on the HeaderBar / Sidebar buttons, all of which are visually-occluded by the modal overlay (CSS pointer-events). Add a real trap in PR 4.6a Tier 5 polish if needed. **The 4.5c-6 PublishDialog test removes the "Tab/Shift+Tab cycles inside" assertion accordingly.**
-
-**ARIA tooltip wiring** (P2-4 fold):
-- The blocking-state copy renders inside `<p id="publish-dialog-blocker" className="publish-dialog__tooltip">…</p>` (no `role="status"` — the tooltip is not a live region; it's static descriptive text for a disabled button).
-- The Confirm button carries `aria-describedby="publish-dialog-blocker"` when `blocker !== null` so AT users hear the reason for the disabled state. When `blocker === null`, the `aria-describedby` attribute is omitted (no `<p>` rendered). | No DS Modal exists; building one would balloon scope. Inline the primitive with explicit focus management; promote to DS when a second modal consumer (with a real focus-trap need) exists. |
+| **F1** | `PublishDialog` consumes the **existing DS `Modal` primitive** at `packages/design-system/src/primitives/Modal.tsx` (Radix-backed; provides focus trap, body scroll lock, Escape-dismiss, portal, focus return for free). Codex round 17 PR #97 P2 fold corrected the original F1 which falsely claimed "no DS Modal exists" — the DS barrel exports `Modal` at `index.ts:45`. **Props contract:** `Modal({open, onOpenChange, title, children})`. PublishDialog accepts `{open, onOpenChange}` and forwards both to `<Modal>`; Shell renders `{isPublishOpen && <PublishDialog open={isPublishOpen} onOpenChange={setIsPublishOpen} />}` — conditional mount preserves the round-9 P1 fold's "fresh useHealth per open" semantic. **ARIA tooltip wiring** (P2-4 fold preserved): blocking-state copy renders inside `<p id="publish-dialog-blocker">…</p>` (no `role="status"` — static descriptive text); Confirm `<Button aria-describedby="publish-dialog-blocker">` when `blocker !== null`. Modal's `title` prop auto-renders the accessible name (no need for our own `<h2 id="publish-dialog-title">`); the test outline drops Esc-closes/backdrop-closes/focus-trap assertions (Radix tests already cover those). | DS reuse + AGENTS.md no-raw-HTML compliance + better a11y (focus trap, scroll lock) for free. |
 | **F2** | PublishDialog **does NOT call `apiClient.publish()` directly** — it consumes `usePublish()` from `apps/admin/src/state/usePublish.ts`. Side effects live in the hook; render lives in the dialog. | Locality. Render-only component; state lives in hook. |
 | **G1** | Shell's HeaderBar gains a `<Button>Publish</Button>` (existing DS primitive, `variant="primary"` per design pattern). Click toggles `isPublishOpen` local Shell state. `<ToastProvider>` wraps Shell's main content. **Codex round 3 PR #97 P1 fold:** PublishDialog is **conditionally mounted** — `{isPublishOpen && <PublishDialog onClose={...} />}` — so each open is a fresh mount that re-runs `useHealth()`'s effect against the latest health snapshot. The original `<PublishDialog open={...} onClose={...} />` pattern with internal `if (!open) return null` left the component mounted for the app lifetime, and `useHealth`'s effect has an empty dep array so it would never re-fetch; the dialog would open against stale health (possibly with confirm enabled when corrupt-workspace state newly appeared). PublishDialog no longer accepts an `open` prop; presence ↔ open. | Locality + freshness. Conditional mount is the cleanest way to retrigger an existing useEffect; no plumbing changes to `useHealth`. |
 | **H1** | PublishHistory route lives at `?route=publishes`. `urlState.ts` MODIFY adds `{ route: 'publishes'; page?: number }` variant; default page = 0. Sort: `published_at` descending (handler returns newest-first per spec §4.7). Pagination: `?route=publishes&page=N`. Page size: 20 (matches `ListPublishesQuery` default per spec §4.7). | Match existing URL-state pattern. |
@@ -1341,18 +1333,24 @@ it('confirm button DISABLED while health.value === null (loading); shows "Loadin
 it('confirm button DISABLED while health.error !== null; shows error message', /* P2 fold Codex round 1 PR #97 */)
 it('on success: fires Toast EXACTLY ONCE then calls publish.reset() so subsequent re-renders are no-ops', /* P1 fold Codex round 2 PR #97 */)
 it('on error: fires Toast EXACTLY ONCE then calls publish.reset()', /* P1 fold Codex round 2 PR #97 */)
-it('Escape closes dialog; backdrop click closes dialog; first focusable element is auto-focused', /* ... */)
+// Codex round 17 PR #97 P2 fold: PublishDialog wraps DS Modal (Radix-backed).
+// Modal's tests (packages/design-system/src/primitives/Modal.test.tsx) already
+// cover focus trap, Esc dismissal, backdrop click, body scroll lock, focus
+// return. PublishDialog tests focus on the PublishDialog-specific behaviour:
+// blocker tooltip text, disabled-state-during-loading, aria-describedby
+// wiring, success/error Toast firing + reset.
 it('Confirm button has aria-describedby pointing at the blocker tooltip id when a blocker is active', /* P2-4 fold */)
-// P1-6 fold: dropped the "Tab / Shift+Tab cycles inside (focus trap)" assertion. Phase 1 relies
-// on aria-modal="true" + minimal focusable surface; full trap deferred to PR 4.6a Tier 5 polish.
 ```
 
 #### Task 4.5c-7: `PublishDialog.tsx` impl
 
 ```tsx
-import { useEffect, useRef } from 'react'
-import type { JSX } from 'react'
-import { Button, useToast } from '@snowboard-trip-advisor/design-system'
+// Codex round 17 PR #97 P2 fold: consume the DS Modal primitive (Radix-backed)
+// at packages/design-system/src/primitives/Modal.tsx instead of inlining a
+// <div role="dialog">. Modal provides focus trap, body scroll lock, Escape-
+// dismiss, portal, and focus-return for free.
+import { useEffect, type JSX } from 'react'
+import { Button, Modal, useToast } from '@snowboard-trip-advisor/design-system'
 
 import { useHealth } from '../state/useHealth'
 import { usePublish } from '../state/usePublish'
@@ -1370,57 +1368,28 @@ const TOOLTIP_BY_BLOCKER = {
 type Blocker = keyof typeof TOOLTIP_BY_BLOCKER
 
 export interface PublishDialogProps {
-  readonly onClose: () => void
+  readonly open: boolean
+  readonly onOpenChange: (open: boolean) => void
 }
 
-// Codex round 3 PR #97 P1 fold: no `open` prop. Shell mounts the dialog
-// conditionally (`{isPublishOpen && <PublishDialog onClose={...} />}`) so
-// each open re-runs `useHealth()`'s mount effect against fresh health.
-export function PublishDialog({ onClose }: PublishDialogProps): JSX.Element {
-  const dialogRef = useRef<HTMLDivElement | null>(null)
+export function PublishDialog({ open, onOpenChange }: PublishDialogProps): JSX.Element {
   const health = useHealth()
   const publish = usePublish()
   const toast = useToast()
 
-  useEffect((): (() => void) => {
-    const previouslyFocused = document.activeElement as HTMLElement | null
-    const firstFocusable = dialogRef.current?.querySelector<HTMLElement>(
-      'button:not([disabled]), [tabindex]:not([tabindex="-1"])',
-    )
-    firstFocusable?.focus()
-    function onKey(e: KeyboardEvent): void {
-      if (e.key === 'Escape') { onClose() }
-      // P1-6 fold: NO Tab trap in Phase 1. aria-modal="true" + minimal focusable surface
-      // (Cancel + Confirm) suffices; PR 4.6a Tier 5 polish adds a real trap if needed.
-    }
-    document.addEventListener('keydown', onKey)
-    return (): void => {
-      document.removeEventListener('keydown', onKey)
-      previouslyFocused?.focus()
-    }
-  }, [onClose])
-
   useEffect((): void => {
-    // Codex round 2 PR #97 P1 fold: after handling terminal status, call
-    // publish.reset() so subsequent re-renders see status === 'idle' and the
-    // effect's body is a no-op — defense-in-depth on top of the ToastProvider
-    // memoization that already stabilizes `toast`. Without the reset, if any
-    // future refactor destabilizes `toast`, the effect re-runs while status
-    // is still 'success'/'error' and fires a fresh Toast per render.
+    // Codex round 2 PR #97 P1 fold preserved: reset after handling terminal status.
     if (publish.status === 'success') {
       toast.show({ variant: 'success', message: `Published version ${publish.response?.version_id ?? ''}` })
       publish.reset()
-      onClose()
+      onOpenChange(false)
     } else if (publish.status === 'error') {
       toast.show({ variant: 'error', message: `Publish failed: ${publish.error?.message ?? 'unknown'}` })
       publish.reset()
     }
-  }, [publish, onClose, toast])
+  }, [publish, onOpenChange, toast])
 
-  // Codex round 1 PR #97 P2 fold: fail-CLOSED while health is unknown.
-  // Original logic enabled the confirm button when `health.value === null`
-  // (loading or error), letting a fast click bypass the very blockers the
-  // dialog enforces. Treat unknown health as disabled with a loading affordance.
+  // Codex round 1 PR #97 P2 fold preserved: fail-CLOSED while health is unknown.
   const healthUnknown = health.value === null
   const blocker: Blocker | null =
     healthUnknown ? null
@@ -1433,38 +1402,26 @@ export function PublishDialog({ onClose }: PublishDialogProps): JSX.Element {
   const disabled = healthUnknown || blocker !== null || publish.status === 'submitting'
 
   return (
-    <>
-      <div className="publish-dialog__backdrop" onClick={onClose} aria-hidden="true" />
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="publish-dialog-title"
-        className="publish-dialog"
-      >
-        <h2 id="publish-dialog-title">Publish</h2>
-        {healthUnknown && (
-          <p id="publish-dialog-blocker" className="publish-dialog__tooltip" role="status">
-            {health.error === null ? 'Loading pre-publish checks…' : `Could not load health: ${health.error.message}`}
-          </p>
-        )}
-        {!healthUnknown && blocker !== null && (
-          <p id="publish-dialog-blocker" className="publish-dialog__tooltip">
-            {TOOLTIP_BY_BLOCKER[blocker]}
-          </p>
-        )}
-        <div className="publish-dialog__actions">
-          <Button onClick={onClose} variant="ghost">Cancel</Button>
-          <Button
-            onClick={(): void => { void publish.submit() }}
-            disabled={disabled}
-            aria-describedby={blocker !== null ? 'publish-dialog-blocker' : undefined}
-          >
-            {publish.status === 'submitting' ? 'Publishing…' : 'Confirm'}
-          </Button>
-        </div>
+    <Modal open={open} onOpenChange={onOpenChange} title="Publish">
+      {healthUnknown && (
+        <p id="publish-dialog-blocker" role="status">
+          {health.error === null ? 'Loading pre-publish checks…' : `Could not load health: ${health.error.message}`}
+        </p>
+      )}
+      {!healthUnknown && blocker !== null && (
+        <p id="publish-dialog-blocker">{TOOLTIP_BY_BLOCKER[blocker]}</p>
+      )}
+      <div className="publish-dialog__actions">
+        <Button onClick={(): void => { onOpenChange(false) }} variant="ghost">Cancel</Button>
+        <Button
+          onClick={(): void => { void publish.submit() }}
+          disabled={disabled}
+          aria-describedby={blocker !== null ? 'publish-dialog-blocker' : undefined}
+        >
+          {publish.status === 'submitting' ? 'Publishing…' : 'Confirm'}
+        </Button>
       </div>
-    </>
+    </Modal>
   )
 }
 ```
@@ -1490,9 +1447,12 @@ export function Shell({ children }: { children: ReactNode }): JSX.Element {
         </header>
         {/* …existing nav + main… */}
         {children}
-        {/* Codex round 3 PR #97 P1 fold: conditionally mount so each open re-runs useHealth on mount. */}
+        {/* Codex round 3 PR #97 P1 fold: conditionally mount so each open re-runs useHealth on mount.
+            Codex round 17 PR #97 P2 fold: PublishDialog now consumes DS Modal, takes
+            {open, onOpenChange} props (controlled). Conditional mount is preserved so
+            useHealth re-fires per open. */}
         {publishOpen && (
-          <PublishDialog onClose={(): void => { setPublishOpen(false) }} />
+          <PublishDialog open={publishOpen} onOpenChange={setPublishOpen} />
         )}
       </div>
     </ToastProvider>
@@ -1980,6 +1940,7 @@ _Populate as Codex / subagent / maintainer / user findings land per round. Carry
 | 16 | 4.5a | Codex round 15 PR #97 | **P2** PR 4.5a planned 6 separate commits (Tasks 4.5a-1 through 4.5a-6) exceeding AGENTS.md's PR Sizing Discipline ≤5 commit ceiling. | Combined Tasks 4.5a-1 (failing tests for publish handler) and 4.5a-2 (impl that greens them) into a single red→green pair commit per the canonical TDD-pair shape — drops the per-task count from 6 to 5. Each remaining task still pairs one commit. The Task 4.5a-1 "Step 3: Commit" line was repurposed to defer until 4.5a-2; Task 4.5a-2 "Step 3" now commits both files with a combined message. |
 | 17 | 4.5a | Codex round 16 PR #97 | **P2** Decision J1's server-side claim ("the dispatcher already forwards Node `http.IncomingMessage.headers` through to handlers via the existing route plumbing") was false. `DispatchInput` (`apps/admin/server/dispatch.ts:27-32`) has only `method`, `pathname`, `search`, `body` — no `headers` field, and the Vite middleware + MSW bridge call `dispatch()` without forwarding HTTP headers. | Rewrote the J1 server section: Phase 1 honors `Idempotency-Key` at the HTTP boundary only (Vite ignores unknown headers without rejecting); the dispatcher never sees it. **No server-side test is feasible until Phase 2 adds header plumbing.** Removed the corresponding "honors Idempotency-Key" dispatch-test case from Task 4.5a-5 with a comment explaining the framing. |
 | 17 | 4.5c | Codex round 16 PR #97 | **P2** "What we are NOT building" bullet said publish-success invalidates `health` + `listPublishes`, contradicting Decision D2 (which was updated in round 2 to only invalidate `listPublishes` after Decision D3 was dropped). Following the early-checklist bullet would reintroduce the `useHealth`/`useHealth.test.ts` extension and push PR 4.5c back over the file ceiling. | Updated the NOT-building bullet to "Only invalidate `listPublishes`" with a parenthetical explaining the round-2 D3 drop. |
+| 18 | 4.5c | Codex round 17 PR #97 | **P2** Decision F1 ("no DS Modal exists; inline a `<div role='dialog'>`") was built on a false premise. The DS already exports `Modal` from `packages/design-system/src/primitives/Modal.tsx` (Radix-backed; focus trap + body scroll lock + Escape-dismiss + portal + focus return). My inline-dialog plan violated AGENTS.md no-raw-HTML for components and reinvented worse a11y. | Rewrote Decision F1 to **consume the existing DS `Modal`** (`Modal({open, onOpenChange, title, children})`). PublishDialog now takes `{open, onOpenChange}` props (controlled) and forwards to `<Modal>`. Dropped all the manual focus management / Esc handler / backdrop click handler / `useEffect` plumbing. PublishDialog test outline drops Esc-close / backdrop-click / first-focusable-auto-focus assertions (Modal's own tests cover those). Shell wiring still conditionally mounts the dialog so `useHealth` re-fires per open. |
 
 ---
 
