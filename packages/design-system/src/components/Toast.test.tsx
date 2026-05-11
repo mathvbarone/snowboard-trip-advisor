@@ -154,6 +154,65 @@ describe('Toast — variants + ARIA', (): void => {
     expect(onDismiss).toHaveBeenCalledOnce()
   })
 
+  // Codex round 1 PR #100 P2 fold: when a consumer re-renders <Toast> in
+  // place with a different `dismissAfterMs` (or a different variant whose
+  // default differs), the timer must adopt the new duration. Without
+  // including `dismissAfterMs` in the effect's dep-array, `remainingRef`
+  // stays pinned to the first-render value and the toast dismisses on the
+  // wrong schedule. Pin the regression here.
+  it('re-rendering with a longer dismissAfterMs adopts the new duration', (): void => {
+    vi.useFakeTimers()
+    try {
+      const onDismiss = vi.fn()
+      const { rerender } = render(
+        <Toast variant="info" message="X" onDismiss={onDismiss} dismissAfterMs={3000} />,
+      )
+      // Switch to a longer duration before the original 3000ms expires.
+      act((): void => {
+        vi.advanceTimersByTime(1000)
+      })
+      rerender(<Toast variant="info" message="X" onDismiss={onDismiss} dismissAfterMs={10_000} />)
+      // The original 3000ms boundary must NOT fire — the re-render adopted
+      // the new 10_000ms duration.
+      act((): void => {
+        vi.advanceTimersByTime(3000)
+      })
+      expect(onDismiss).not.toHaveBeenCalled()
+      // The new 10_000ms boundary fires.
+      act((): void => {
+        vi.advanceTimersByTime(7000)
+      })
+      expect(onDismiss).toHaveBeenCalledOnce()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('re-rendering from info to error in place adopts the error variant default (8s, not 5s)', (): void => {
+    // Default-duration counterpart of the explicit-duration test above.
+    vi.useFakeTimers()
+    try {
+      const onDismiss = vi.fn()
+      const { rerender } = render(
+        <Toast variant="info" message="X" onDismiss={onDismiss} />,
+      )
+      // Switch to error variant — default 8000ms — before the info 5000ms expires.
+      rerender(<Toast variant="error" message="X" onDismiss={onDismiss} />)
+      // Cross the info default boundary; must NOT fire.
+      act((): void => {
+        vi.advanceTimersByTime(5000)
+      })
+      expect(onDismiss).not.toHaveBeenCalled()
+      // Cross the error default boundary.
+      act((): void => {
+        vi.advanceTimersByTime(3000)
+      })
+      expect(onDismiss).toHaveBeenCalledOnce()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it.each<[ToastVariant, number]>([
     ['info', 5000],
     ['success', 5000],

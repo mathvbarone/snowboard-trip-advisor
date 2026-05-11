@@ -49,7 +49,15 @@ export function Toast(props: ToastProps): JSX.Element {
   const startedAtRef = useRef<number>(Date.now())
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Codex round 1 PR #100 P2 fold: include `dismissAfterMs` in the effect
+  // dep-array and reset `remainingRef` at the top of each run so consumers
+  // re-rendering <Toast> in place with a new variant or `dismissAfterMs`
+  // adopt the new duration. The single-slot <ToastProvider> path remounts
+  // <Toast> via the per-show key (Decision C2), so this effect only re-runs
+  // for direct-consumer use; that path was previously stuck on the
+  // first-render duration.
   useEffect((): (() => void) => {
+    remainingRef.current = dismissAfterMs
     startedAtRef.current = Date.now()
     timerRef.current = setTimeout(onDismiss, remainingRef.current)
     return (): void => {
@@ -58,7 +66,7 @@ export function Toast(props: ToastProps): JSX.Element {
         timerRef.current = null
       }
     }
-  }, [onDismiss])
+  }, [onDismiss, dismissAfterMs])
 
   const pauseTimer = useCallback((): void => {
     if (timerRef.current !== null) {
