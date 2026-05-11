@@ -137,11 +137,18 @@ export function Toast(props: ToastProps): JSX.Element {
   // ARIA per Decision C1: info/success → polite (`role="status"`); error →
   // assertive (`role="alert"`). The polite/assertive split matches AT
   // conventions: assertive interrupts current speech; polite waits.
+  //
+  // Codex round 4 PR #100 P2 fold: the live-region role lives on the message
+  // <span>, NOT the outer wrapper. ARIA live regions are intended for
+  // text-only announcements; embedding a focusable control (the Dismiss
+  // <Button>) inside the alert region can cause AT to announce the control
+  // as part of the message. Keep the wrapper as a plain interactive
+  // container (hover/focus pause handlers); confine the live-region role to
+  // the text span.
   const role = variant === 'error' ? 'alert' : 'status'
 
   return (
     <div
-      role={role}
       tabIndex={0}
       className={`sta-toast sta-toast--${variant}`}
       onMouseEnter={handleMouseEnter}
@@ -149,7 +156,7 @@ export function Toast(props: ToastProps): JSX.Element {
       onFocus={handleFocus}
       onBlur={handleBlur}
     >
-      <span className="sta-toast__message">{message}</span>
+      <span role={role} className="sta-toast__message">{message}</span>
       <Button variant="ghost" onClick={onDismiss} aria-label="Dismiss notification">
         ×
       </Button>

@@ -48,6 +48,27 @@ describe('Toast — variants + ARIA', (): void => {
     }
   })
 
+  // Codex round 4 PR #100 P2 fold: ARIA live regions are intended for
+  // text-only announcements. Placing the focusable Dismiss <Button> inside
+  // the alert region can cause AT to announce the control as part of the
+  // message. Confine the live-region role to the message span; keep the
+  // dismiss control outside it.
+  it.each<[ToastVariant, 'status' | 'alert']>([
+    ['info', 'status'],
+    ['success', 'status'],
+    ['error', 'alert'],
+  ])(
+    'variant %s confines role="%s" to the message span; dismiss control sits outside the live region',
+    (variant, expectedRole): void => {
+      render(<Toast variant={variant} message="Hello" onDismiss={(): void => undefined} />)
+      const liveRegion = screen.getByRole(expectedRole)
+      expect(liveRegion.tagName).toBe('SPAN')
+      expect(liveRegion).toHaveTextContent('Hello')
+      const dismissButton = screen.getByLabelText('Dismiss notification')
+      expect(liveRegion.contains(dismissButton)).toBe(false)
+    },
+  )
+
   it('auto-dismisses after the explicit dismissAfterMs', (): void => {
     vi.useFakeTimers()
     try {
