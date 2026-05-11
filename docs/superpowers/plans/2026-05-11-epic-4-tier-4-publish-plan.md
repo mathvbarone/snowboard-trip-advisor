@@ -317,6 +317,23 @@ async function composePublishInput(workspaceRoot: string): Promise<ComposeResult
       }
       throw err
     }
+    // Codex round 30 PR #97 P2 fold: WorkspaceFile.parse only enforces INTERNAL
+    // slug consistency (top-level === resort.slug === live_signal.resort_slug);
+    // it does NOT verify the FILENAME matches the embedded slug. A renamed or
+    // copied file (`a.json` containing `slug: 'b'`, internally valid) would
+    // otherwise publish under the wrong slug. The single-file read path
+    // (`workspace.readWorkspaceFileForSlug`, line 84) already throws
+    // `workspace-corrupt` on this drift; the publish handler must match.
+    const filenameSlug = entry.replace(/\.json$/, '')
+    if (parsed.data.slug !== filenameSlug) {
+      const err = new Error('workspace-corrupt')
+      ;(err as Error & { code: string; details: unknown }).code = 'workspace-corrupt'
+      ;(err as Error & { code: string; details: unknown }).details = {
+        slug: filenameSlug,
+        reason: `workspace file ${filenameSlug}.json embeds slug "${parsed.data.slug}" — filename/slug drift`,
+      }
+      throw err
+    }
     workspaceResorts.set(parsed.data.slug, parsed.data.resort)
     workspaceSlugsWithEntry.add(parsed.data.slug)
     if (parsed.data.live_signal !== null) {
@@ -2107,6 +2124,7 @@ _Populate as Codex / subagent / maintainer / user findings land per round. Carry
 | 28 | 4.5a | Codex round 28 PR #97 | **P2** Task 4.5a-5 still instructed implementers to add `workspace-corrupt → 500` to `STATUS_FOR_CODE` and treated route registration as a needed change, but `apps/admin/server/dispatch.ts` already has both: route entries at lines 91-103 + `workspace-corrupt → 500` at line 205. The "expect FAIL (routes not registered)" guidance in Step 2 was also wrong — the stub→real swap is what actually flips the tests from 501 to 200. | Dropped `dispatch.ts` MODIFY from PR 4.5a's file list (now 7 files). Step 3 now says "NO `dispatch.ts` change required". Step 2's expected-FAIL framing rewritten to attribute the FAIL to the 501 stubs throwing `not-implemented`. Step 6 stages only `dispatch.test.ts`. |
 | 28 | 4.5c | Codex round 28 PR #97 | **P2** PublishDialog's blocker selection used a nested-ternary chain over `health.value!` — both forbidden by AGENTS.md (no nested ternaries, no non-null assertions). The implementation would pass behavior tests but fail `npm run lint`/`qa`. | Rewrote with an explicit guarded `if (healthValue !== null)` branch. TypeScript narrows inside the block, so no `!` is needed; the chain becomes a clean `if/else if` ladder over the four health blockers. |
 | 29 | 4.5a | Codex round 29 PR #97 | **P2** `composePublishInput`'s ENOENT-only catch (round-13 fold) diverged from existing read paths: a malformed `current.v1.json` (SyntaxError or schema-parse failure) would crash the publish handler with a 500 instead of being treated as absent (the way `health.ts`, `listResorts.ts`, and `workspace.readPublishedDocOrNull` already do). The UI could show a publishable workspace but publish would fail. | Replaced the inline `readFile + JSON.parse` block with a call to the canonical `readPublishedDocOrNull(publishedPath)` (`apps/admin/server/workspace.ts:109`): returns `null` on ENOENT, malformed JSON, OR schema-parse failure; rethrows other fs errors (EACCES, EIO). Imports updated. Maintains the round-13 P2 guarantee (real fs errors still propagate) while matching the rest of the read surface's "malformed → absent" behaviour. |
+| 30 | 4.5a | Codex round 30 PR #97 | **P2** `composePublishInput` iterated filenames but trusted `parsed.data.slug` — a renamed/copied workspace file (`a.json` containing `slug: 'b'`, internally valid) could publish under the wrong slug. `WorkspaceFile.parse` only enforces INTERNAL slug consistency (top-level === resort.slug === live_signal.resort_slug); the single-file read path (`workspace.readWorkspaceFileForSlug` line 84) already throws `workspace-corrupt` on filename↔embedded-slug drift. | Added the same check: extract `filenameSlug = entry.replace(/\.json$/, '')` and compare with `parsed.data.slug`; throw `workspace-corrupt` with `details.reason` describing the drift if they don't match. Matches the existing read path's behavior. |
 
 ---
 
