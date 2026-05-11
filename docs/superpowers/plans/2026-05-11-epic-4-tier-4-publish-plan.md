@@ -1177,9 +1177,9 @@ export type { ToastProps, ToastVariant, ToastInput } from './components/Toast'
 
 **Files:** Create `apps/admin/src/state/useListPublishes.ts` (impl shown in PR 4.5d section below — full code there; ship the impl with this task).
 
-- [ ] **Step 1: Implement** the dual-cache + subscriber-set pattern (`cachedPromises`, `cachedFulfilled`, `subscribers`, `revisions`, `loadOnce`, exported `useListPublishes`, `invalidateListPublishes`, `__resetForTests`).
+- [ ] **Step 1: Implement** the useState/useEffect + module-level inFlight Map + per-key generation counter (per Decision E1 / Codex round-9 P1 fold + round-12 P1 fold). Module surface: `useListPublishes(q)` returns `{ value, error }`; `invalidateListPublishes()` bumps every key's generation + clears inFlight + fires subscribers; `__resetForTests()` clears inFlight + subscribers + generations. Reference impl block above. **NOT Suspense** (Codex round 14 + round 18 PR #97 P2 folds — the dual-cache `cachedPromises` / `cachedFulfilled` / `loadOnce` design was replaced; do NOT follow stale references).
 - [ ] **Step 2: Run tests — expect PASS.**
-- [ ] **Step 3: Commit** (`feat(admin-state): useListPublishes Suspense hook with consumer subscription (PR 4.5c §4.5c-2)`).
+- [ ] **Step 3: Commit** (`feat(admin-state): useListPublishes useState hook + generation-counter stale guard (PR 4.5c §4.5c-2)`).
 
 #### Task 4.5c-3: `usePublish.test.ts` — state machine + invalidations
 
@@ -1795,7 +1795,7 @@ The other two sidebar items (`/` for Dashboard and `/resorts` for Resorts) keep 
 ```tsx
 // tests/integration/apps/admin/publish-flow.test.tsx
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtemp, rm, readdir } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, rm, readdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { render, screen, waitFor } from '@testing-library/react'
@@ -1804,15 +1804,36 @@ import userEvent from '@testing-library/user-event'
 // Codex round 7 PR #97 P2 fold: 4 `..` segments to reach repo root from
 // tests/integration/apps/admin/ (matches existing tests like
 // resort-editor-write.test.tsx:13). App is a default export per App.tsx:9.
-import { server } from '../../../../apps/admin/src/mocks/server'
+// Codex round 18 PR #97 P2 fold: import `server` from apps/public/src/mocks/
+// server (the singleton wired by tests/integration/test-setup.ts) — NOT the
+// admin unit-test server. The integration MSW lifecycle (listen / resetHandlers
+// / close) is bound to the public singleton; using the admin one would attach
+// bridge handlers to an unstarted server and leave /api/* requests unhandled.
+import { server } from '../../../../apps/public/src/mocks/server'
 import { bridgeHandlers } from '../../../../apps/admin/src/mocks/realHandlers'
 import App from '../../../../apps/admin/src/App'
+
+// Codex round 18 PR #97 P2 fold: seed fixtures into the bridge workspace
+// BEFORE installing handlers / rendering. Without this, GET /api/health
+// reports resorts_total === 0, PublishDialog disables Confirm, and the
+// happy-path test cannot create a history entry. Mirrors the
+// resort-editor-write.test.tsx seeding pattern (setupTmpRoot helper).
+const SEED_FIXTURE_DIR = join(process.cwd(), 'tests/fixtures/admin-workspace')
+
+async function setupTmpRoot(slugs: string[]): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), 'snowboard-publish-flow-'))
+  const workspaceDir = join(root, 'data', 'admin-workspace')
+  await mkdir(workspaceDir, { recursive: true })
+  for (const slug of slugs) {
+    await copyFile(join(SEED_FIXTURE_DIR, `${slug}.json`), join(workspaceDir, `${slug}.json`))
+  }
+  return root
+}
 
 describe('publish flow — bridge tier', (): void => {
   let workspaceRoot: string
   beforeEach(async (): Promise<void> => {
-    workspaceRoot = await mkdtemp(join(tmpdir(), 'snowboard-publish-flow-'))
-    // Seed both seed fixtures into workspaceRoot/data/admin-workspace/.
+    workspaceRoot = await setupTmpRoot(['kotelnica-bialczanska', 'spindleruv-mlyn'])
     server.use(...bridgeHandlers(workspaceRoot))
   })
   afterEach(async (): Promise<void> => {
@@ -1941,6 +1962,9 @@ _Populate as Codex / subagent / maintainer / user findings land per round. Carry
 | 17 | 4.5a | Codex round 16 PR #97 | **P2** Decision J1's server-side claim ("the dispatcher already forwards Node `http.IncomingMessage.headers` through to handlers via the existing route plumbing") was false. `DispatchInput` (`apps/admin/server/dispatch.ts:27-32`) has only `method`, `pathname`, `search`, `body` — no `headers` field, and the Vite middleware + MSW bridge call `dispatch()` without forwarding HTTP headers. | Rewrote the J1 server section: Phase 1 honors `Idempotency-Key` at the HTTP boundary only (Vite ignores unknown headers without rejecting); the dispatcher never sees it. **No server-side test is feasible until Phase 2 adds header plumbing.** Removed the corresponding "honors Idempotency-Key" dispatch-test case from Task 4.5a-5 with a comment explaining the framing. |
 | 17 | 4.5c | Codex round 16 PR #97 | **P2** "What we are NOT building" bullet said publish-success invalidates `health` + `listPublishes`, contradicting Decision D2 (which was updated in round 2 to only invalidate `listPublishes` after Decision D3 was dropped). Following the early-checklist bullet would reintroduce the `useHealth`/`useHealth.test.ts` extension and push PR 4.5c back over the file ceiling. | Updated the NOT-building bullet to "Only invalidate `listPublishes`" with a parenthetical explaining the round-2 D3 drop. |
 | 18 | 4.5c | Codex round 17 PR #97 | **P2** Decision F1 ("no DS Modal exists; inline a `<div role='dialog'>`") was built on a false premise. The DS already exports `Modal` from `packages/design-system/src/primitives/Modal.tsx` (Radix-backed; focus trap + body scroll lock + Escape-dismiss + portal + focus return). My inline-dialog plan violated AGENTS.md no-raw-HTML for components and reinvented worse a11y. | Rewrote Decision F1 to **consume the existing DS `Modal`** (`Modal({open, onOpenChange, title, children})`). PublishDialog now takes `{open, onOpenChange}` props (controlled) and forwards to `<Modal>`. Dropped all the manual focus management / Esc handler / backdrop click handler / `useEffect` plumbing. PublishDialog test outline drops Esc-close / backdrop-click / first-focusable-auto-focus assertions (Modal's own tests cover those). Shell wiring still conditionally mounts the dialog so `useHealth` re-fires per open. |
+| 19 | 4.5d | Codex round 18 PR #97 | **P2** `publish-flow.test.tsx` imported `server` from `apps/admin/src/mocks/server`, but the integration MSW lifecycle (`tests/integration/test-setup.ts`) wires `apps/public/src/mocks/server`. Bridge handlers would register on an unstarted server; `/api/*` requests would go unhandled. | Updated the import path to `'../../../../apps/public/src/mocks/server'` (matches `resort-editor-write.test.tsx:21`). Comment cites the test-setup wiring. |
+| 19 | 4.5d | Codex round 18 PR #97 | **P2** Bridge `beforeEach` only created an empty tmpdir — no fixture seeding. `GET /api/health` would report `resorts_total === 0`, PublishDialog disables Confirm, happy-path test fails. | Added a `setupTmpRoot(slugs)` helper (mirrors `resort-editor-write.test.tsx:55-62`): creates the tmpdir, `mkdir -p data/admin-workspace/`, `copyFile` from `tests/fixtures/admin-workspace/<slug>.json` into the workspace dir. Seeds BOTH seed slugs (`kotelnica-bialczanska` + `spindleruv-mlyn`) so the publish has 2 resorts to write. |
+| 19 | 4.5c | Codex round 18 PR #97 | **P2** Task 4.5c-2 implementation steps still described the OLD Suspense design (`cachedPromises`, `cachedFulfilled`, `loadOnce`, "Suspense hook" commit message) — drift left over from round 9's switch to useState. | Rewrote Task 4.5c-2 Step 1 to describe the actual `useState`/`useEffect` + module-level `inFlight` Map + per-key generation counter (per Decision E1 / round-9 + round-12 folds). Commit message updated to `feat(admin-state): useListPublishes useState hook + generation-counter stale guard`. |
 
 ---
 
