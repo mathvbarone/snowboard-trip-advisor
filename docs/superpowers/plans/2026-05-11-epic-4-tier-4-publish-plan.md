@@ -165,6 +165,10 @@ import { hostname } from 'node:os'
 import { basename, join } from 'node:path'
 
 import { publishDataset } from '@snowboard-trip-advisor/schema/node'
+
+// Codex round 29 PR #97 P2 fold: use the canonical reader so malformed
+// current.v1.json is treated as absent (same as health.ts / listResorts.ts).
+import { readPublishedDocOrNull } from './workspace'
 // Codex round 5 PR #97 P2 fold: `Resort` + `ResortLiveSignal` are domain types
 // exported from the schema root (`packages/schema/src/index.ts`), NOT the API
 // barrel (`packages/schema/api/index.ts:1-9`, which only exposes endpoint
@@ -323,23 +327,19 @@ async function composePublishInput(workspaceRoot: string): Promise<ComposeResult
     // the explicit-clear case and skip the published fallback.
   }
 
-  let publishedResorts: Resort[] = []
-  let publishedLive: ResortLiveSignal[] = []
-  try {
-    const raw = await readFile(publishedPath, 'utf-8')
-    const doc = JSON.parse(raw) as { resorts?: Resort[]; live_signals?: ResortLiveSignal[] }
-    publishedResorts = doc.resorts ?? []
-    publishedLive = doc.live_signals ?? []
-  } catch (e) {
-    // Codex round 13 PR #97 P2 fold: only ENOENT (missing file) is the cold-
-    // start case per spec §10.9; other filesystem errors (EACCES, EIO) must
-    // propagate so we don't silently drop published-only resorts from a new
-    // current.v1.json. Mirrors the existing health.ts / listResorts.ts pattern
-    // which rethrow non-ENOENT failures.
-    const code = (e as NodeJS.ErrnoException).code
-    if (code !== 'ENOENT') { throw e }
-    // ENOENT: leave publishedResorts/publishedLive as [] (cold start per §10.9).
-  }
+  // Codex round 29 PR #97 P2 fold: use the canonical readPublishedDocOrNull
+  // helper (apps/admin/server/workspace.ts:109) which:
+  //   - returns null on ENOENT (cold start per spec §10.9)
+  //   - returns null on malformed JSON (SyntaxError) — operationally absent
+  //   - returns null on schema-parse failure — also operationally absent
+  //   - rethrows other fs errors (EACCES, EIO) so they surface as 500s
+  // Matches health.ts + listResorts.ts behavior. The previous inline read
+  // only handled ENOENT and rethrew SyntaxError, diverging from the existing
+  // read paths — a malformed current.v1.json would 500 the publish handler
+  // instead of letting the workspace files publish over it.
+  const publishedDoc = await readPublishedDocOrNull(publishedPath)
+  const publishedResorts: Resort[] = publishedDoc?.resorts ?? []
+  const publishedLive: ResortLiveSignal[] = publishedDoc?.live_signals ?? []
 
   // Merge resorts: workspace overrides per slug; published-only kept.
   const mergedResorts: Resort[] = []
@@ -2106,6 +2106,7 @@ _Populate as Codex / subagent / maintainer / user findings land per round. Carry
 | 27 | 4.5d | Codex round 27 PR #97 | **P2** Bridge test's `beforeEach` seeded fixtures + handlers but did NOT reset `window.history` or the module-scoped state caches (`useURLState`, `useHealth`, `useResortList`, `useListPublishes`). The happy-path test ends with `window.location` on `/?route=publishes`; the blocked-state test then starts on that URL → renders PublishHistory instead of the Dashboard → "Publish" button isn't visible → click fails. Existing admin bridge tests (`resort-editor-write.test.tsx`) reset URL state + history in both beforeEach AND afterEach. | Added imports for `__resetForTests` from `useURLState`, `useHealth`, `useResortList`, `useListPublishes`. `beforeEach`: `window.history.replaceState({}, '', '/')` + all 4 resets. `afterEach`: same + tmp dir cleanup. Symmetric so any next file's first test also starts fresh. |
 | 28 | 4.5a | Codex round 28 PR #97 | **P2** Task 4.5a-5 still instructed implementers to add `workspace-corrupt → 500` to `STATUS_FOR_CODE` and treated route registration as a needed change, but `apps/admin/server/dispatch.ts` already has both: route entries at lines 91-103 + `workspace-corrupt → 500` at line 205. The "expect FAIL (routes not registered)" guidance in Step 2 was also wrong — the stub→real swap is what actually flips the tests from 501 to 200. | Dropped `dispatch.ts` MODIFY from PR 4.5a's file list (now 7 files). Step 3 now says "NO `dispatch.ts` change required". Step 2's expected-FAIL framing rewritten to attribute the FAIL to the 501 stubs throwing `not-implemented`. Step 6 stages only `dispatch.test.ts`. |
 | 28 | 4.5c | Codex round 28 PR #97 | **P2** PublishDialog's blocker selection used a nested-ternary chain over `health.value!` — both forbidden by AGENTS.md (no nested ternaries, no non-null assertions). The implementation would pass behavior tests but fail `npm run lint`/`qa`. | Rewrote with an explicit guarded `if (healthValue !== null)` branch. TypeScript narrows inside the block, so no `!` is needed; the chain becomes a clean `if/else if` ladder over the four health blockers. |
+| 29 | 4.5a | Codex round 29 PR #97 | **P2** `composePublishInput`'s ENOENT-only catch (round-13 fold) diverged from existing read paths: a malformed `current.v1.json` (SyntaxError or schema-parse failure) would crash the publish handler with a 500 instead of being treated as absent (the way `health.ts`, `listResorts.ts`, and `workspace.readPublishedDocOrNull` already do). The UI could show a publishable workspace but publish would fail. | Replaced the inline `readFile + JSON.parse` block with a call to the canonical `readPublishedDocOrNull(publishedPath)` (`apps/admin/server/workspace.ts:109`): returns `null` on ENOENT, malformed JSON, OR schema-parse failure; rethrows other fs errors (EACCES, EIO). Imports updated. Maintains the round-13 P2 guarantee (real fs errors still propagate) while matching the rest of the read surface's "malformed → absent" behaviour. |
 
 ---
 
