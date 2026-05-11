@@ -48,6 +48,12 @@ export function Toast(props: ToastProps): JSX.Element {
   const remainingRef = useRef<number>(dismissAfterMs)
   const startedAtRef = useRef<number>(Date.now())
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Codex round 2 PR #100 P2 fold: track hover + focus independently so a
+  // mouseleave-after-mouseenter does NOT resume the timer while the
+  // keyboard user is still focused (and vice versa). The timer resumes only
+  // after BOTH interactions have left the toast.
+  const isHoveredRef = useRef<boolean>(false)
+  const isFocusedRef = useRef<boolean>(false)
 
   // Codex round 1 PR #100 P2 fold: include `dismissAfterMs` in the effect
   // dep-array and reset `remainingRef` at the top of each run so consumers
@@ -68,7 +74,10 @@ export function Toast(props: ToastProps): JSX.Element {
     }
   }, [onDismiss, dismissAfterMs])
 
-  const pauseTimer = useCallback((): void => {
+  // Internal pause primitive: clears the timer + snapshots elapsed time.
+  // No-op when the timer is already paused (idempotent for double-pause via
+  // hover + focus overlap).
+  const pauseTimerInternal = useCallback((): void => {
     if (timerRef.current !== null) {
       clearTimeout(timerRef.current)
       timerRef.current = null
@@ -79,13 +88,41 @@ export function Toast(props: ToastProps): JSX.Element {
     }
   }, [])
 
-  const resumeTimer = useCallback((): void => {
+  // Internal resume primitive: starts a new timer for the captured
+  // remainder. No-op when a timer is already active.
+  const resumeTimerInternal = useCallback((): void => {
     if (timerRef.current !== null) {
       return
     }
     startedAtRef.current = Date.now()
     timerRef.current = setTimeout(onDismiss, remainingRef.current)
   }, [onDismiss])
+
+  const handleMouseEnter = useCallback((): void => {
+    isHoveredRef.current = true
+    pauseTimerInternal()
+  }, [pauseTimerInternal])
+
+  const handleMouseLeave = useCallback((): void => {
+    isHoveredRef.current = false
+    // Only resume when neither interaction is active. If focus is still
+    // inside the toast, keep paused so the keyboard user controls dismissal.
+    if (!isFocusedRef.current) {
+      resumeTimerInternal()
+    }
+  }, [resumeTimerInternal])
+
+  const handleFocus = useCallback((): void => {
+    isFocusedRef.current = true
+    pauseTimerInternal()
+  }, [pauseTimerInternal])
+
+  const handleBlur = useCallback((): void => {
+    isFocusedRef.current = false
+    if (!isHoveredRef.current) {
+      resumeTimerInternal()
+    }
+  }, [resumeTimerInternal])
 
   // ARIA per Decision C1: info/success → polite (`role="status"`); error →
   // assertive (`role="alert"`). The polite/assertive split matches AT
@@ -97,10 +134,10 @@ export function Toast(props: ToastProps): JSX.Element {
       role={role}
       tabIndex={0}
       className={`sta-toast sta-toast--${variant}`}
-      onMouseEnter={pauseTimer}
-      onMouseLeave={resumeTimer}
-      onFocus={pauseTimer}
-      onBlur={resumeTimer}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+      onFocus={handleFocus}
+      onBlur={handleBlur}
     >
       <span className="sta-toast__message">{message}</span>
       <Button variant="ghost" onClick={onDismiss} aria-label="Dismiss notification">

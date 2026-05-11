@@ -144,6 +144,74 @@ describe('Toast — variants + ARIA', (): void => {
     }
   })
 
+  // Codex round 2 PR #100 P2 fold: hover and focus must be tracked
+  // independently. Otherwise mouseleave (resume) can defeat an active focus
+  // (pause), and the timer fires while the keyboard user is still
+  // interacting with the toast.
+  it('keeps the timer paused when focus is still active after mouseleave (hover + focus independence)', (): void => {
+    vi.useFakeTimers()
+    try {
+      const onDismiss = vi.fn()
+      const { container } = render(
+        <Toast variant="info" message="X" onDismiss={onDismiss} dismissAfterMs={5000} />,
+      )
+      const root = container.firstChild as HTMLElement
+      // User hovers + focuses (both pause).
+      fireEvent.mouseEnter(root)
+      fireEvent.focus(root)
+      act((): void => {
+        vi.advanceTimersByTime(20_000)
+      })
+      expect(onDismiss).not.toHaveBeenCalled()
+      // Mouse leaves but focus remains — timer must stay paused.
+      fireEvent.mouseLeave(root)
+      act((): void => {
+        vi.advanceTimersByTime(20_000)
+      })
+      expect(onDismiss).not.toHaveBeenCalled()
+      // Only when focus also leaves does the timer resume.
+      fireEvent.blur(root)
+      act((): void => {
+        vi.advanceTimersByTime(5000)
+      })
+      expect(onDismiss).toHaveBeenCalledOnce()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps the timer paused when hover is still active after blur (hover + focus independence)', (): void => {
+    vi.useFakeTimers()
+    try {
+      const onDismiss = vi.fn()
+      const { container } = render(
+        <Toast variant="info" message="X" onDismiss={onDismiss} dismissAfterMs={5000} />,
+      )
+      const root = container.firstChild as HTMLElement
+      // User focuses + hovers (both pause).
+      fireEvent.focus(root)
+      fireEvent.mouseEnter(root)
+      act((): void => {
+        vi.advanceTimersByTime(20_000)
+      })
+      expect(onDismiss).not.toHaveBeenCalled()
+      // Focus leaves but hover remains — timer must stay paused.
+      fireEvent.blur(root)
+      act((): void => {
+        vi.advanceTimersByTime(20_000)
+      })
+      expect(onDismiss).not.toHaveBeenCalled()
+      // Only when hover also leaves does the timer resume.
+      fireEvent.mouseLeave(root)
+      act((): void => {
+        vi.advanceTimersByTime(5000)
+      })
+      expect(onDismiss).toHaveBeenCalledOnce()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('clicking the Dismiss button calls onDismiss immediately', async (): Promise<void> => {
     const user = userEvent.setup()
     const onDismiss = vi.fn()
