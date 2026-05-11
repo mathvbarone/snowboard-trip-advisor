@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { axe } from 'jest-axe'
 import { useEffect, type ReactElement } from 'react'
@@ -801,7 +801,7 @@ describe('ToastProvider + useToast', (): void => {
     expect(region.textContent).toBe('')
   })
 
-  it('populates the polite live region when show({variant: "info"}) is called', (): void => {
+  it('populates the polite live region when show({variant: "info"}) is called', async (): Promise<void> => {
     render(
       <ToastProvider>
         <ProbeShow variant="info" message="Heads up" />
@@ -809,17 +809,25 @@ describe('ToastProvider + useToast', (): void => {
     )
     expect(getPoliteRegion().textContent).toBe('')
     fireEvent.click(screen.getByRole('button', { name: 'trigger' }))
-    expect(getPoliteRegion().textContent).toBe('Heads up')
+    // Round-11 fold: the message is populated via queueMicrotask (so the
+    // empty intermediate clears for AT to detect the diff). React commits
+    // the deferred update on the next act cycle; waitFor polls until it
+    // lands.
+    await waitFor((): void => {
+      expect(getPoliteRegion().textContent).toBe('Heads up')
+    })
   })
 
-  it('populates the polite live region when show({variant: "success"}) is called', (): void => {
+  it('populates the polite live region when show({variant: "success"}) is called', async (): Promise<void> => {
     render(
       <ToastProvider>
         <ProbeShow variant="success" message="Published version 7" />
       </ToastProvider>,
     )
     fireEvent.click(screen.getByRole('button', { name: 'trigger' }))
-    expect(getPoliteRegion().textContent).toBe('Published version 7')
+    await waitFor((): void => {
+      expect(getPoliteRegion().textContent).toBe('Published version 7')
+    })
   })
 
   it('does NOT populate the polite live region for error variant (uses visible role="alert" instead)', (): void => {
@@ -852,7 +860,9 @@ describe('ToastProvider + useToast', (): void => {
     )
     // First show — establishes the baseline content in the region.
     fireEvent.click(screen.getByRole('button', { name: 'trigger' }))
-    expect(getPoliteRegion().textContent).toBe('Published successfully')
+    await waitFor((): void => {
+      expect(getPoliteRegion().textContent).toBe('Published successfully')
+    })
 
     // Track per-record added/removed text nodes on the persistent region.
     const region = getPoliteRegion()
@@ -875,18 +885,88 @@ describe('ToastProvider + useToast', (): void => {
       // produce both a removal (the prior text node) and an addition
       // (the new text node), even though both carry the same text.
       fireEvent.click(screen.getByRole('button', { name: 'trigger' }))
-      // Drain microtasks so MutationObserver delivers its callbacks.
-      await Promise.resolve()
-      await Promise.resolve()
+      // queueMicrotask defers the populate to a separate React commit;
+      // waitFor + final MutationObserver flush gives both microtask
+      // batches time to land in the DOM.
+      await waitFor((): void => {
+        expect(additions.length).toBeGreaterThan(0)
+      })
     } finally {
       observer.disconnect()
     }
 
-    // The flushSync(clear) committed an empty state, removing the prior
-    // text node; the subsequent setPoliteAnnouncement re-added it.
+    // The clear committed an empty state, removing the prior text node;
+    // the queueMicrotask-deferred set re-added it.
     expect(removals).toContain('Published successfully')
     expect(additions).toContain('Published successfully')
     // Final state: region remains populated with the message.
+    expect(region.textContent).toBe('Published successfully')
+  })
+
+  // Codex round 11 PR #100 P2 fold: the planned PublishDialog (PR 4.5c)
+  // calls `show()` from a `useEffect` after publish completes. flushSync
+  // (the round-9 implementation) was a no-op inside React effects, so
+  // identical successive toasts in effect-driven flows would be silent
+  // for assistive tech. The queueMicrotask approach works in both event
+  // handlers AND effects — pin the invariant for the effect path here.
+  it('clears+re-sets the polite live region when show() is called from a useEffect (effect-driven path)', async (): Promise<void> => {
+    function EffectProbe({ trigger }: { readonly trigger: number }): ReactElement {
+      const { show } = useToast()
+      useEffect((): void => {
+        if (trigger > 0) {
+          show({ variant: 'success', message: 'Published successfully' })
+        }
+      }, [trigger, show])
+      return <div />
+    }
+
+    // First effect run with trigger=1 → first toast.
+    const { rerender } = render(
+      <ToastProvider>
+        <EffectProbe trigger={1} />
+      </ToastProvider>,
+    )
+    await waitFor((): void => {
+      expect(getPoliteRegion().textContent).toBe('Published successfully')
+    })
+
+    // Track text-node mutations on the persistent region.
+    const region = getPoliteRegion()
+    const removals: Array<string> = []
+    const additions: Array<string> = []
+    const observer = new MutationObserver((records): void => {
+      for (const record of records) {
+        for (const node of record.removedNodes) {
+          removals.push(node.textContent ?? '')
+        }
+        for (const node of record.addedNodes) {
+          additions.push(node.textContent ?? '')
+        }
+      }
+    })
+    observer.observe(region, { characterData: true, childList: true, subtree: true })
+
+    try {
+      // Second effect run (trigger=2) → effect re-fires, show() called
+      // again with identical message from inside useEffect. Must still
+      // produce empty→content text-node diff for AT.
+      rerender(
+        <ToastProvider>
+          <EffectProbe trigger={2} />
+        </ToastProvider>,
+      )
+      await waitFor((): void => {
+        expect(additions.length).toBeGreaterThan(0)
+      })
+    } finally {
+      observer.disconnect()
+    }
+
+    // The clear-then-deferred-set pattern produces both a text-node
+    // removal AND an addition, even from inside a useEffect. The
+    // round-9 flushSync approach would have no-op'd here.
+    expect(removals).toContain('Published successfully')
+    expect(additions).toContain('Published successfully')
     expect(region.textContent).toBe('Published successfully')
   })
 })
