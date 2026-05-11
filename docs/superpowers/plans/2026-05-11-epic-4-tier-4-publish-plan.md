@@ -616,7 +616,11 @@ git commit -s -m "feat(admin-server): listPublishes handler — counter-prefixed
 it('routes POST /api/resorts/__all__/publish → publishHandler (200 with PublishResponse)', /* ... */)
 it('routes POST /api/resorts/non-all-slug/publish → 400 invalid-request (Phase 1)', /* ... */)
 it('routes GET /api/publishes → listPublishesHandler (200 with ListPublishesResponse)', /* ... */)
-it('routes GET /api/publishes?page.offset=5&page.limit=10 → respects pagination', /* ... */)
+// Codex round 8 PR #97 P2 fold: apiClient serializeQuery() JSON-stringifies
+// nested query values as a single top-level param (apiClient.ts:64-73).
+// `?page.offset=5&page.limit=10` would be ignored by ListPublishesQuery.parse().
+// Use the JSON-encoded format that apiClient actually produces.
+it('routes GET /api/publishes?page={"offset":5,"limit":10} → respects pagination', /* ... */)
 it('honors Idempotency-Key header on POST publish without rejecting (Phase 1, spec §4.9 invariant 5)', /* ... */)  // Decision J1.
 ```
 
@@ -1192,13 +1196,26 @@ describe('usePublish', (): void => {
     expect(result.current.status).toBe('idle')
     expect(result.current.error).toBeNull()
   })
+
+  // Codex round 8 PR #97 P2 fold: synchronous in-flight guard.
+  it('synchronous in-flight guard: a second submit() while one is pending is a no-op', async (): Promise<void> => {
+    const apiSpy = vi.spyOn(apiClient, 'publish')
+    const { result } = renderHook((): ReturnType<typeof usePublish> => usePublish())
+    // Fire two submits synchronously — second one must not invoke apiClient.publish().
+    await act(async (): Promise<void> => {
+      const p1 = result.current.submit()
+      const p2 = result.current.submit()
+      await Promise.all([p1, p2])
+    })
+    expect(apiSpy).toHaveBeenCalledOnce()
+  })
 })
 ```
 
 #### Task 4.5c-4: `usePublish.ts` impl per Decision D1 + D2
 
 ```ts
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 
 import type { PublishResponse } from '@snowboard-trip-advisor/schema/api'
 
@@ -1220,8 +1237,17 @@ export function usePublish(): UsePublishResult {
   const [status, setStatus] = useState<PublishStatus>('idle')
   const [response, setResponse] = useState<PublishResponse | null>(null)
   const [error, setError] = useState<Error | null>(null)
+  // Codex round 8 PR #97 P2 fold: synchronous in-flight guard. Without this,
+  // a double-click on Confirm (or any second submit() call before React
+  // commits the `setStatus('submitting')` render) would launch a second
+  // apiClient.publish() — Phase 1 does NOT deduplicate Idempotency-Keys
+  // server-side (spec §4.9 invariant 5), so two POSTs = two history archives
+  // + two current.v1.json writes for one user intent.
+  const inFlightRef = useRef<boolean>(false)
 
   async function submit(): Promise<void> {
+    if (inFlightRef.current) { return }
+    inFlightRef.current = true
     setStatus('submitting')
     setError(null)
     try {
@@ -1232,6 +1258,8 @@ export function usePublish(): UsePublishResult {
     } catch (e) {
       setError(e instanceof Error ? e : new Error(String(e)))
       setStatus('error')
+    } finally {
+      inFlightRef.current = false
     }
   }
 
@@ -1768,6 +1796,8 @@ _Populate as Codex / subagent / maintainer / user findings land per round. Carry
 | 7 | 4.5a | Codex round 6 PR #97 | **P2** `composePublishInput` skipped workspace `live_signal: null` entries; the merge then fell back to published live_signal for that slug — silently resurrecting data the analyst explicitly cleared via the upsert handler. | Track `workspaceSlugsWithEntry: Set<string>` separately from the value `Map`. Merge logic: if slug ∈ set → use workspace's value (which may be `null` → omit); else → fall back to published. Added a test case asserting that workspace null + published-non-null yields an empty `live_signals` array in the archived snapshot. |
 | 7 | 4.5a | Codex round 6 PR #97 | **P2** Plan called `deps.now()` but `HandlerDeps` (`apps/admin/server/listResorts.ts:16-18`) only contains `workspaceRoot`; `dispatch()` passes only `{ workspaceRoot }`. Existing handlers (`listResorts.ts:57`, `health.ts:63`) use `Date.now()` / `new Date()` directly. Plan as-written would fail typecheck. | Switched to `new Date()` directly inside the handler (matches existing pattern). Tests now use `vi.setSystemTime()` for deterministic clock (Vitest convention) instead of injecting a `now` dep. |
 | 8 | 4.5d | Codex round 7 PR #97 | **P2** `publish-flow.test.tsx` integration test imports used `../../../apps/admin/...` (3 segments — resolves to `tests/apps/admin/`, not repo-root `apps/admin/`); existing tests in the same directory (`resort-editor-write.test.tsx:13`, `resort-editor-read.test.tsx:20`, `shell.test.tsx:11`) use **4** segments. Also imported `{ App }` (named) but `apps/admin/src/App.tsx:9` declares `export default function App()`. Plan as-written would fail module resolution. | Corrected to `../../../../apps/admin/...` (4 segments) + `import App from '...'` (default). Comment cites the existing-test reference paths so an executing agent can verify. |
+| 9 | 4.5c | Codex round 8 PR #97 | **P2** `usePublish.submit()` only set state before the await — a double-click on Confirm (or any second `submit()` call before React commits the `setStatus('submitting')` render) would launch a second `apiClient.publish()`. Phase 1 does NOT deduplicate Idempotency-Keys server-side (per Decision J1), so two POSTs = two history archives + two `current.v1.json` writes for one user intent. | Added a synchronous in-flight guard via `useRef<boolean>(false)`: `submit()` returns early if the ref is true; sets the ref true before awaiting; clears in `finally`. Added a regression test that fires two concurrent `submit()`s and asserts `apiClient.publish` was called exactly once. |
+| 9 | 4.5a | Codex round 8 PR #97 | **P2** `dispatch.test.ts` test for pagination used dotted query keys (`?page.offset=5&page.limit=10`). The existing `apiClient.serializeQuery()` (`apps/admin/src/lib/apiClient.ts:64-73`) JSON-stringifies nested values as a single top-level param, so dotted keys would be silently ignored by `ListPublishesQuery.parse()`, defaulting to the first page. | Updated the test case to use the JSON-encoded format `?page={"offset":5,"limit":10}` (matching the apiClient serializer shape). Comment cites the serializer line numbers. |
 
 ---
 
