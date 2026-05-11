@@ -772,4 +772,58 @@ describe('ToastProvider + useToast', (): void => {
     // insertion per MDN's dynamic-insertion exception.
     expect(screen.getByRole('alert')).toHaveTextContent('Publish failed')
   })
+
+  // Codex round 9 PR #100 P2 fold: two consecutive shows with identical
+  // message text would be a `setPoliteAnnouncement(same)` state-equality
+  // no-op without the clear-then-set pattern, so the persistent region's
+  // textContent never changes and AT doesn't announce the second toast.
+  // The implementation uses `flushSync` to commit an empty intermediate
+  // state before populating with the message; MutationObserver verifies
+  // that BOTH a text-node removal AND a text-node addition occur on the
+  // second show (proving the intermediate empty commit happened).
+  it('clears the polite live region before re-setting on identical successive shows', async (): Promise<void> => {
+    render(
+      <ToastProvider>
+        <ProbeShow variant="success" message="Published successfully" />
+      </ToastProvider>,
+    )
+    // First show — establishes the baseline content in the region.
+    fireEvent.click(screen.getByRole('button', { name: 'trigger' }))
+    expect(getPoliteRegion().textContent).toBe('Published successfully')
+
+    // Track per-record added/removed text nodes on the persistent region.
+    const region = getPoliteRegion()
+    const removals: Array<string> = []
+    const additions: Array<string> = []
+    const observer = new MutationObserver((records): void => {
+      for (const record of records) {
+        for (const node of record.removedNodes) {
+          removals.push(node.textContent ?? '')
+        }
+        for (const node of record.addedNodes) {
+          additions.push(node.textContent ?? '')
+        }
+      }
+    })
+    observer.observe(region, { characterData: true, childList: true, subtree: true })
+
+    try {
+      // Second show with the IDENTICAL message — clear-then-set must
+      // produce both a removal (the prior text node) and an addition
+      // (the new text node), even though both carry the same text.
+      fireEvent.click(screen.getByRole('button', { name: 'trigger' }))
+      // Drain microtasks so MutationObserver delivers its callbacks.
+      await Promise.resolve()
+      await Promise.resolve()
+    } finally {
+      observer.disconnect()
+    }
+
+    // The flushSync(clear) committed an empty state, removing the prior
+    // text node; the subsequent setPoliteAnnouncement re-added it.
+    expect(removals).toContain('Published successfully')
+    expect(additions).toContain('Published successfully')
+    // Final state: region remains populated with the message.
+    expect(region.textContent).toBe('Published successfully')
+  })
 })

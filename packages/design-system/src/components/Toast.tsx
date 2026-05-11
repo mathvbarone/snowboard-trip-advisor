@@ -9,6 +9,7 @@ import {
   type JSX,
   type ReactNode,
 } from 'react'
+import { flushSync } from 'react-dom'
 
 // Toast — design-system primitive for the Tier 4 publish flow's success /
 // failure notification surface (plan §4.5b, spec §5.1 + §7.15). See
@@ -265,7 +266,21 @@ export function ToastProvider({ children }: { children: ReactNode }): JSX.Elemen
         setCurrent({ input, key: keyRef.current })
         // Update the persistent polite live region for non-error variants.
         // Error variant uses the visible Toast's role="alert" path.
+        //
+        // Codex round 9 PR #100 P2 fold: when consecutive toasts have
+        // IDENTICAL text (e.g. two publishes in a row both showing
+        // "Published successfully"), setPoliteAnnouncement(same) is a
+        // state-equality no-op → no DOM update → AT doesn't detect a
+        // content change → silent toast. Force a textContent diff by
+        // clearing the region first via `flushSync` (which commits the
+        // empty state to the DOM synchronously), then populating with
+        // the message in a normal state update. AT sees empty→content
+        // and announces. flushSync is appropriate here because we
+        // genuinely need React to commit between two state updates.
         if (input.variant !== 'error') {
+          flushSync((): void => {
+            setPoliteAnnouncement('')
+          })
           setPoliteAnnouncement(input.message)
         }
       },
