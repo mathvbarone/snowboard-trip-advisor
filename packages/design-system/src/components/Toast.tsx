@@ -56,7 +56,17 @@ export function Toast(props: ToastProps): JSX.Element {
   // a parent re-rendering more often than `dismissAfterMs` with an inline
   // `onDismiss` arrow kept resetting `remainingRef` to full and the toast
   // lived indefinitely.
+  //
+  // Codex round 10 PR #100 P2 fold: track previous `message` and
+  // `variant` too. A direct-consumer rerender with a NEW message (or a
+  // variant swap whose default duration is the same — e.g. info → success
+  // both default to 5000ms) must restart the timer at the full duration,
+  // not inherit the previous toast's remainder. The single-slot
+  // <ToastProvider> path key-remounts so it's not affected; this matters
+  // only for the exported direct-<Toast> API.
   const prevDismissAfterMsRef = useRef<number>(dismissAfterMs)
+  const prevMessageRef = useRef<string>(message)
+  const prevVariantRef = useRef<ToastVariant>(variant)
   // Codex round 2 PR #100 P2 fold: track hover + focus independently so a
   // mouseleave-after-mouseenter does NOT resume the timer while the
   // keyboard user is still focused (and vice versa). The timer resumes only
@@ -84,10 +94,22 @@ export function Toast(props: ToastProps): JSX.Element {
   // often than `dismissAfterMs` keeps the toast alive indefinitely. The
   // cleanup snapshots elapsed time into `remainingRef` BEFORE clearing the
   // timer so the next effect run picks up where this one left off.
+  //
+  // Codex round 10 PR #100 P2 fold: also reset on `message` or `variant`
+  // change — a new notification text or variant swap must restart the
+  // timer at the full new duration instead of inheriting the previous
+  // toast's near-expiry remainder. onDismiss-identity-only swaps still
+  // preserve elapsed progress (the round-5 invariant).
   useEffect((): (() => void) => {
-    if (prevDismissAfterMsRef.current !== dismissAfterMs) {
+    const isReplacement =
+      prevDismissAfterMsRef.current !== dismissAfterMs ||
+      prevMessageRef.current !== message ||
+      prevVariantRef.current !== variant
+    if (isReplacement) {
       remainingRef.current = dismissAfterMs
       prevDismissAfterMsRef.current = dismissAfterMs
+      prevMessageRef.current = message
+      prevVariantRef.current = variant
     }
     startedAtRef.current = Date.now()
     if (!isHoveredRef.current && !isFocusedRef.current) {
@@ -103,7 +125,7 @@ export function Toast(props: ToastProps): JSX.Element {
         timerRef.current = null
       }
     }
-  }, [onDismiss, dismissAfterMs])
+  }, [onDismiss, dismissAfterMs, message, variant])
 
   // Internal pause primitive: clears the timer + snapshots elapsed time.
   // No-op when the timer is already paused (idempotent for double-pause via

@@ -471,6 +471,69 @@ describe('Toast — variants + ARIA', (): void => {
     }
   })
 
+  // Codex round 10 PR #100 P2 fold: direct-consumer rerender with a new
+  // message (or a variant swap whose default duration is unchanged — e.g.
+  // info → success both default to 5000ms) must restart the timer at the
+  // full duration. Without this, the round-5 "preserve elapsed" path
+  // captures the previous toast's remainder and the replacement message
+  // can dismiss almost immediately.
+  it('resets the timer when rerendered with a new message (codex round 10 P2 fold)', (): void => {
+    vi.useFakeTimers()
+    try {
+      const onDismiss = vi.fn()
+      const { rerender } = render(
+        <Toast variant="info" message="First" onDismiss={onDismiss} dismissAfterMs={5000} />,
+      )
+      // 4s pass on the first message — 1s remaining.
+      act((): void => {
+        vi.advanceTimersByTime(4000)
+      })
+      // Rerender with a NEW message; dismissAfterMs unchanged. Timer must
+      // restart at 5000ms instead of inheriting the 1000ms remainder.
+      rerender(
+        <Toast variant="info" message="Second" onDismiss={onDismiss} dismissAfterMs={5000} />,
+      )
+      // After 1000ms the old remainder would have fired — must NOT.
+      act((): void => {
+        vi.advanceTimersByTime(1000)
+      })
+      expect(onDismiss).not.toHaveBeenCalled()
+      // After the full new 5000ms — fires.
+      act((): void => {
+        vi.advanceTimersByTime(4000)
+      })
+      expect(onDismiss).toHaveBeenCalledOnce()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('resets the timer when rerendered with a new variant whose default duration matches (info → success)', (): void => {
+    // info → success: both default to 5000ms, so dismissAfterMs is
+    // unchanged. The variant change alone must still restart the timer.
+    vi.useFakeTimers()
+    try {
+      const onDismiss = vi.fn()
+      const { rerender } = render(<Toast variant="info" message="X" onDismiss={onDismiss} />)
+      act((): void => {
+        vi.advanceTimersByTime(4000)
+      })
+      rerender(<Toast variant="success" message="X" onDismiss={onDismiss} />)
+      // 1000ms (the old remainder) must NOT fire after variant swap.
+      act((): void => {
+        vi.advanceTimersByTime(1000)
+      })
+      expect(onDismiss).not.toHaveBeenCalled()
+      // Full new 5000ms boundary — fires.
+      act((): void => {
+        vi.advanceTimersByTime(4000)
+      })
+      expect(onDismiss).toHaveBeenCalledOnce()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('does not extend toast lifetime when parent re-renders more often than dismissAfterMs (codex round 5 regression)', (): void => {
     vi.useFakeTimers()
     try {
