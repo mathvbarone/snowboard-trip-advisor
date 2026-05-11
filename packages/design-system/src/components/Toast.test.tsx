@@ -305,6 +305,70 @@ describe('Toast — variants + ARIA', (): void => {
       }
     },
   )
+
+  // Codex round 3 PR #100 P2 fold: an effect restart (e.g. consumer passes a
+  // new inline `onDismiss` identity, or swaps `dismissAfterMs`) while the
+  // user is still hovering or keyboard-focused must NOT schedule a fresh
+  // timeout — that would break the pause-on-interaction guarantee from the
+  // round-2 fold. Pin the regression for both interaction paths.
+  it('re-rendering with a new dismissAfterMs while hovered keeps the timer paused (effect-restart pause-guard)', (): void => {
+    vi.useFakeTimers()
+    try {
+      const onDismiss = vi.fn()
+      const { container, rerender } = render(
+        <Toast variant="info" message="X" onDismiss={onDismiss} dismissAfterMs={5000} />,
+      )
+      const root = container.firstChild as HTMLElement
+      fireEvent.mouseEnter(root)
+      // Effect restart with a new duration while still hovered.
+      rerender(<Toast variant="info" message="X" onDismiss={onDismiss} dismissAfterMs={10_000} />)
+      // Cross both the old and new durations — timer must stay paused.
+      act((): void => {
+        vi.advanceTimersByTime(20_000)
+      })
+      expect(onDismiss).not.toHaveBeenCalled()
+      // Releasing hover schedules a fresh timer for the FULL new duration.
+      fireEvent.mouseLeave(root)
+      act((): void => {
+        vi.advanceTimersByTime(9999)
+      })
+      expect(onDismiss).not.toHaveBeenCalled()
+      act((): void => {
+        vi.advanceTimersByTime(1)
+      })
+      expect(onDismiss).toHaveBeenCalledOnce()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('re-rendering with a new dismissAfterMs while focused keeps the timer paused (effect-restart pause-guard)', (): void => {
+    vi.useFakeTimers()
+    try {
+      const onDismiss = vi.fn()
+      const { container, rerender } = render(
+        <Toast variant="info" message="X" onDismiss={onDismiss} dismissAfterMs={5000} />,
+      )
+      const root = container.firstChild as HTMLElement
+      fireEvent.focus(root)
+      rerender(<Toast variant="info" message="X" onDismiss={onDismiss} dismissAfterMs={10_000} />)
+      act((): void => {
+        vi.advanceTimersByTime(20_000)
+      })
+      expect(onDismiss).not.toHaveBeenCalled()
+      fireEvent.blur(root)
+      act((): void => {
+        vi.advanceTimersByTime(9999)
+      })
+      expect(onDismiss).not.toHaveBeenCalled()
+      act((): void => {
+        vi.advanceTimersByTime(1)
+      })
+      expect(onDismiss).toHaveBeenCalledOnce()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
 
 describe('ToastProvider + useToast', (): void => {

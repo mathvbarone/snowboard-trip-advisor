@@ -62,10 +62,20 @@ export function Toast(props: ToastProps): JSX.Element {
   // <Toast> via the per-show key (Decision C2), so this effect only re-runs
   // for direct-consumer use; that path was previously stuck on the
   // first-render duration.
+  //
+  // Codex round 3 PR #100 P2 fold: when the effect restarts while either
+  // pause flag is active (e.g. consumer passes a new inline `onDismiss`
+  // identity during a parent re-render, or swaps `dismissAfterMs` while the
+  // user is still hovering / focused), leave the timer cleared instead of
+  // unconditionally scheduling. Resume runs from `handleMouseLeave` /
+  // `handleBlur` when both flags clear, using the fresh `remainingRef`
+  // captured above for the full new duration.
   useEffect((): (() => void) => {
     remainingRef.current = dismissAfterMs
     startedAtRef.current = Date.now()
-    timerRef.current = setTimeout(onDismiss, remainingRef.current)
+    if (!isHoveredRef.current && !isFocusedRef.current) {
+      timerRef.current = setTimeout(onDismiss, remainingRef.current)
+    }
     return (): void => {
       if (timerRef.current !== null) {
         clearTimeout(timerRef.current)
