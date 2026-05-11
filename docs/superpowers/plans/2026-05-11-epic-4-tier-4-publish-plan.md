@@ -1424,7 +1424,7 @@ it('Confirm button has aria-describedby pointing at the blocker tooltip id when 
 // at packages/design-system/src/primitives/Modal.tsx instead of inlining a
 // <div role="dialog">. Modal provides focus trap, body scroll lock, Escape-
 // dismiss, portal, and focus-return for free.
-import { useEffect, type JSX } from 'react'
+import { useCallback, useEffect, type JSX } from 'react'
 import { Button, Modal, useToast } from '@snowboard-trip-advisor/design-system'
 
 import { useHealth } from '../state/useHealth'
@@ -1485,6 +1485,18 @@ export function PublishDialog({ open, onOpenChange }: PublishDialogProps): JSX.E
   }
 
   const disabled = healthUnknown || blocker !== null || publish.status === 'submitting'
+
+  // Codex round 32 PR #97 P2 fold: ignore close requests while a publish is
+  // in-flight. Otherwise the user can Escape/backdrop-click out, PublishDialog
+  // unmounts, the success/error Toast useEffect inside this component is gone,
+  // and the publish completes silently (the POST still writes the archive +
+  // current.v1.json, but the user has no indication). Keep the dialog mounted
+  // until the publish resolves so the Toast emits.
+  const handleOpenChange = useCallback((next: boolean): void => {
+    if (!next && publish.status === 'submitting') { return }
+    onOpenChange(next)
+  }, [publish.status, onOpenChange])
+
   // Codex round 20 PR #97 P3 fold: render the descriptive `<p>` (and link Confirm
   // via aria-describedby) WHENEVER the dialog is disabled for a reason the user
   // should hear — i.e., during health loading/error AND for the four blockers.
@@ -1493,7 +1505,7 @@ export function PublishDialog({ open, onOpenChange }: PublishDialogProps): JSX.E
   const hasBlockerCopy = healthUnknown || blocker !== null
 
   return (
-    <Modal open={open} onOpenChange={onOpenChange} title="Publish">
+    <Modal open={open} onOpenChange={handleOpenChange} title="Publish">
       {healthUnknown && (
         <p id="publish-dialog-blocker" role="status">
           {health.error === null ? 'Loading pre-publish checks…' : `Could not load health: ${health.error.message}`}
@@ -1503,7 +1515,11 @@ export function PublishDialog({ open, onOpenChange }: PublishDialogProps): JSX.E
         <p id="publish-dialog-blocker">{TOOLTIP_BY_BLOCKER[blocker]}</p>
       )}
       <div className="publish-dialog__actions">
-        <Button onClick={(): void => { onOpenChange(false) }} variant="ghost">Cancel</Button>
+        <Button
+          onClick={(): void => { handleOpenChange(false) }}
+          disabled={publish.status === 'submitting'}
+          variant="ghost"
+        >Cancel</Button>
         <Button
           onClick={(): void => { void publish.submit() }}
           disabled={disabled}
@@ -2121,6 +2137,7 @@ _Populate as Codex / subagent / maintainer / user findings land per round. Carry
 | 29 | 4.5a | Codex round 29 PR #97 | **P2** `composePublishInput`'s ENOENT-only catch (round-13 fold) diverged from existing read paths: a malformed `current.v1.json` (SyntaxError or schema-parse failure) would crash the publish handler with a 500 instead of being treated as absent (the way `health.ts`, `listResorts.ts`, and `workspace.readPublishedDocOrNull` already do). The UI could show a publishable workspace but publish would fail. | Replaced the inline `readFile + JSON.parse` block with a call to the canonical `readPublishedDocOrNull(publishedPath)` (`apps/admin/server/workspace.ts:109`): returns `null` on ENOENT, malformed JSON, OR schema-parse failure; rethrows other fs errors (EACCES, EIO). Imports updated. Maintains the round-13 P2 guarantee (real fs errors still propagate) while matching the rest of the read surface's "malformed → absent" behaviour. |
 | 30 | 4.5a | Codex round 30 PR #97 | **P2** `composePublishInput` iterated filenames but trusted `parsed.data.slug` — a renamed/copied workspace file (`a.json` containing `slug: 'b'`, internally valid) could publish under the wrong slug. `WorkspaceFile.parse` only enforces INTERNAL slug consistency; the single-file read path (`workspace.readWorkspaceFileForSlug` line 84) already throws `workspace-corrupt` on filename↔embedded-slug drift. | (Reverted in round 31 — see below.) Originally added the same check: extract `filenameSlug = entry.replace(/\.json$/, '')` and compare with `parsed.data.slug`; throw `workspace-corrupt` if they don't match. |
 | 31 | 4.5a | Codex round 31 PR #97 | **P2** Round-30's drift-detection-in-publish was inconsistent with health.ts: `health.ts:65-74` runs only `WorkspaceFile.safeParse(raw)` and does NOT count drift, so `resorts_with_corrupt_workspace` would stay 0 → PublishDialog enables Confirm → POST deterministically fails with 500. Either both paths reject drift or neither does. | **Reverted round-30**. Spec §10.3.1 narrowly defines "corrupt" as "files that fail `WorkspaceFile.parse()`"; the single-file read path's drift rejection is an internal extension beyond the spec. `composePublishInput` now trusts the embedded slug. Drift surfaces when the analyst opens the editor (single-file read path still throws). Avoids the deterministic UX lie + a 9-file PR 4.5a budget. |
+| 32 | 4.5c | Codex round 32 PR #97 | **P2** PublishDialog passed `onOpenChange` through directly to Modal. Mid-publish (`publish.status === 'submitting'`), the user could Escape/backdrop-click to close the modal → PublishDialog unmounts → the success/error Toast `useEffect` (inside PublishDialog) is gone → publish completes silently. The POST still writes the archive + current.v1.json, but the user gets no Toast indication. | Wrapped `onOpenChange` in a `handleOpenChange` callback (memoized via `useCallback`) that swallows close requests while submitting: `if (!next && publish.status === 'submitting') return`. Pass `handleOpenChange` to Modal AND to the Cancel button. Cancel is also disabled while submitting for clarity. Success path still closes via the post-publish effect (status === 'success' bypass). |
 
 ---
 
