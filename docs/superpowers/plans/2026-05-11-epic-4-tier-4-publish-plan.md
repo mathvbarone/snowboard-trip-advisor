@@ -1141,6 +1141,7 @@ export type { ToastProps, ToastVariant, ToastInput } from './components/Toast'
   - Subscriber cleanup on unmount: unmounted consumer does NOT re-fetch on invalidation.
   - `__resetForTests()` clears inFlight + subscribers maps.
   - **Stale-request identity guard** (Codex round 10 PR #97 P2 fold): start fetch `p1` (returns response A after 50ms); call `invalidateListPublishes()` 10ms in (clears inFlight + fires onInvalidate which starts `p2` returning response B after 5ms); assert that after `p1` resolves, the component state still holds B (not A). Mirrors `useResortDetail.ts:94` `cachedPromises.get(slug) === next` pattern.
+  - **Reset-on-key-change** (Codex round 11 PR #97 P2 fold): mount with query `{ page: { offset: 0, limit: 20 } }`, await resolve, assert `value !== null`; rerender with query `{ page: { offset: 20, limit: 20 } }`; assert that BEFORE the new fetch resolves the hook returns `{ value: null, error: null }` (loading state) — NOT the prior page's `value`. Mirrors `useResortList`'s reset-on-effect-entry behaviour.
 
 - [ ] **Step 2: Run — expect FAIL** (`useListPublishes.ts` does not yet exist).
 
@@ -1294,7 +1295,11 @@ it.each([
   ['resorts_total', 0, 'no resorts staged for publish. Add resorts in the editor before publishing.'],
 ])('disables confirm + shows tooltip when %s = %i', async (field, value, tooltip): Promise<void> => {
   // Seed MSW health response with the blocking field; render <PublishDialog open onClose=…/>.
-  // Assert confirm button has aria-disabled="true" and tooltip element renders the exact copy.
+  // Codex round 11 PR #97 P2 fold: assert via native `disabled` (Button forwards
+  // it; aria-disabled prop was dropped from Button in round 5 — native disabled
+  // covers the AT semantic). Tooltip text asserted exactly.
+  // Assert: screen.getByRole('button', { name: /Confirm/ }).toBeDisabled()
+  // and tooltip element renders the exact copy from spec §4.3.1.
 })
 
 it('confirm button enabled when health is clean; click → submit; on success → onClose called + Toast surfaces', /* ... */)
@@ -1534,6 +1539,10 @@ export function useListPublishes(q: ListPublishesQuery): UseListPublishesResult 
 
   useEffect((): (() => void) => {
     let cancelled = false
+    // Codex round 11 PR #97 P2 fold: reset to loading on key change so the
+    // user doesn't see stale rows from the previous page while the new fetch
+    // is in flight. Mirrors useResortList's reset-on-effect-entry pattern.
+    setValue(null); setError(null)
     let p = inFlight.get(key)
     if (p === undefined) {
       p = apiClient.listPublishes(q).finally((): void => {
@@ -1892,6 +1901,8 @@ _Populate as Codex / subagent / maintainer / user findings land per round. Carry
 | 10 | 4.5d | Codex round 9 PR #97 (post-main-merge) | **P2** `PublishHistory` returned `<main>...</main>` but `Shell.tsx:42` already wraps children in `<main>{children}</main>` → nested `main` landmarks (invalid HTML + AT navigation confusion). Other views (`Dashboard.tsx`, `ResortsTable.tsx`) use `<section>` instead. | Changed all four PublishHistory branches (loading, error, two empty states, content) to `<section aria-label="Publish history">`. Test outline updated to assert the root element is `<section>` not `<main>`. |
 | 11 | 4.5c | Codex round 10 PR #97 | **P2** `useListPublishes` round-9 rewrite lacked the stale-request identity guard. After `invalidateListPublishes()` clears the inFlight Map and a fresh fetch starts, the older promise's `.then` could still resolve and overwrite component state with stale data — the `useResortDetail.ts:94` `cachedPromises.get(slug) === next` guard the previous Suspense-based impl had. | Captured `currentP = p` reference; gated all `.then` writes on `inFlight.get(key) === currentP` (and same for `p2` in `onInvalidate`). Also identity-guarded the `inFlight.delete()` in `.finally` so a stale settle doesn't evict a fresh promise. Added a test case asserting that after invalidating mid-flight, the stale response cannot overwrite the fresh response in component state. |
 | 11 | 4.5d | Codex round 10 PR #97 | **P2** `Shell.tsx`'s SIDEBAR_ITEMS Publishes link still pointed at the pathname `/publishes`, but urlState is query-string-driven (`?route=publishes`). Clicking the sidebar Publishes link would navigate to `/publishes` with no `route` query → `parseURL` falls back to dashboard → PublishHistory never mounts via sidebar nav. | Added `apps/admin/src/views/Shell.tsx` MODIFY to PR 4.5d's file list (now 7/8 budget). Change is one line: `href: '/publishes'` → `href: '/?route=publishes'` for the Publishes item only. Other sidebar items keep their pathname-form hrefs — fixing the full Sidebar pathname-vs-query mismatch stays **Tier 5 polish per the post-Tier-2 handoff** as previously documented (out of scope here). publish-flow.test.tsx gains a sidebar-click assertion that the Publishes link routes correctly. |
+| 12 | 4.5c | Codex round 11 PR #97 | **P2** `useListPublishes` did not reset to loading on query-key change — user would see the prior page's rows + stale pagination state during the new-page fetch window. `useResortList` resets to loading at the start of its effect for this exact case. | Added `setValue(null); setError(null)` at the top of the `useEffect` body (before in-flight lookup). Added a test case asserting that rerendering with a new query key shows `{ value: null, error: null }` during the fetch window. |
+| 12 | 4.5c | Codex round 11 PR #97 | **P2** PublishDialog test instruction still asserted `aria-disabled="true"` on the Confirm button, but the round-5 fold dropped `aria-disabled` from PublishDialog in favor of the native `disabled` attribute (Button only forwards native disabled + the aria-describedby prop added in Task 4.5b-3). Following the test instruction literally would fail despite the impl being correct. | Updated the test instruction to assert via native `disabled` (`screen.getByRole('button', { name: /Confirm/ }).toBeDisabled()`); comment explains the prop history. |
 
 ---
 
