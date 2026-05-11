@@ -158,7 +158,9 @@ Expected: failures pointing at the missing `publishHandler` real impl (still 501
 - [ ] **Step 1: Implement the handler.**
 
 ```ts
+import { createHash } from 'node:crypto'
 import { mkdir, readdir, readFile } from 'node:fs/promises'
+import { hostname } from 'node:os'
 import { basename, join } from 'node:path'
 
 import { publishDataset } from '@snowboard-trip-advisor/schema/node'
@@ -213,7 +215,12 @@ export async function publishHandler(
       live_signals,
       manifest: {
         resort_count: resorts.length,
-        generated_by: 'admin-workspace',  // Phase 1 fingerprint per spec §4.7.
+        // Codex round 22 PR #97 P2 fold: parent spec §4.5.1 requires
+        // `manifest.generated_by` = "<cli-identifier> host=<sha256(hostname)>"
+        // so PublishHistory can show per-host publish provenance. Hard-coding
+        // 'admin-workspace' (the previous shape) collapsed every archive's
+        // `published_by` to one value, losing the per-host signal.
+        generated_by: computeGeneratedBy(),
         validator_version: '1',
       },
     },
@@ -240,6 +247,16 @@ export async function publishHandler(
     published_at: publishedAt,
     resort_count: resorts.length,
   }
+}
+
+// Codex round 22 PR #97 P2 fold: per parent spec §4.5.1, manifest.generated_by
+// is "<cli-identifier> host=<sha256(hostname)>". For Phase 1 loopback admin,
+// the cli-identifier is the admin-app label; the host fingerprint is sha256 of
+// the OS hostname (not PII — irreversible). PublishHistory's published_by
+// column reads this back via listPublishesHandler.
+function computeGeneratedBy(): string {
+  const hostHash = createHash('sha256').update(hostname()).digest('hex')
+  return `admin-workspace host=${hostHash}`
 }
 
 interface ComposeResult {
@@ -752,16 +769,17 @@ git push -u origin epic-4/pr-4.5a-publish-handler
 
 **Subagent review trigger:** **YES** — `packages/design-system/**` (per spec §7.15 line 659). Brief the reviewer to verify: (a) ARIA roles per variant (`info`/`success` → `role="status"`; `error` → `role="alert"`), (b) auto-dismiss timing prop respected, (c) hover-to-pause works via timer clear/reset, (d) jest-axe clean in all 3 variants, (e) single-Toast semantics (no queue/stack — Decision C1).
 
-**File budget:** 6 files (within ≤8 budget; Codex round 5 PR #97 P2 fold added `Button` ARIA-prop extension here since it's the same DS-surface review surface as Toast).
+**File budget:** 7 files (within ≤8 budget; Codex round 22 PR #97 P2 fold added `Toast.css` for the single-slot positioning).
 
 **Files (tests first):**
 
 1. **Create** `packages/design-system/src/components/Toast.test.tsx`.
-2. **Create** `packages/design-system/src/components/Toast.tsx`.
-3. **Modify** `packages/design-system/src/components/Button.test.tsx` — assert new ARIA props pass through to the rendered `<button>` element.
-4. **Modify** `packages/design-system/src/components/Button.tsx` — extend `ButtonProps` with `aria-describedby?: string` (needed by PR 4.5c's PublishDialog for `aria-describedby` → tooltip wiring per Decision F1). `aria-disabled` is NOT added because the standard `disabled` attribute already conveys disabled state to AT; PublishDialog should pass `disabled={blocker !== null}` and drop the `aria-disabled` prop.
-5. **Modify** `packages/design-system/src/index.ts` — re-export `Toast` + `ToastProvider` + `useToast`.
-6. **Modify** `packages/design-system/src/index.test.ts` — barrel test (verified at `packages/design-system/src/index.test.ts:1`); add assertions that `Toast`, `ToastProvider`, `useToast` exports are re-exported from the package root.
+2. **Create** `packages/design-system/src/components/Toast.tsx` — imports `./Toast.css` at the top (mirrors `Drawer.tsx:12`'s `import './Drawer.css'` pattern).
+3. **Create** `packages/design-system/src/components/Toast.css` — Codex round 22 PR #97 P2 fold: scoped `.sta-toast` styles for fixed top-right positioning (the single-slot promise from Decisions C1/C2). Mirrors `Drawer.css`'s pattern (uses design tokens `--space-lg`, `--z-toast` or fallback, box-shadow, etc.). Without this CSS the Toast renders in normal document flow → not visible as a notification.
+4. **Modify** `packages/design-system/src/components/Button.test.tsx` — assert new ARIA props pass through to the rendered `<button>` element.
+5. **Modify** `packages/design-system/src/components/Button.tsx` — extend `ButtonProps` with `aria-describedby?: string` (needed by PR 4.5c's PublishDialog for `aria-describedby` → tooltip wiring per Decision F1). `aria-disabled` is NOT added because the standard `disabled` attribute already conveys disabled state to AT; PublishDialog should pass `disabled={blocker !== null}` and drop the `aria-disabled` prop.
+6. **Modify** `packages/design-system/src/index.ts` — re-export `Toast` + `ToastProvider` + `useToast`.
+7. **Modify** `packages/design-system/src/index.test.ts` — barrel test (verified at `packages/design-system/src/index.test.ts:1`); add assertions that `Toast`, `ToastProvider`, `useToast` exports are re-exported from the package root.
 
 #### Task 4.5b-1: Toast.test.tsx — 3 variants + ARIA + axe
 
@@ -935,6 +953,10 @@ describe('ToastProvider + useToast', (): void => {
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { JSX, ReactNode } from 'react'
 
+// Codex round 22 PR #97 P2 fold: import scoped Toast CSS (fixed top-right
+// positioning, z-index, padding). Mirrors Drawer.tsx:12's pattern. Without
+// this, the Toast renders in normal flow instead of as a notification slot.
+import './Toast.css'
 import { Button } from './Button'
 
 export type ToastVariant = 'info' | 'success' | 'error'
@@ -1980,6 +2002,8 @@ _Populate as Codex / subagent / maintainer / user findings land per round. Carry
 | 21 | 4.5a | Codex round 20 PR #97 | **P2** PR 4.5a file-list entry #3 still said to add an "Idempotency-Key passthrough test" to `dispatch.test.ts`, but Decision J1 + Task 4.5a-5 already explain that `DispatchInput` has no `headers` field (no test feasible until Phase 2). Stale file-list line. | Updated the file-list entry to say "No Idempotency-Key passthrough test" and cite the round-16 P2 fold that revised Decision J1. |
 | 21 | 4.5c | Codex round 20 PR #97 | **P3** PublishDialog rendered the descriptive `<p id="publish-dialog-blocker">` during health-loading and health-error states, but only set `aria-describedby` for the four blocker cases. AT users got no explanation for the disabled Confirm during loading/error. | Replaced `aria-describedby={blocker !== null ? ...}` with `aria-describedby={hasBlockerCopy ? ...}` where `hasBlockerCopy = healthUnknown || blocker !== null`. Updated Decision F1's tooltip-wiring description to match. |
 | 22 | 4.5d | Codex round 21 PR #97 | **P2** Bridge integration test used `findByRole('status', { name: /Published version/ })` but Toast renders `<div role="status"><span>{message}</span>…</div>` with no `aria-label`. Testing Library's `name` option matches the accessible name (aria-label/-labelledby), NOT element text — so the assertion would time out. | Split into `findByRole('status')` to locate the region, then `toHaveTextContent(/Published version/)` to assert the message. Added a comment citing the round-21 catch. |
+| 23 | 4.5a | Codex round 22 PR #97 | **P2** Hard-coded `manifest.generated_by: 'admin-workspace'` collapsed every archive's `published_by` to one value, losing per-host publish provenance. Parent spec §4.5.1 requires `generated_by = "<cli-identifier> host=<sha256(hostname)>"`. | Added `computeGeneratedBy()` helper that hashes `os.hostname()` with sha256 and formats as `admin-workspace host=<hex>`. `publish.ts` calls it instead of hard-coding the value. Imports `node:crypto` `createHash` + `node:os` `hostname` added. |
+| 23 | 4.5b | Codex round 22 PR #97 | **P2** Toast had no CSS asset/import. `Toast.tsx` assigns `sta-toast` classes but with no companion CSS, Toast renders in normal document flow → not visible as a fixed top-right notification (the single-slot promise from Decisions C1/C2 fails). | Added `Toast.css` to PR 4.5b's file list (now 7/8 budget). Mirrors `Drawer.css` pattern: scoped `.sta-toast` styles with `position: fixed`, top-right corner, z-index, padding, design tokens. `Toast.tsx` imports `./Toast.css` at top (matches `Drawer.tsx:12`). |
 
 ---
 
