@@ -10,7 +10,7 @@
 
 Epic 4 ships `apps/admin`, a loopback-only Vite SPA + in-process API middleware that lets a single analyst edit `Resort` and `ResortLiveSignal` documents and trigger an all-or-nothing publish through the same `publishDataset()` pipeline `apps/public` already consumes. The admin app is **never** built into a production container image; the network boundary (`127.0.0.1:5174` `strictPort: true`) is the access control in Phase 1. Editing is read-only below the `md` breakpoint — controls are removed from the tab order, not merely disabled.
 
-**What ships in Epic 4** (13 PRs across foundation, navigation, editor, publish, polish — see §7 for the dependency graph and the tier-and-gate workflow):
+**What ships in Epic 4** (originally scoped as 13 PRs; delivered as 18 PRs across foundation, navigation, editor, publish, polish — §7.10 split PR 4.4a into 4.4a-1 + 4.4a-2; §7.15 split PR 4.5b into 4.5b + 4.5c + 4.5d; §7.17.1 split PR 4.6c off PR 4.6a — all for file-budget reasons per `feedback_atomic_prs.md`. See §7 for the dependency graph and the tier-and-gate workflow):
 
 - **Foundation** (PRs 4.1a/b/c) — `packages/schema/api/` Zod surface for 6 in-scope endpoints + `WorkspaceFile` schema (with top-level `editor_modes` + cross-key invariant per §10.2) + contract-snapshot test; the `vite-plugin-admin-api.ts` middleware skeleton + `apps/admin` Shell composition + tiered-MSW test harness (canned + bridge); design-system additions (Sidebar, StatusPill, Tabs, Popover, DropdownMenu).
 - **Navigation** (PRs 4.2 / 4.3) — Dashboard health cards + Resorts table. Both surface the cold-start empty state per §10.9.
@@ -483,7 +483,7 @@ PRs touching these paths require an independent subagent review per AGENTS.md:
 
 ### 7.4 Tiers, gates, and parallelism
 
-Epic 4 ships across **5 tiers** (13 PRs total). **Inter-tier gates are blocking** — no Tier N+1 PR opens until all Tier N PRs are merged AND the gate verification below passes. Within a tier, PRs marked **‖** can land in any order (parallel-capable; same base commit, no shared files); PRs marked **→** are strictly sequential (later branches stack on the predecessor).
+Epic 4 ships across **5 tiers**. Originally scoped as 13 PRs; delivered as **18 PRs / 15 ledger sections** (§7.10 collapses PRs 4.4a-1 + 4.4a-2; §7.15 collapses PRs 4.5b + 4.5c + 4.5d; §7.17.1 captures the PR 4.6c split-off — all execution-time splits for file-budget per `feedback_atomic_prs.md`). **Inter-tier gates are blocking** — no Tier N+1 PR opens until all Tier N PRs are merged AND the gate verification below passes. Within a tier, PRs marked **‖** can land in any order (parallel-capable; same base commit, no shared files); PRs marked **→** are strictly sequential (later branches stack on the predecessor).
 
 | Tier | Contents | Within-tier order |
 |---|---|---|
@@ -859,5 +859,5 @@ The in-UI "Create resort" affordance is **Phase 2** (parent §3 + §13 future wo
 1. This spec is committed to `docs/superpowers/specs/2026-05-01-epic-4-admin-app-design.md` on branch `docs/epic-4-admin-app-spec` (PR [#65](https://github.com/mathvbarone/snowboard-trip-advisor/pull/65)).
 2. A spec-document-reviewer subagent runs against this doc; findings folded into the same branch before maintainer review. Multiple fold cycles have already landed (`6ed3df9`, `7af26d7`, `0d5f226`, `7e7d3c0`, `3470111`, plus the post-`50af331` fold that introduced this revision).
 3. Maintainer reviews the committed spec.
-4. `superpowers:writing-plans` produces the implementation plan against this spec — the plan decomposes each of the **13 PRs** in §7.5–§7.17 into TDD-ordered concrete tasks per the tier-and-gate workflow in §7.4.
+4. `superpowers:writing-plans` produces the implementation plan against this spec — the plan decomposes each of the originally-scoped 13 PRs (delivered as 18 PRs / 15 ledger sections per the §7.10 / §7.15 / §7.17.1 splits) in §7.5–§7.17.1 into TDD-ordered concrete tasks per the tier-and-gate workflow in §7.4.
 5. `superpowers:using-git-worktrees` + `superpowers:subagent-driven-development` execute the plan PR by PR, honoring the inter-tier gates and the 4.4a‖4.4b / 4.6a‖4.6b parallel pairs per §7.4.
