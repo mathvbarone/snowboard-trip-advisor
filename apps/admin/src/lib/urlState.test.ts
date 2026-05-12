@@ -113,13 +113,28 @@ describe('parseURL — publishes route', () => {
     expect(parseURL('?route=publishes&page=-1')).toEqual({ route: 'publishes' })
   })
   it('drops unsafe-integer page (?route=publishes&page=99...9 → no page key)', (): void => {
-    // 21 nines = ~1e21, well above Number.MAX_SAFE_INTEGER (2^53 - 1).
-    // Without the Number.isSafeInteger guard, PublishHistory's offset =
-    // page * PAGE_SIZE would feed an unsafe integer into ListPublishesQuery's
-    // `z.number().int()` validator, which rejects unsafe integers and surfaces
-    // a load error instead of the silent drop-invalid fall-back. Codex round-1
-    // P3 PR #102.
+    // 21 nines = ~1e21, well above both Number.MAX_SAFE_INTEGER (2^53 - 1)
+    // AND the offset-safe cap (MAX_SAFE_INTEGER / 20). Codex round-1 P3 PR #102.
     expect(parseURL('?route=publishes&page=999999999999999999999')).toEqual({ route: 'publishes' })
+  })
+  it('drops page values whose derived offset would exceed Number.MAX_SAFE_INTEGER', (): void => {
+    // page = MAX_SAFE_INTEGER (2^53 - 1) is itself a safe integer but its
+    // derived offset (page * PUBLISHES_PAGE_SIZE = 20 * MAX_SAFE_INTEGER) is
+    // NOT — ListPublishesQuery's `z.number().int()` would reject it, surfacing
+    // a load error instead of the silent drop-invalid fall-back. Codex round-2
+    // P2 PR #102. The parse step caps at MAX_SAFE_PUBLISHES_PAGE = floor(
+    // MAX_SAFE_INTEGER / PUBLISHES_PAGE_SIZE) so the consumer never sees an
+    // over-cap page.
+    expect(parseURL('?route=publishes&page=9007199254740991')).toEqual({ route: 'publishes' })
+  })
+  it('preserves the largest safe page (offset stays in safe-integer range)', (): void => {
+    // floor(MAX_SAFE_INTEGER / 20) = 450359962737049 — boundary case at the cap.
+    // page * 20 = 9007199254740980, just below MAX_SAFE_INTEGER. Sanity-pins
+    // that the bound is inclusive on the safe side.
+    expect(parseURL('?route=publishes&page=450359962737049')).toEqual({
+      route: 'publishes',
+      page: 450359962737049,
+    })
   })
 })
 

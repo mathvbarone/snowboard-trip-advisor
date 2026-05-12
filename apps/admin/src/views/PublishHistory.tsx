@@ -18,10 +18,14 @@
 import { Button } from '@snowboard-trip-advisor/design-system'
 import type { JSX } from 'react'
 
+import { PUBLISHES_PAGE_SIZE } from '../lib/urlState'
 import { useListPublishes } from '../state/useListPublishes'
 import { setRoute, useURLState } from '../state/useURLState'
 
-const PAGE_SIZE = 20
+// Re-export under the historical local name so the multi-place reference stays
+// readable; the canonical value lives in urlState.ts so the parse-time bound
+// check (drops over-cap pages) stays in lockstep with the consumer multiplier.
+const PAGE_SIZE = PUBLISHES_PAGE_SIZE
 
 export function PublishHistory(): JSX.Element {
   const route = useURLState()

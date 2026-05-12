@@ -30,6 +30,20 @@ import { z } from 'zod'
 const ROUTE_VALUES = ['dashboard', 'resorts', 'editor', 'publishes'] as const
 const RouteValue = z.enum(ROUTE_VALUES)
 
+// Single source of truth for the publishes-route page size. PublishHistory
+// imports this so the URL-contract bound check below (MAX_SAFE_PUBLISHES_PAGE)
+// stays in lockstep with the multiplier the consumer actually uses to derive
+// the API offset.
+export const PUBLISHES_PAGE_SIZE = 20
+
+// The page index is multiplied by PUBLISHES_PAGE_SIZE to derive the API
+// offset, and ListPublishesQuery's `z.number().int()` rejects unsafe integers.
+// Cap at the largest page whose derived offset stays inside the safe-integer
+// range so a crafted deep link can't force a load error in PublishHistory;
+// over-cap inputs drop to the canonical first-page form. Codex round-2 P2
+// PR #102.
+const MAX_SAFE_PUBLISHES_PAGE = Math.floor(Number.MAX_SAFE_INTEGER / PUBLISHES_PAGE_SIZE)
+
 export type Route =
   | { route: 'dashboard' }
   | { route: 'resorts'; country?: ISOCountryCode; hasFailures?: boolean }
@@ -54,18 +68,19 @@ export function parseURL(search: string): RouteState {
   }
 
   if (route === 'publishes') {
-    // Drop-invalid pattern: only safe-integer natural numbers >= 1 are
-    // preserved. page=0 (default), missing, negative, non-digit, AND
-    // unsafe-integer values (e.g. `?page=9...9` exceeding Number.MAX_SAFE_INTEGER)
-    // all collapse to the canonical `{ route: 'publishes' }` shape per the
-    // "defaults are omitted" header comment. PublishHistory reads
-    // `route.page ?? 0` so this is functionally equivalent to explicit page=0.
-    // The unsafe-integer drop matters because ListPublishesQuery's `z.number()
-    // .int()` rejects unsafe integers — without this guard a crafted deep
-    // link would surface a load error instead of falling back to page 0.
+    // Drop-invalid pattern: only safe-integer natural numbers in the inclusive
+    // range [1, MAX_SAFE_PUBLISHES_PAGE] are preserved. page=0 (default),
+    // missing, negative, non-digit, and over-cap values all collapse to the
+    // canonical `{ route: 'publishes' }` shape per the "defaults are omitted"
+    // header comment. PublishHistory reads `route.page ?? 0` so this is
+    // functionally equivalent to explicit page=0. The bound matters because
+    // PublishHistory multiplies `page * PUBLISHES_PAGE_SIZE` to derive the API
+    // offset, and ListPublishesQuery's `z.number().int()` rejects unsafe
+    // integers — without the cap a crafted deep link would surface a load
+    // error instead of falling back to page 0.
     const pageRaw = params.get('page')
     const page = pageRaw !== null && /^\d+$/.test(pageRaw) ? Number(pageRaw) : undefined
-    if (page === undefined || page === 0 || !Number.isSafeInteger(page)) {
+    if (page === undefined || page === 0 || page > MAX_SAFE_PUBLISHES_PAGE) {
       return { route: 'publishes' }
     }
     return { route: 'publishes', page }
