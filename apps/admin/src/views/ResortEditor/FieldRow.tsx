@@ -2,7 +2,6 @@ import {
   Input,
   SourceBadge,
   StatusPill,
-  tokens,
 } from '@snowboard-trip-advisor/design-system'
 import type {
   FieldState,
@@ -11,8 +10,9 @@ import type {
   SourceKey,
 } from '@snowboard-trip-advisor/schema'
 import type { JSX } from 'react'
-import { useRef, useState, useSyncExternalStore } from 'react'
+import { useRef, useState } from 'react'
 
+import { useResponsiveTabOrder } from '../../lib/useResponsiveTabOrder'
 import { useModeToggle } from '../../state/useModeToggle'
 import { useWorkspaceState } from '../../state/useWorkspaceState'
 
@@ -47,44 +47,13 @@ const MANUAL_EDITABLE_PATHS: ReadonlySet<MetricPath> = new Set([
   'skiable_terrain_ha', 'season.start_month', 'season.end_month',
 ])
 
-// Per Codex round-7 P2-9: drive the responsive query from `tokens.breakpoint.md`
-// (= 900) so the responsive gate stays aligned to the design-system token
-// (NOT the hardcoded 768 from an earlier plan revision — that would leave
-// 768-899px tablet widths interactive in violation of AGENTS.md "Admin App
-// Rules: edit controls are removed from the tab order below md").
-const MD_QUERY = `(min-width: ${tokens.breakpoint.md.toString()}px)`
-
-// Subscribes to viewport changes via matchMedia. addEventListener fires when
-// the viewport crosses the threshold. useSyncExternalStore handles the React
-// side. Per Codex round-6 P2-8: jsdom does not implement matchMedia natively
-// so FieldRow.test.tsx stubs it with vi.stubGlobal. Other test files that
-// mount FieldRow indirectly (ResortEditor.test.tsx, integration tests) do
-// NOT stub it — the implementation falls back to the above-md default
-// (the admin runs loopback-only on desktop in Phase 1) so callers without
-// matchMedia get the interactive editor surface, matching the dev-loopback
-// reality. PR 4.4d's file budget excludes test-setup.ts modification per
-// Decision D11.
-function hasMatchMedia(): boolean {
-  return typeof window.matchMedia === 'function'
-}
-
-function useIsAboveMd(): boolean {
-  const subscribe = (cb: () => void): (() => void) => {
-    if (!hasMatchMedia()) { return (): void => {} }
-    const mql = window.matchMedia(MD_QUERY)
-    mql.addEventListener('change', cb)
-    return (): void => { mql.removeEventListener('change', cb) }
-  }
-  const getSnapshot = (): boolean => {
-    if (!hasMatchMedia()) { return true }
-    return window.matchMedia(MD_QUERY).matches
-  }
-  // No getServerSnapshot: admin is loopback dev-only (`apps/admin/vite.config.ts`
-  // binds 127.0.0.1:5174 with strictPort) and never reaches React's SSR
-  // machinery, so the SSR fallback would be dead code in every test
-  // environment we run.
-  return useSyncExternalStore(subscribe, getSnapshot)
-}
+// Per PR 4.6a Tier 5 plan Decision E1: the responsive gate is provided by the
+// shared `useResponsiveTabOrder` hook in `apps/admin/src/lib/`. This file
+// previously inlined a `useIsAboveMd` impl + `MD_QUERY` constant + matchMedia
+// subscription; PR 4.6a extracts them into the dedicated hook (token-driven
+// breakpoint preserved; jsdom-friendly fallback preserved). FieldRow consumes
+// `readOnly` and inverts to local `isAboveMd` so all downstream branches stay
+// unchanged.
 
 function isMoney(v: unknown): v is Money {
   if (typeof v !== 'object' || v === null) {
@@ -232,7 +201,8 @@ export function FieldRow({ path, state }: FieldRowProps): JSX.Element {
   const badgeSource = sourceForBadge(state)
   const { draft, setFieldValue, clearFieldValue } = useWorkspaceState()
   const { toggleMode, modeFor } = useModeToggle()
-  const isAboveMd = useIsAboveMd()
+  const { readOnly } = useResponsiveTabOrder()
+  const isAboveMd = !readOnly
 
   // Resolve the displayed/edited value. Draft overrides canonical for paths
   // the user has edited in-session; otherwise fall back to the canonical

@@ -470,7 +470,7 @@ PRs touching these paths require an independent subagent review per AGENTS.md:
 | 4.4d | (none — UI interaction only) |
 | 4.5a | `apps/admin/server/publish.ts` (publish pipeline gate), `packages/schema/**` (touches `publishDataset` consumer) |
 | 4.5b | `packages/design-system/**` (Toast component addition) |
-| 4.6a | (none — UI polish + responsive only; no CODEOWNERS-protected paths) |
+| 4.6a | `docs/superpowers/specs/**` (this section §7.16 self-amendment per AGENTS.md §95 — see §7.16 below) |
 | 4.6b | (none — integration tests only; Dockerfile guard deferred to Epic 6 per §10.7 / C4) |
 
 ### 7.3 Cross-cutting assignments (every PR)
@@ -552,8 +552,8 @@ Tier 5 ─ Closing
   - Pre-publish blocking-state surface (§4.3.1) gates correctly on all four conditions: `resorts_with_failed_fields > 0`, `resorts_with_missing_provenance > 0`, `resorts_with_corrupt_workspace > 0`, `resorts_total === 0`. Each disabled-state's tooltip text verified.
 - **Tier 5 (Epic 4 done) gate (after 4.6a + 4.6b merged):**
   - `full-flow.test.tsx` green (bridge tier — composite open admin → Resorts → row click → MANUAL edit → save → publish → see in history).
-  - Keyboard shortcuts work in browser smoke (`/`, `g r`, `g i`, `mod+enter`, `esc`).
-  - Responsive read-only enforced via DOM `tabindex="-1"` + render-gate-hidden edit input below `md` (NOT CSS-only; tested via simulated viewport).
+  - Keyboard shortcuts work in browser smoke for the **4 shortcuts shipped in 4.6a** (`g r`, `g i` (Toast), `mod+enter` callback, `Escape` callback). The `/` shortcut is **deferred to Phase 2** when search functionality lands per [Tier 5 plan Decision B1](../plans/2026-05-12-epic-4-tier-5-closing-plan.md).
+  - Responsive read-only enforced via DOM **native `disabled`** attribute on Shell header action buttons (NOT `tabindex="-1"+aria-disabled` per [Tier 5 plan Decision D1](../plans/2026-05-12-epic-4-tier-5-closing-plan.md) — design-system Button.tsx convention + WAI-ARIA 1.2 normative behavior) + render-gate-hidden edit input below `md` (NOT CSS-only; tested via simulated viewport).
   - `npm run qa` green on `main`.
 
 **Parallel-capable PRs** branch from the same base commit (the prior tier's last-merged commit). They MUST NOT modify shared files; each PR's "Files" subsection enumerates its surface so a reviewer can verify disjointness at a glance. If a parallel PR's review reveals a needed shared-file change, the maintainer collapses the pair to sequential.
@@ -662,7 +662,9 @@ Status: **DONE** — merged in [#95](https://github.com/mathvbarone/snowboard-tr
 
 ### 7.16 PR 4.6a — Polish (keyboard shortcuts + responsive read-only-below-md)
 
-**Goal.** Ship the user-facing polish surface: global keyboard shortcuts (parent §3.10) + responsive read-only-below-md affordance (parent §3.2). Polish is one concern; integration backfill ships separately in 4.6b (per P1-5 fold).
+**Goal.** Ship the user-facing polish surface: global keyboard shortcuts (parent §3.10) + responsive read-only-below-md affordance (parent §3.2). Polish is one concern; integration backfill ships separately in 4.6b (per P1-5 fold). PR 4.6a ships **4 of the 5** spec §3.10 shortcuts; the `/` shortcut is **deferred to Phase 2** when search functionality lands per [Tier 5 plan Decision B1](../plans/2026-05-12-epic-4-tier-5-closing-plan.md). A focus-only target (placeholder `<input type="search">`) violates WCAG 3.3.2 + 4.1.2 — input claims search role, does nothing.
+
+**Plan:** [docs/superpowers/plans/2026-05-12-epic-4-tier-5-closing-plan.md](../plans/2026-05-12-epic-4-tier-5-closing-plan.md).
 
 **Branch:** `epic-4/pr-4.6a-polish`. **Depends on:** 4.5b merged. **README:** evaluation only.
 
@@ -670,16 +672,18 @@ Status: **DONE** — merged in [#95](https://github.com/mathvbarone/snowboard-tr
 
 **Files (tests first):**
 
-- Create `apps/admin/src/lib/shortcuts.test.ts` — assert `/` focuses search, `g r` → resorts, `g i` → integrations placeholder, `mod+enter` saves in editor, `esc` closes modals (via `vitest` userEvent).
-- Create `apps/admin/src/lib/useResponsiveTabOrder.ts` + `.test.ts` — hook returning `{ readOnly: boolean }` keyed off `useMediaQuery('(max-width: <md>)')`. Test asserts the hook flips at the break.
-- Create `apps/admin/src/lib/shortcuts.ts` — global keyboard shortcut handler implementing the test cases.
-- Create / modify `apps/admin/src/views/Shell.responsive.css.ts` — visual breakpoint styles only (e.g., grid → stacked layout, header collapse). **CSS cannot apply `tabindex` or `disabled` attributes**; the tab-order discipline lives in TSX render gates below.
-- Modify `apps/admin/src/views/ResortEditor/FieldRow.tsx` — when `useResponsiveTabOrder().readOnly === true`, render a read-only `<span>` instead of the edit input/select; this is the "removed from tab order" path per parent §3.2 (the edit controls aren't in the DOM at all below `md`, so they cannot receive focus).
-- Modify `apps/admin/src/views/Shell.tsx` (or the relevant header/sidebar components) — apply `tabIndex={-1}` and `aria-disabled` JSX props on any header/sidebar action buttons that DO render below `md` but must not be tabbable. Tests assert the rendered DOM carries `tabindex="-1"` (not just CSS visibility).
+- Create `apps/admin/src/lib/shortcuts.test.ts` — assert `g r` → resorts, `g i` → integrations Toast (Tier 5 plan Decision G3), `mod+enter` callback fires (true save flush wires in PR 4.6c — Decision G2), `Escape` callback fires (Radix Dialog handles modal Escape internally — Decision G1) via `vitest` + `@testing-library/user-event`. Editable-target bypass (`g _` skip when active element is INPUT / TEXTAREA / SELECT / contenteditable) and cross-platform mod-key (Meta+Enter on macOS, Control+Enter elsewhere) covered. The `/` shortcut is NOT shipped per Decision B1.
+- Create `apps/admin/src/lib/useResponsiveTabOrder.ts` + `.test.ts` — hook returning `{ readOnly: boolean }` keyed off `(min-width: ${tokens.breakpoint.md}px)` (= 900). matchMedia subscription via `useSyncExternalStore`; jsdom-friendly fallback to `readOnly: false` when `window.matchMedia` is unavailable (matches FieldRow PR 4.4d D11 pattern). No new shared `useMediaQuery` hook (Tier 5 plan Decision E2 — locality-of-behavior).
+- Create `apps/admin/src/lib/shortcuts.ts` — global keyboard shortcut handler implementing the test cases. Single document-level `keydown` listener per consumer-mount; handlers pinned via `useRef` so re-renders with fresh handler closures don't tear down + re-attach the listener (Tier 5 plan Decision F5).
+- Create `apps/admin/src/views/Shell.responsive.css.ts` — visual breakpoint styles only (header padding tightening + brand-text hidden below md). Tests bundled into Shell.test.tsx per Tier 5 plan Decision I2. **CSS cannot apply `tabindex` or `disabled` attributes**; the tab-order discipline lives in TSX render gates below.
+- Create `apps/admin/src/views/Shell.test.tsx` — tests for the Shell tab-order discipline + responsive CSS injection + RESPONSIVE_CSS export shape. NEW file (no prior Shell unit-test coverage; PR 4.5d's coverage rode on Dashboard / ResortsTable / PublishDialog tests).
+- Modify `apps/admin/src/views/ResortEditor/FieldRow.tsx` — when `useResponsiveTabOrder().readOnly === true`, render a read-only `<span>` instead of the edit input/select; this is the "removed from tab order" path per parent §3.2 (the edit controls aren't in the DOM at all below `md`, so they cannot receive focus). PR 4.6a additionally **drops the inlined `useIsAboveMd` impl + `MD_QUERY` constant + the `tokens` and `useSyncExternalStore` imports** (now-unused after the hook extraction) and consumes `useResponsiveTabOrder` instead.
+- Modify `apps/admin/src/views/Shell.tsx` — apply native `disabled={readOnly}` JSX prop on header action buttons (Publish + the inner `<Button>` of the Account `<DropdownMenu>` trigger) that DO render below `md` but must not be tabbable. **Per [`packages/design-system/src/components/Button.tsx:35-40`](../../../packages/design-system/src/components/Button.tsx) ("we deliberately do NOT add a parallel `aria-disabled` prop — the native `disabled` attribute already conveys the disabled state to assistive tech")** AND WAI-ARIA 1.2 normative behavior ("aria-disabled does not change operability — the element is still focusable, perceivable, and operable to assistive technology and the user"). Native `disabled` removes from tab order, prevents mouse activation, AND triggers `:disabled` CSS for visual state. The earlier draft of this section mandated `tabIndex={-1}` + `aria-disabled` JSX props; that pattern is broken per WAI-ARIA 1.2 (the element remains mouse-clickable and AT-discoverable via roving cursors) AND directly contradicts the design-system Button.tsx convention. Tests assert the rendered DOM carries the `disabled` attribute (NOT `tabindex="-1"` and NOT `aria-disabled`). Sidebar nav links remain tabbable below md (spec §3.2's "Publish/approve/sync/test actions" carve-out targets action affordances, not navigation). PR 4.6a additionally wires `useShortcuts({ onGoResorts, onGoIntegrations, onModEnter, onEscape })`, mounts a `<style>{RESPONSIVE_CSS}</style>` overlay at the Shell root, and consumes `useResponsiveTabOrder` for the `readOnly` flag.
+- Modify `docs/superpowers/specs/2026-05-01-epic-4-admin-app-design.md` (this section §7.16) — co-ships with PR 4.6a per AGENTS.md §95 documentation discipline ("treat README/spec drift as a documentation bug, not optional cleanup"). Triggers Subagent Review per AGENTS.md §60 (`docs/superpowers/specs/**` is a CODEOWNERS-protected path).
 
-**Subagent review trigger:** NO (UI polish only; no CODEOWNERS-protected paths).
+**Subagent review trigger:** **YES** (revised — `docs/superpowers/specs/**` is touched per the spec amendment, file 9). Brief the reviewer to verify the amendment cites both Button.tsx:35-40 AND WAI-ARIA 1.2 normative text; the `/` deferral is documented with the WCAG 3.3.2 / 4.1.2 rationale; the amendment does NOT modify any §7.4 done-gate criteria beyond replacing `tabindex="-1"` with `disabled`.
 
-**Acceptance gate:** Keyboard shortcuts test green; responsive test asserts the rendered DOM at simulated `md`-1 viewport contains read-only `<span>` (not edit input) for `<FieldRow>` and `tabindex="-1"` JSX attributes (not CSS-only) on any header/sidebar action that still renders; `npm run qa` green.
+**Acceptance gate:** Keyboard-shortcut tests green (4 of 5 shortcuts shipped per Decision B1); responsive test asserts the rendered DOM at simulated `md`-1 viewport contains read-only `<span>` (not edit input) for `<FieldRow>` and **`disabled` attribute (NOT `tabindex="-1"+aria-disabled`)** on Shell header action buttons that still render, per Tier 5 plan Decision D1; `npm run qa` green.
 
 ### 7.17 PR 4.6b — Integration backfill (closing PR)
 
@@ -697,7 +701,7 @@ Status: **DONE** — merged in [#95](https://github.com/mathvbarone/snowboard-tr
 
 **Subagent review trigger:** NO (no CODEOWNERS-protected paths; Dockerfile guard deferred to Epic 6 per §10.7).
 
-**Acceptance gate:** All three integration tests green; `npm run qa` green; **Tier 5 → Epic 4 done gate** verified per §7.4 (full-flow green; keyboard shortcuts work in browser smoke per 4.6a; responsive read-only enforced via DOM `tabindex="-1"`).
+**Acceptance gate:** All three integration tests green; `npm run qa` green; **Tier 5 → Epic 4 done gate** verified per §7.4 (full-flow green; keyboard shortcuts work in browser smoke per 4.6a; responsive read-only enforced via DOM **native `disabled`** attribute on Shell header action buttons per [Tier 5 plan Decision D1](../plans/2026-05-12-epic-4-tier-5-closing-plan.md) + render-gate-hidden edit input below md).
 
 ---
 
