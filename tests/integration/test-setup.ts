@@ -20,10 +20,18 @@ import { server } from '../../apps/public/src/mocks/server'
 // integration render crashes inside FieldValueRenderer's Tooltip
 // (ResizeObserver) or useMediaQuery (matchMedia).
 
+// Query-aware matchMedia stub. PR 4.6a introduced `useResponsiveTabOrder`
+// which keys Shell tab-order on `(min-width: 900px)`; integration tests run
+// as desktop-default (admin is loopback-only on desktop in Phase 1), so any
+// `(min-width: ...)` query returns matches: true. Other queries return
+// matches: false (preserves the apps/public matrix-below-md semantic, whose
+// useMediaQuery doesn't gate on min-width). Per-test overrides via
+// `vi.stubGlobal('matchMedia', ...)` can simulate sub-md viewports when a
+// specific test needs that.
 vi.stubGlobal(
   'matchMedia',
   (query: string): MediaQueryList => ({
-    matches: false,
+    matches: query.startsWith('(min-width:'),
     media: query,
     onchange: null,
     addListener: (): void => undefined,

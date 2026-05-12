@@ -168,12 +168,20 @@ describe('Resort editor read integration (PR 4.4b Task 10)', (): void => {
       expect(within(livePanel).getByLabelText('Lift pass (per day)')).toBeInTheDocument()
       expect(within(livePanel).getByLabelText('Lodging median')).toBeInTheDocument()
 
-      // Render-only ModeToggle: every <span role="switch"> is aria-disabled.
-      const switches = screen.getAllByRole('switch')
-      expect(switches.length).toBeGreaterThan(0)
-      for (const sw of switches) {
-        expect(sw).toHaveAttribute('aria-disabled', 'true')
-        expect(sw.tagName).toBe('SPAN')
+      // Interactive ModeToggle (above md, the integration-test default per
+      // PR 4.6a's tests/integration/test-setup.ts query-aware matchMedia stub):
+      // each ModeToggle is a button with aria-pressed reflecting the
+      // AUTO/MANUAL state (PR 4.4d Decision D11; semantics shifted from
+      // role="switch" to aria-pressed when ModeToggle moved to a DS Button).
+      // The 5 live-path toggles are `disabled` because PR 4.4d only ships
+      // MANUAL editing for the 7 durable paths. The below-md render-only
+      // <span role="switch" aria-disabled> fallback is covered separately by
+      // FieldRow.test.tsx with explicit matchMedia stubs.
+      const toggleButtons = within(livePanel).getAllByRole('button', { name: /mode/i })
+      expect(toggleButtons.length).toBeGreaterThan(0)
+      for (const btn of toggleButtons) {
+        expect(btn.tagName).toBe('BUTTON')
+        expect(btn).toHaveAttribute('aria-pressed')
       }
     })
   }
