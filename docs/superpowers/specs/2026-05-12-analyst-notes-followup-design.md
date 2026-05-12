@@ -242,7 +242,7 @@ const publishedPath = join(deps.workspaceRoot, 'data', 'published', 'current.v1.
      - `markdown === null` → `delete wf.notes[path]`
      - else → `wf.notes[path] = { schema_version: 1, markdown, created_at: existing?.created_at ?? now, updated_at: now }`
    - Stamp `wf.modified_at = now`.
-   - Validate via `WorkspaceFile.parse(wf)`.
+   - Validate via `const parsed = WorkspaceFile.safeParse(wf); if (!parsed.success) throw new InvalidWorkspaceError(parsed.error.issues)` (mirrors [`resortUpsert.ts:145-148`](../../../apps/admin/server/resortUpsert.ts) precedent — `safeParse` then access `.data`, since `parse()` would return the value directly with no `.data` wrapper).
    - `atomicWriteWorkspaceFile(targetPath, JSON.stringify(parsed.data, null, 2))`.
 4. Render `html` for the affected note (or `null` on delete) inside a `try`; on render exception → **500 `internal`** (file is already on disk; next GET will surface the issue). Return `{ slug, path, note: { ...note, html } | null }`.
 
@@ -268,7 +268,10 @@ Two new entries in the `routes` array. The shape mirrors existing entries at `di
   method: 'GET',
   pathPattern: '/api/analyst-notes/:slug',
   paramSchema: ResortSlugParam,
-  bodySchema: null,
+  // No `bodySchema` field — `Route.bodySchema` is optional (`?: z.ZodType`),
+  // and the dispatcher at `dispatch.ts:267-269` treats only `undefined`
+  // as "no body schema". Setting `null` would crash with
+  // `Cannot read properties of null (reading 'parse')`.
   handler: async (args, deps): Promise<unknown> =>
     analystNotesGet({ params: args.params as never }, deps),
 },
@@ -405,7 +408,7 @@ export function renderAnalystNoteMarkdown(markdown: string): string {
 - **OWASP XSS Filter Evasion Cheat Sheet** adopted wholesale: `<script>`, `<img onerror>`, `javascript:` href, `<iframe>`, `<style>`, `<details ontoggle>`, `<svg onload>`, `<math><annotation-xml encoding=text/html><script>` (mXSS classic), `<iframe srcdoc>`, `<noscript>` parser confusion, `<template>` content escapes, CRLF in attribute values, percent-encoded `javascript:` (`javascript&#58;`), reference-style link defs with `javascript:` URLs (`[x][y]\n\n[y]: javascript:...`).
 - **GFM correctness:** tables, task lists, autolinks, strikethrough, fenced code blocks with language hints.
 - **c2-widening positives:** `<kbd>Cmd+K</kbd>`, `<details open>…</details>`, `<sub>2</sub>`, `<sup>3</sup>`, `<abbr title="…">…</abbr>`, `<figure>…<figcaption>…</figcaption></figure>`.
-- **DOM-clobbering:** `<div id="head">` → `<div id="analyst-head">`; `<a href="#section">` → `<a href="#analyst-section">` via `rehypeAnchorRewrite`.
+- **DOM-clobbering:** `<h2 id="head">` → `<h2 id="analyst-head">`; `<a href="#section">` → `<a href="#analyst-section">` via `rehypeAnchorRewrite`. (Uses a heading because §4.4 narrows the `id` allowlist to `<h1>`–`<h6>` + `<figure>`; a `<div id=…>` would have its `id` stripped before the rewrite step ever runs.)
 - **Empty / non-string contract:** `renderAnalystNoteMarkdown('') === ''`; `renderAnalystNoteMarkdown(null as never)` throws `TypeError`.
 
 Plus `markdown.fuzz.test.ts` (fast-check): asserts output never contains `<script`, `javascript:`, `on\w+=` (case-insensitive) for any random string input.
@@ -446,23 +449,23 @@ The per-path SlugStore makes path-gating implicit — each path has its own `Not
    - Structural equality short-circuit: if `state.draft === state.lastSent && state.status !== 'save-failed'` → return.
    - `state.abortController?.abort()` (fire-and-forget previous in-flight).
    - Capture `const flightRev = state.rev` (rev-counter race guard).
-   - `state.abortController = new AbortController(); state.status = 'saving'`.
+   - `const localController = (state.abortController = new AbortController()); state.status = 'saving'`. The `localController` capture is the **controller-identity guard** — any subsequent cleanup that clears `state.abortController` MUST first verify `state.abortController === localController`. Without it, a `deleteNote` that runs between this flight's start and its terminal handler will install a fresh controller; clearing unconditionally would lose the ability to abort that newer request.
    - `apiClient.upsertAnalystNote(slug, body, { signal })`.
    - On success:
      - **Rev-counter guard** (mirrors `useWorkspaceState.ts:369-371`): if `flightRev !== state.rev`, a newer `setDraft` / `deleteNote` happened during the flight — skip the prepopulate, leave status as the caller set it (do NOT clobber newer state with this stale response).
-     - Else: `state.lastSent = state.draft; state.status = 'saved'; state.abortController = undefined`. `prepopulateAnalystNotes(slug, merge(slug, response.path, response.note))`. (Do NOT reassign `state.draft` — the analyst may keep editing the same path; preserving the textarea content is the natural UX.)
-   - On `AbortError`: `state.abortController = undefined`. Do **not** transition status — `deleteNote` and `setDraft` already updated status before triggering the abort. Mirrors PR 4.6c's path-gated abort branch but path-gating is implicit per the per-path store.
+     - Else: `state.lastSent = state.draft; state.status = 'saved'`. **Controller-identity guard:** `if (state.abortController === localController) state.abortController = undefined` (else a fresh `deleteNote` / `setDraft` already installed a newer controller — do not clobber it). Then `prepopulateAnalystNotes(slug, merge(slug, response.path, response.note))`. (Do NOT reassign `state.draft` — the analyst may keep editing the same path; preserving the textarea content is the natural UX.)
+   - On `AbortError`: **Controller-identity guard:** `if (state.abortController === localController) state.abortController = undefined` (else `deleteNote` / `setDraft` installed a fresh controller after triggering this abort; clearing unconditionally would lose the ability to abort that newer flight, opening a server-side `withSlugLock` ordering race where the stale upsert outraces the delete). Do **not** transition status — `deleteNote` and `setDraft` already updated status before triggering the abort. Mirrors PR 4.6c's path-gated abort branch but path-gating is implicit per the per-path store.
    - On other error (rev-guarded the same way): `state.status = 'save-failed'`.
 3. **`deleteNote()`:**
    - `state.rev++` (advances the rev so any in-flight upsert's response will fail the rev guard).
    - `state.abortController?.abort()` (fire-and-forget previous in-flight upsert).
    - `state.draft = ''; state.lastSent = null; state.status = 'saving'`.
    - Capture `const flightRev = state.rev` (same race guard pattern as step 2).
-   - PUT `{ markdown: null }` with a FRESH `state.abortController = new AbortController()`; fire-and-forget the previous abort, no polling.
+   - PUT `{ markdown: null }` with a FRESH controller — capture both rev and controller: `const localController = (state.abortController = new AbortController())`. Fire-and-forget the previous abort, no polling. The `localController` capture is the **controller-identity guard** (same pattern as step 2): cleanup that clears `state.abortController` MUST verify `state.abortController === localController`, else a fresh `setDraft` mid-flight will be silently disarmed.
    - On success:
      - **Rev-counter guard** (same pattern as step 2): if `flightRev !== state.rev`, a newer `setDraft` / `deleteNote` happened mid-flight — skip the prepopulate, leave status as the caller set it. Without this, a `setDraft('x')` racing the delete response would be clobbered by `prepopulateAnalystNotes(... null)` while the user has 'x' typed.
-     - Else: `state.status = 'saved'; state.abortController = undefined`. `prepopulateAnalystNotes(slug, merge(slug, path, null))` (note removed from cache). Status terminal-after-success; next `setDraft` re-enters the upsert path with `lastSent === null`.
-   - On `AbortError` (the delete itself got aborted by ANOTHER `setDraft`): leave status; the new `setDraft` already updated status.
+     - Else: `state.status = 'saved'`. **Controller-identity guard:** `if (state.abortController === localController) state.abortController = undefined`. Then `prepopulateAnalystNotes(slug, merge(slug, path, null))` (note removed from cache). Status terminal-after-success; next `setDraft` re-enters the upsert path with `lastSent === null`.
+   - On `AbortError` (the delete itself got aborted by ANOTHER `setDraft`): leave status (the new `setDraft` already updated status); leave `state.abortController` alone (the new `setDraft` already installed its own).
    - On other error (rev-guarded the same way): `state.status = 'save-failed'`.
 4. **Unmount:** clean up subscriber; do NOT abort in-flight saves (analyst-walks-away convention); debounce timer lives on the module store (not the component), so the timer fires post-unmount and the flush proceeds without a consumer. Next mount reads the prepopulated value. Documented trade-off: navigation away has up to 500 ms tail latency before the save completes — `flushAllForSlug` on route-change is a Phase 2 question.
 
@@ -514,7 +517,7 @@ export async function withSlugLock<T>(slug: ResortSlug, fn: () => Promise<T>): P
   const prev = slugLocks.get(slug) ?? Promise.resolve()
   const next = prev.then(fn, fn)  // run fn after prev settles (success or fail)
   slugLocks.set(slug, next)
-  next.catch(() => {})  // suppress unhandled rejection — does NOT rebind the lock entry
+  void next.catch(() => {})  // `void` satisfies AGENTS.md §"Code Rules → TypeScript" ("Do not leave promises unhandled. Await them or mark them with `void`."); the `.catch` suppresses unhandled-rejection without rebinding the lock entry
   try {
     return await next
   } finally {
@@ -523,7 +526,7 @@ export async function withSlugLock<T>(slug: ResortSlug, fn: () => Promise<T>): P
 }
 ```
 
-**Critical correctness:** the cleanup compares against the SAME `next` Promise we stored. The bug pattern `slugLocks.set(slug, next.catch(() => {}))` creates a different Promise; cleanup never matches; map leaks. The `next.catch(() => {})` line in the body suppresses unhandled rejection without rebinding the lock entry — a common gotcha.
+**Critical correctness:** the cleanup compares against the SAME `next` Promise we stored. The bug pattern `slugLocks.set(slug, next.catch(() => {}))` creates a different Promise; cleanup never matches; map leaks. The `void next.catch(() => {})` line in the body suppresses unhandled rejection without rebinding the lock entry — a common gotcha. The `void` prefix is required by AGENTS.md §"Code Rules → TypeScript" (`no-floating-promises`); the `.catch` is what actually attaches a handler.
 
 ### 5.6 `resortUpsert` retrofit
 
