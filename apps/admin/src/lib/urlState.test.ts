@@ -90,6 +90,30 @@ describe('parseURL — editor route', () => {
   })
 })
 
+describe('parseURL — publishes route', () => {
+  it('parses ?route=publishes as { route: "publishes" } with no page (default = 0)', (): void => {
+    expect(parseURL('?route=publishes')).toEqual({ route: 'publishes' })
+  })
+  it('parses ?route=publishes&page=2', (): void => {
+    expect(parseURL('?route=publishes&page=2')).toEqual({ route: 'publishes', page: 2 })
+  })
+  it('drops the default-0 page (?route=publishes&page=0 → page key omitted)', (): void => {
+    // Defaults are omitted per the urlState.ts header comment, so an explicit
+    // page=0 collapses to the canonical "first page" shape. PublishHistory
+    // reads `route.page ?? 0` anyway, so functionality is preserved.
+    expect(parseURL('?route=publishes&page=0')).toEqual({ route: 'publishes' })
+  })
+  it('drops invalid page (?route=publishes&page=bogus → no page key)', (): void => {
+    expect(parseURL('?route=publishes&page=bogus')).toEqual({ route: 'publishes' })
+  })
+  it('drops negative page (?route=publishes&page=-1 → no page key)', (): void => {
+    // Negative offsets are nonsensical for pagination; the ^\d+$ regex rejects
+    // them. PublishHistory's Previous button is `disabled` at page === 0, so a
+    // crafted negative URL never originates from the UI.
+    expect(parseURL('?route=publishes&page=-1')).toEqual({ route: 'publishes' })
+  })
+})
+
 describe('serializeURL', () => {
   it('serializes dashboard route as empty (default omitted)', (): void => {
     expect(serializeURL({ route: 'dashboard' })).toBe('')
@@ -112,6 +136,17 @@ describe('serializeURL', () => {
       serializeURL({ route: 'editor', slug: ResortSlug.parse('kotelnica-bialczanska') }),
     ).toBe('?route=editor&slug=kotelnica-bialczanska')
   })
+  it('serializes publishes with no page as ?route=publishes', (): void => {
+    expect(serializeURL({ route: 'publishes' })).toBe('?route=publishes')
+  })
+  it('serializes publishes with page=2 as ?route=publishes&page=2', (): void => {
+    expect(serializeURL({ route: 'publishes', page: 2 })).toBe('?route=publishes&page=2')
+  })
+  it('drops default-0 page on serialize (?route=publishes)', (): void => {
+    // Mirrors the "defaults are omitted" header comment — round-trip-stable for
+    // the canonical { route: 'publishes' } shape.
+    expect(serializeURL({ route: 'publishes', page: 0 })).toBe('?route=publishes')
+  })
 })
 
 describe('round-trip parseURL ∘ serializeURL', () => {
@@ -130,6 +165,8 @@ describe('round-trip parseURL ∘ serializeURL', () => {
       hasFailures: true,
     }],
     ['editor', { route: 'editor', slug: ResortSlug.parse('kotelnica-bialczanska') }],
+    ['publishes (no page)', { route: 'publishes' }],
+    ['publishes (page=2)', { route: 'publishes', page: 2 }],
   ]
 
   for (const [label, input] of cases) {
