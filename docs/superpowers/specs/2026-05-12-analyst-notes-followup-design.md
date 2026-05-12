@@ -238,6 +238,7 @@ const publishedPath = join(deps.workspaceRoot, 'data', 'published', 'current.v1.
 2. Derive `workspaceDir` + `publishedPath` per the snippet above; `targetPath = join(workspaceDir, ${slug}.json)`.
 3. Acquire `withSlugLock(slug, async () => { ... })`:
    - `readWorkspaceFileForSlug(workspaceDir, slug)` — if missing, hydrate from `readPublishedDocOrNull(publishedPath)` (mirrors `resortUpsert.ts:117-127`). If neither → **404 `not-found`**.
+   - **Cold-start seed** (required): the hydrated `wf` MUST carry `notes: wf.notes ?? {}` before the patch step. Published docs do not carry `notes` per §2.6, so a workspace object hydrated solely from `readPublishedDocOrNull` has `notes === undefined`; the next bullet's `wf.notes[path] = …` would throw `TypeError: Cannot set properties of undefined`, breaking the first analyst-note PUT for every published-only resort. Equivalent alternative: round-trip the hydrated candidate through `WorkspaceFile.safeParse` so §2.3's `AnalystNotesMap.default({})` applies before the patch — either form must execute before the patch step.
    - Apply patch:
      - `markdown === null` → `delete wf.notes[path]`
      - else → `wf.notes[path] = { schema_version: 1, markdown, created_at: existing?.created_at ?? now, updated_at: now }`
@@ -682,7 +683,7 @@ Subagent Review column distinguishes:
 ### 7.4 Per-PR workflow (every PR)
 
 1. **Plan write** (using `superpowers:writing-plans`) — TDD-ordered task list against this spec; section reviewer for any user-facing UX section.
-2. **Subagent Review** (for the 4 PRs that touch CODEOWNERS-protected paths).
+2. **Subagent Review** (for the 5 PRs identified in §7.1 — N.a, N.b1, N.b2 mechanical; N.b3a, N.b3b discretionary per AGENTS.md §60 paragraph 4).
 3. **Open PR + `@codex review`** — per saved memory `feedback_codex_review_per_pr.md`. Wait for review, fold findings, REST cross-check both `/issues/<N>/comments` and `/pulls/<N>/comments` endpoints with `jq 'sort_by(.created_at) | reverse'` every round, resolve threads via GraphQL.
 4. **Local test plan** — per saved memory `feedback_local_test_per_pr.md`. Run `npm run qa`, dev-server smoke, Playwright MCP browser checks where UI changes ship (N.c4 in particular; lighter smoke on N.c1–N.c3 since they're state-only). Execute, don't describe.
 5. **Maintainer merge**.
