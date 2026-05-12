@@ -553,22 +553,35 @@ export function clearFieldValue(slug: ResortSlug, path: MetricPath): void {
   scheduleFlush(slug)
 }
 
-// Decision K1 path-walker — returns true when the cleared path is present
-// in the in-flight PUT body. Top-level paths (`slopes_km`) check direct
-// presence; 2-segment paths (`altitude_m.min`) check parent presence
-// (because the in-flight body carries the WHOLE parent — a shallow merge
-// on the server would re-introduce the cleared leaf).
+// Decision K1 path-walker — returns true when the cleared path was
+// user-edited in the in-flight PUT body, via the field_sources entry for
+// the FULL dotted path. Every manual value edit pairs the leaf write with
+// a fresh field_sources entry (Decision D12), and diffSide includes a
+// field_sources entry only when the corresponding leaf VALUE differs from
+// lastSent (round-3 P2-D), so a body containing `field_sources[path]`
+// uniquely identifies "this exact path was edited in this PUT."
 //
 // Reads from the BODY (the diff emitted by buildBodyFromDraft) per Codex
 // round-2 P2 fold — gating on the whole draft would false-positive on
-// paths already-persisted by a prior PUT (the rev-moved success path
-// updates lastSent so subsequent diffs exclude those paths from the body).
-function isPathInBody(body: ResortUpsertBody, side: Side, path: MetricPath): boolean {
+// paths already-persisted by a prior PUT.
+//
+// Reads field_sources rather than the side root per Codex round-3 P2 fold
+// — gating on parent-key presence would false-positive on sibling-only
+// edits where the cleared leaf was hydrated from canonical (D10) for the
+// server's shallow-merge correctness rather than user-edited. Aborting
+// such PUTs would cancel the sibling's legitimate save AND drop the
+// sibling's draft+status via clearDraftLeaf → silent data loss.
+// Exported for direct unit-coverage of the defensive `fs === undefined`
+// arm (unreachable via the public API — buildBodyFromDraft always pairs
+// a populated side body with a field_sources entry per Decision D12 —
+// but reachable through the generic ResortUpsertBody schema contract,
+// same pattern diffSide uses for its Partial<T> contract fallback).
+export function isPathInBody(body: ResortUpsertBody, side: Side, path: MetricPath): boolean {
   const sideBody = side === 'resort' ? body.resort : body.live_signal
   if (sideBody === undefined) { return false }
-  const dotIdx = path.indexOf('.')
-  const key = dotIdx === -1 ? path : path.slice(0, dotIdx)
-  return Object.prototype.hasOwnProperty.call(sideBody, key)
+  const fs = (sideBody as { readonly field_sources?: Record<string, unknown> }).field_sources
+  if (fs === undefined) { return false }
+  return Object.prototype.hasOwnProperty.call(fs, path)
 }
 
 // Decision K1 (PR 4.6c): synchronous save-shortcut consumed by Shell's

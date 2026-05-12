@@ -19,6 +19,7 @@ import {
   __resetForTests as resetWorkspaceState,
   diffSide,
   flushNow as workspaceFlushNow,
+  isPathInBody,
   setFieldValue as workspaceSetFieldValue,
   useWorkspaceState,
 } from './useWorkspaceState'
@@ -1298,6 +1299,60 @@ describe('useWorkspaceState — K1 in-flight-clear race fix + flushNow + abort g
     // Cleanup: resolve PUT 2 so the test exits cleanly.
     await act(async (): Promise<void> => {
       handle.resolveAt(1, syntheticResponse('kotelnica-bialczanska'))
+      for (let i = 0; i < 20; i += 1) { await Promise.resolve() }
+    })
+  })
+
+  it('isPathInBody handles a side body without field_sources (generic ResortUpsertBody contract; unreachable via public API)', (): void => {
+    // buildBodyFromDraft always pairs a populated side body with a
+    // field_sources entry per Decision D12 (every value edit writes its
+    // manual provenance alongside the value), so the public-API code path
+    // never produces this shape. The defensive `fs === undefined` arm
+    // exists for the generic ResortUpsertBody schema contract — same
+    // pattern diffSide uses for its Partial<T> generic-contract fallback.
+    expect(isPathInBody({ resort: { slopes_km: 150 } }, 'resort', 'slopes_km')).toBe(false)
+    expect(isPathInBody({ live_signal: { snow_depth_cm: 100 } }, 'live_signal', 'snow_depth_cm')).toBe(false)
+  })
+
+  it('path-gated abort NEGATIVE for sibling-only nested body (Codex round-3 P2 fold): editing altitude_m.max then clearing altitude_m.min must NOT abort the in-flight max save', async (): Promise<void> => {
+    // Codex inline review round 3 (PR #105, 2026-05-12 15:12 UTC): when
+    // the in-flight body carries the WHOLE nested parent (per D10
+    // hydration-from-canonical), the parent-key check would false-positive
+    // on a sibling-only edit. Editing altitude_m.max sends
+    // `{ resort: { altitude_m: { min: <canonical>, max: 950 },
+    //   field_sources: { 'altitude_m.max': manualFs } } }`. The cleared
+    // path altitude_m.min has NO field_sources entry — it was hydrated
+    // from canonical for the server's shallow-merge correctness, not
+    // user-edited. Aborting here cancels the only request that could save
+    // the max edit; clearDraftLeaf concurrently drops the whole parent
+    // (and status['altitude_m.max']), so the AbortError catch can't
+    // revert max to dirty either → DATA LOSS. The gate must distinguish
+    // user-edited paths (field_sources entry present) from
+    // hydrated-only siblings.
+    prepopulateResortDetail(KOTELNICA, syntheticResponse('kotelnica-bialczanska'))
+    const handle = makeAbortableUpsertMock()
+
+    const { result } = renderHook(() => useWorkspaceState())
+
+    // Step 1: edit altitude_m.max → debounce → PUT 1 in flight. Body has
+    // altitude_m hydrated parent + field_sources['altitude_m.max'].
+    act((): void => { result.current.setFieldValue('altitude_m.max', 950) })
+    await act(async (): Promise<void> => { await vi.advanceTimersByTimeAsync(600) })
+    expect(handle.capturedSignals.length).toBe(1)
+    const maxPutSignal = handle.capturedSignals[0]
+    if (maxPutSignal === undefined) { throw new Error('PUT signal not captured') }
+    expect(maxPutSignal.aborted).toBe(false)
+
+    // Step 2: clear altitude_m.min. The cleared leaf was NOT user-edited;
+    // it sat in the in-flight body only via D10 hydration. Abort must NOT
+    // fire — the legitimate altitude_m.max save would otherwise be lost.
+    act((): void => { result.current.clearFieldValue('altitude_m.min') })
+    expect(maxPutSignal.aborted).toBe(false)
+
+    // Step 3: resolve PUT 1 normally → server persisted altitude_m.max=950
+    // (via its shallow merge of the hydrated parent). Cleanup for next test.
+    await act(async (): Promise<void> => {
+      handle.resolveAt(0, syntheticResponse('kotelnica-bialczanska'))
       for (let i = 0; i < 20; i += 1) { await Promise.resolve() }
     })
   })
