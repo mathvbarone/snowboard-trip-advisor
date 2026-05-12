@@ -351,6 +351,7 @@ Server validates the *full* `WorkspaceFile` after merge — atomic semantics; th
 - `rehype-raw` (parse raw HTML in the AST)
 - `rehype-external-links` with `{ target: '_blank', rel: ['nofollow', 'noopener', 'noreferrer'], protocols: ['http', 'https'] }` (auto-inject `rel` to prevent tabnabbing)
 - `rehype-sanitize` with the custom Schema below
+- `rehypeStripStrayInputs` (custom ~10 LOC pass — removes any `<input>` element whose attributes don't exactly match the §4.4 GFM task-list carve-out shape: `type="checkbox"` AND `disabled` present. Closes R10.1 — `rehype-sanitize`'s value-restricted attribute model strips non-matching attributes but leaves the bare `<input>` tag, which in HTML5 defaults to `type="text"` and renders as a focusable, interactive text field. The post-sanitize pass enforces "only the GFM task-list shape survives".)
 - `rehypeAnchorRewrite` (custom ~15 LOC pass — rewrites `<a href="#X">` to `<a href="#analyst-X">` so internal anchors hop to the clobber-prefixed `id`s)
 - `rehype-stringify` (HAST → HTML string)
 
@@ -362,7 +363,7 @@ Server validates the *full* `WorkspaceFile` after merge — atomic semantics; th
 packages/schema/src/
   analystNote.ts                   (PR N.a)
   markdownSanitizeSchema.ts        (PR N.b1) — Schema + ID_CLOBBER_PREFIX
-  markdown.ts                      (PR N.b1) — renderAnalystNoteMarkdown + rehypeAnchorRewrite
+  markdown.ts                      (PR N.b1) — renderAnalystNoteMarkdown + rehypeAnchorRewrite + rehypeStripStrayInputs
   markdown.test.ts                 (PR N.b1) — plugin-order pin + OWASP corpus + GFM + c2-widening positives
   markdown.fuzz.test.ts            (PR N.b1) — fast-check fuzz: no <script, javascript:, on*=
 ```
@@ -371,7 +372,7 @@ packages/schema/src/
 
 ### 4.3 Plugin order is a security invariant
 
-The chain is load-bearing — `remark-rehype({allowDangerousHtml:true})` → `rehype-raw` → `rehype-external-links` → `rehype-sanitize` → `rehypeAnchorRewrite` → `rehype-stringify`. Reordering breaks sanitization (e.g., if `rehype-sanitize` runs before `rehype-raw`, raw HTML strings pass straight to the stringifier unsanitized).
+The chain is load-bearing — `remark-rehype({allowDangerousHtml:true})` → `rehype-raw` → `rehype-external-links` → `rehype-sanitize` → `rehypeStripStrayInputs` → `rehypeAnchorRewrite` → `rehype-stringify`. Reordering breaks sanitization (e.g., if `rehype-sanitize` runs before `rehype-raw`, raw HTML strings pass straight to the stringifier unsanitized). `rehypeStripStrayInputs` MUST run after `rehype-sanitize` (its job is to clean up sanitizer residue — `<input>` elements that survived because they're on the allowlist but whose attributes were stripped down to a bare-and-interactive form).
 
 Pinned by `markdown.test.ts`:
 
@@ -380,8 +381,8 @@ it('plugin order is the documented security invariant', () => {
   const names = processor.attachers.map((a) => a[0].name)
   expect(names).toStrictEqual([
     'remarkParse', 'remarkGfm', 'remarkRehype', 'rehypeRaw',
-    'rehypeExternalLinks', 'rehypeSanitize', 'rehypeAnchorRewrite',
-    'rehypeStringify',
+    'rehypeExternalLinks', 'rehypeSanitize', 'rehypeStripStrayInputs',
+    'rehypeAnchorRewrite', 'rehypeStringify',
   ])
 })
 ```
@@ -402,7 +403,7 @@ Extends `rehype-sanitize`'s `defaultSchema` (GFM-aware baseline) with:
   - `<details>`: `open`
   - `<th>`, `<td>`: + `colspan`, `rowspan`, `align`
   - `<abbr>`: `title`; `<q>`: `cite`; `<time>`: `datetime`
-  - `<input>`: **GFM task-list carve-out** — `rehype-sanitize` value-restricted form `[['type', 'checkbox']]` plus boolean attributes `disabled`, `checked`. This matches the *exact* shape `remark-gfm` emits for `- [x] / - [ ]` task list items (`<input type="checkbox" disabled [checked]>`); any other input type, name, value, or attribute is rejected by the value-restricted schema. Without this carve-out, §4.6's "tables, task lists, autolinks, strikethrough" promise silently regresses to "tables, autolinks, strikethrough" because `<input>` would inherit `defaultSchema`'s block. Test corpus row in §4.6 must include a task-list positive (`- [x] done` → renders with the disabled checkbox) and a task-list negative (`<input type="text">` → input element stripped).
+  - `<input>`: **GFM task-list carve-out** — `rehype-sanitize` value-restricted form `[['type', 'checkbox']]` plus boolean attributes `disabled`, `checked`. The post-sanitize `rehypeStripStrayInputs` pass (see §4.1) then removes any `<input>` element whose attributes don't exactly match `type="checkbox"` AND `disabled` present. This two-step model — sanitize whitelist + post-pass shape check — matches the *exact* shape `remark-gfm` emits for `- [x] / - [ ]` task list items (`<input type="checkbox" disabled [checked]>`) while preventing a bare `<input>` from surviving sanitization with a default `type="text"` (HTML5 default, focusable + interactive text field). Without the carve-out + post-pass pair, §4.6's "tables, task lists, autolinks, strikethrough" promise either regresses (no carve-out → checkbox stripped) or opens a phishable surface (carve-out alone → bare interactive `<input>` survives). Test corpus row in §4.6 includes a task-list positive (`- [x] done` → renders with the disabled checkbox) and a task-list negative (`<input type="text">` → element fully removed by `rehypeStripStrayInputs`).
 - **Protocols (explicit enumeration, NOT inheritance):**
   - `href`: `http`, `https`, `mailto`, `irc`, `ircs`, `tel`, `#`
   - `src`: `http`, `https`
@@ -427,7 +428,7 @@ Inherited from `defaultSchema` (do NOT override):
  *
  * Plugin order is load-bearing:
  *   parse → gfm → rehype(allowDangerousHtml) → raw → externalLinks
- *   → sanitize → anchorRewrite → stringify
+ *   → sanitize → stripStrayInputs → anchorRewrite → stringify
  *
  * Locked test in markdown.test.ts pins this sequence by name.
  *
@@ -447,7 +448,7 @@ export function renderAnalystNoteMarkdown(markdown: string): string {
 ### 4.6 Test corpus
 
 - **OWASP XSS Filter Evasion Cheat Sheet** adopted wholesale: `<script>`, `<img onerror>`, `javascript:` href, `<iframe>`, `<style>`, `<details ontoggle>`, `<svg onload>`, `<math><annotation-xml encoding=text/html><script>` (mXSS classic), `<iframe srcdoc>`, `<noscript>` parser confusion, `<template>` content escapes, CRLF in attribute values, percent-encoded `javascript:` (`javascript&#58;`), reference-style link defs with `javascript:` URLs (`[x][y]\n\n[y]: javascript:...`).
-- **GFM correctness:** tables, task lists, autolinks, strikethrough, fenced code blocks with language hints. Task-list positive: `- [x] done` renders as `<li><input type="checkbox" disabled checked> done</li>`; task-list negative: `<input type="text" name="x">` → `<input>` (bare void element — `rehype-sanitize`'s value-restricted attribute model strips the non-matching `type` and the non-allowlisted `name`, but the `<input>` tag itself remains on the §4.4 `tagNames` allowlist; a bare void element has no executable surface and renders as nothing, so the security boundary holds without an additional pass).
+- **GFM correctness:** tables, task lists, autolinks, strikethrough, fenced code blocks with language hints. Task-list positive: `- [x] done` renders as `<li><input type="checkbox" disabled checked> done</li>` (passes `rehype-sanitize`'s allowlist AND `rehypeStripStrayInputs`'s shape check). Task-list negative: `<input type="text" name="x">` → element fully removed (`rehype-sanitize` strips the non-matching `type` and non-allowlisted `name`, leaving `<input>`; `rehypeStripStrayInputs` then removes the bare element because it lacks `type="checkbox"` + `disabled`). Additional negative: `<input type="checkbox" name="exfil">` → bare `<input>` (`name` stripped by sanitizer; missing `disabled` → removed by post-pass).
 - **c2-widening positives:** `<kbd>Cmd+K</kbd>`, `<details open>…</details>`, `<sub>2</sub>`, `<sup>3</sup>`, `<abbr title="…">…</abbr>`, `<figure>…<figcaption>…</figcaption></figure>`.
 - **DOM-clobbering:** `<h2 id="head">` → `<h2 id="analyst-head">`; `<a href="#section">` → `<a href="#analyst-section">` via `rehypeAnchorRewrite`. (Uses a heading because §4.4 narrows the `id` allowlist to `<h1>`–`<h6>` + `<figure>`; a `<div id=…>` would have its `id` stripped before the rewrite step ever runs.)
 - **Empty / non-string contract:** `renderAnalystNoteMarkdown('') === ''`; `renderAnalystNoteMarkdown(null as never)` throws `TypeError`.
@@ -457,7 +458,7 @@ Plus `markdown.fuzz.test.ts` (fast-check): for any random string input, **parses
 - No `<iframe>`, `<object>`, `<embed>`, `<form>`, `<style>`, `<noscript>`, `<template>` element exists.
 - No element has an `on*` event-handler attribute (regex `/^on[a-z]+$/i` on attribute names).
 - No `href` / `src` / `cite` / `xlink:href` attribute has a value that, after `decodeURIComponent` + lowercase + trim, starts with `javascript:`, `vbscript:`, or `data:` (`data:` is allowed only on `<img src>` per §4.4 if we explicitly widen the protocol list, which we currently do not).
-- Every `<input>` element has only attributes from the §4.4 allowlist (`type`, `disabled`, `checked`); if `type` is set, its value is exactly `checkbox`. A bare `<input>` with no attributes vacuously satisfies the allowlist — it's the residue of sanitizing a hostile `<input type="text" name="x">`, has no executable surface, and is acceptable.
+- Every `<input>` element in the output has `type="checkbox"` AND a `disabled` attribute (the exact GFM task-list shape). Bare `<input>` and `<input type="checkbox">` without `disabled` are both rejected — `rehypeStripStrayInputs` removes any element that fails this shape check. The two-step pipeline (`rehype-sanitize` allowlist for tag + attribute admission; `rehypeStripStrayInputs` post-pass for shape enforcement) means no interactive/focusable `<input>` of any kind survives.
 
 A raw substring scan would reject safe output where the renderer legitimately emits `javascript:` as plain text in a paragraph or code block (e.g., a note saying `Don't paste \`javascript:\` URLs into href`), or where `onclick=` appears inside a `<code>` example — these are not security boundaries, the actual sanitizer pass already neutralized any executable form. The AST-level property tests the *real* invariant (no executable code path survives) rather than a proxy that drops valid documentation.
 
