@@ -9,7 +9,8 @@ import { useState, type JSX, type ReactNode } from 'react'
 
 import { useShortcuts } from '../lib/shortcuts'
 import { useResponsiveTabOrder } from '../lib/useResponsiveTabOrder'
-import { setRoute } from '../state/useURLState'
+import { setRoute, useURLState } from '../state/useURLState'
+import { flushNow } from '../state/useWorkspaceState'
 
 import { PublishDialog } from './PublishDialog'
 import { RESPONSIVE_CSS } from './Shell.responsive.css'
@@ -64,6 +65,7 @@ export function Shell({ children }: ShellProps): JSX.Element {
 function ShellInterior({ children }: { readonly children: ReactNode }): JSX.Element {
   const [publishOpen, setPublishOpen] = useState<boolean>(false)
   const { readOnly } = useResponsiveTabOrder()
+  const route = useURLState()
   const toast = useToast()
   useShortcuts({
     onGoResorts: (): void => {
@@ -75,9 +77,21 @@ function ShellInterior({ children }: { readonly children: ReactNode }): JSX.Elem
         message: "Integrations management isn't available yet.",
       })
     },
-    // Phase 1 no-ops per Tier 5 plan Decisions G1, G2: Radix Dialog handles
-    // modal Escape; mod+enter flush wires in PR 4.6c via flushNow.
-    onModEnter: (): void => {},
+    // PR 4.6c Decision K1: mod+enter on the editor route triggers an
+    // immediate save via `flushNow(slug)` — bypasses the 500ms debounce
+    // window so the autosave PUT fires the instant the user presses the
+    // shortcut. Off-route stays a no-op (no slug to flush against). The
+    // useShortcuts handlers-ref pattern (Decision F5 at lib/shortcuts.ts:66)
+    // pins the closure on every render, so the latest `route` is always
+    // visible — same Shell mount handles transitions correctly.
+    onModEnter: (): void => {
+      if (route.route === 'editor') {
+        flushNow(route.slug)
+      }
+    },
+    // Phase 1 no-op per Tier 5 plan Decision G1: Radix Dialog handles modal
+    // Escape internally; the callback exists for forward-compat with Phase 2
+    // non-Radix overlays.
     onEscape: (): void => {},
   })
   return (

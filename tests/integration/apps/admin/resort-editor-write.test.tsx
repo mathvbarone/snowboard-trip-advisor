@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { ResortSlug, WorkspaceFile } from '@snowboard-trip-advisor/schema'
+import type { ResortDetailResponse } from '@snowboard-trip-advisor/schema/api'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -193,5 +194,93 @@ describe('Editor write integration (PR 4.4d Task 7)', (): void => {
     expect(wf.editor_modes['season.start_month']).toBe('manual')
     // Manual provenance for the edited path.
     expect(wf.resort.field_sources['season.start_month']?.source).toBe('manual')
+  })
+})
+
+describe('useWorkspaceState — in-flight-clear race (PR 4.6c Decision K1)', (): void => {
+  // The race window in production (localhost bridge) is sub-millisecond and
+  // not deterministically observable. This integration test creates a
+  // controlled in-flight window by wrapping `apiClient.upsertResort` in a
+  // delay that BOTH respects the AbortSignal (clearTimeout when aborted)
+  // AND delegates to the REAL bridge dispatch when not aborted — so the
+  // test still exercises the on-disk atomic write path for the un-aborted
+  // mode-only PUT that preceded the race. When the abort fires within the
+  // delay window, the real upsertResort is never invoked → the workspace
+  // file on disk does NOT carry the soon-to-be-cleared value, AND the SPA's
+  // editor input renders blank.
+  //
+  // Honest residual scope: in production where the delay is < 1ms instead
+  // of the test's 200ms window, the server may have already atomic-written
+  // before the abort lands. The spec §7.13 amendment documents that
+  // residual; this test pins the abort-wins half of the contract.
+  it('K1: clear during in-flight PUT aborts the request → workspace file does NOT carry the typed value AND editor input renders blank', { timeout: 30_000 }, async (): Promise<void> => {
+    await renderAndAwaitEditor()
+
+    // Step 1: flip slopes_km to MANUAL (the input only renders for MANUAL
+    // durable paths). The mode-only PUT lands on disk before our race
+    // scenario starts.
+    fireEvent.click(screen.getByRole('button', { name: 'Mode for Slopes (km)' }))
+    await waitForDebounceAndFlush()
+    const input = await screen.findByRole('textbox', { name: 'Slopes (km)' })
+
+    // Step 2: install the delayed-pass-through spy. Existing in-flight (none
+    // by now — mode PUT completed at step 1) is unaffected. New invocations
+    // of `apiClient.upsertResort` (the value-edit PUT we're about to
+    // trigger) wait 1500ms before reaching the real bridge dispatch — long
+    // enough that the test's clear at ~600ms reliably hits the in-flight
+    // window. The abort cancels the timer cleanly so the real PUT never
+    // fires; the workspace file on disk is untouched by the cleared edit.
+    const realUpsert = apiClient.upsertResort.bind(apiClient)
+    let aborted = false
+    vi.spyOn(apiClient, 'upsertResort').mockImplementation(
+      (slug, body, opts): Promise<ResortDetailResponse> => new Promise((resolve, reject): void => {
+        const signal = (opts as { signal?: AbortSignal } | undefined)?.signal
+        const timer = setTimeout((): void => {
+          // signal could only fire AFTER this setTimeout already ran; safe
+          // to invoke the real bridge here.
+          realUpsert(slug, body, opts).then(resolve, reject)
+        }, 1500)
+        if (signal !== undefined) {
+          signal.addEventListener('abort', (): void => {
+            clearTimeout(timer)
+            aborted = true
+            reject(new DOMException('aborted', 'AbortError'))
+          })
+        }
+      }),
+    )
+
+    // Step 3: type 150 → debounce fires at 500ms → flush() invokes
+    // upsertResort spy → spy's 1500ms timer ticking. Wait long enough to
+    // confirm debounce has fired (600ms) but well before the 1500ms timer
+    // elapses, so the clear at step 4 hits the in-flight window.
+    fireEvent.change(input, { target: { value: '150' } })
+    await new Promise((r): void => { setTimeout(r, 600) })
+
+    // Step 4: clear the input mid-flight → clearFieldValue's path-gated
+    // abort fires → spy's setTimeout is canceled → realUpsert never runs
+    // → workspace file on disk is untouched by the cleared edit.
+    fireEvent.change(input, { target: { value: '' } })
+    await act(async (): Promise<void> => {
+      for (let i = 0; i < 30; i += 1) { await Promise.resolve() }
+    })
+
+    expect(aborted).toBe(true)
+
+    // SPA-side assertion: editor input renders blank locally (FieldRow's
+    // localString tracking).
+    expect(input).toHaveValue('')
+
+    // Filesystem assertion: workspace file does NOT have slopes_km=150.
+    // It retains the seed value (8 from kotelnica-bialczanska.json) AND
+    // the editor_modes.slopes_km='manual' from the mode-only PUT at step 1.
+    const onDisk = JSON.parse(await readFile(tmp.targetFile, 'utf-8')) as unknown
+    const wf = WorkspaceFile.parse(onDisk)
+    expect(wf.resort.slopes_km).toBe(8)
+    expect(wf.editor_modes['slopes_km']).toBe('manual')
+    // The cleared path's field_sources entry was dropped by clearFieldValue
+    // (or never landed because the PUT was aborted before reaching disk);
+    // the seed file's 'resort-feed' provenance remains.
+    expect(wf.resort.field_sources['slopes_km']?.source).toBe('resort-feed')
   })
 })

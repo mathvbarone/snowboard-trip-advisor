@@ -54,6 +54,17 @@ interface SlugStore {
   canonical: ResortDetailResponse | null
   lastSentDraft: DraftShape | null
   inFlightToken: symbol | null
+  // PR 4.6c Decision K1 (+ Codex round-2 P2 fold 2026-05-12): AbortController
+  // + the BODY of the in-flight PUT (not the whole draft) let clearFieldValue
+  // path-gate the abort only when the cleared path is in the wire-side body.
+  // The body is the DIFF emitted by buildBodyFromDraft — after a rev-moved
+  // success, the next PUT can carry a subset of the draft's paths (paths
+  // that match lastSent are excluded). Gating on the whole draft would
+  // false-positive on paths already-persisted by a prior PUT, aborting an
+  // unrelated legitimate save. Fields are nulled in flush()'s finally so a
+  // stale controller can't be re-aborted after the round-trip completes.
+  abortController: AbortController | null
+  inFlightBody: ResortUpsertBody | null
   queued: boolean
   timer: ReturnType<typeof setTimeout> | null
   subscribers: Set<() => void>
@@ -73,6 +84,8 @@ function getOrCreateStore(slug: ResortSlug): SlugStore {
       canonical: null,
       lastSentDraft: null,
       inFlightToken: null,
+      abortController: null,
+      inFlightBody: null,
       queued: false,
       timer: null,
       subscribers: new Set(),
@@ -343,6 +356,10 @@ function valueAtPathDiffersFromSent(
   return JSON.stringify(cLeaf) !== JSON.stringify(sLeaf)
 }
 
+function isAbortError(err: unknown): boolean {
+  return err instanceof DOMException && err.name === 'AbortError'
+}
+
 async function flush(slug: ResortSlug): Promise<void> {
   const store = getOrCreateStore(slug)
   if (store.inFlightToken !== null) {
@@ -353,6 +370,16 @@ async function flush(slug: ResortSlug): Promise<void> {
   const inFlightRev = store.state.rev
   const inFlightDraft = store.state.draft
   store.inFlightToken = token
+  // PR 4.6c Decision K1: fresh AbortController so clearFieldValue can
+  // path-gate its abort. The inFlightBody field is set BELOW (after the
+  // empty-diff short-circuit), once the actual PUT body is known — per
+  // Codex round-2 P2 fold, we gate on the body diff, not the whole draft
+  // (a rev-moved success means the next PUT may carry only a subset of
+  // the draft's paths; gating on the whole draft would abort unrelated
+  // legitimate saves). Both fields are nulled in `finally` so a stale
+  // controller can't be aborted after the round-trip resolves.
+  const abortController = new AbortController()
+  store.abortController = abortController
   patchState(store, (s) => ({ ...s, status: markStatuses(s.status, 'saving') }))
   try {
     const body = buildBodyFromDraft(inFlightDraft, store.lastSentDraft)
@@ -360,10 +387,12 @@ async function flush(slug: ResortSlug): Promise<void> {
       // Per Codex round-18 P2-25: empty-diff short-circuit. Workspace already
       // matches the current draft (user edit-then-reverted, or queued flush
       // saw no remaining changes). Mark statuses saved and exit; no PUT.
+      // inFlightBody stays null since no body is in flight.
       patchState(store, (s) => ({ ...s, status: markStatuses(s.status, 'saved') }))
       return
     }
-    const response = await apiClient.upsertResort(slug, body)
+    store.inFlightBody = body
+    const response = await apiClient.upsertResort(slug, body, { signal: abortController.signal })
     // No race-on-token check needed: the flush early-returns when a PUT is
     // already in-flight, so `store.inFlightToken` cannot change between the
     // try-entry assignment and here. Distinguish rev-unchanged vs rev-moved
@@ -386,13 +415,39 @@ async function flush(slug: ResortSlug): Promise<void> {
       store.lastSentDraft = inFlightDraft
       prepopulateResortDetail(slug, response)
     }
-  } catch {
+  } catch (err: unknown) {
+    // PR 4.6c Decision K1: distinguish intentional abort from generic save
+    // failure. AbortError fires when clearFieldValue's path-gated abort
+    // cancels the in-flight PUT — the user's clear is the canonical intent
+    // now, so revert in-flight-draft paths from `saving` → `dirty` and
+    // skip the prepopulate + lastSentDraft updates that would otherwise
+    // surface the soon-to-be-cleared value into canonical. The
+    // storesBySlug guard handles `__resetForTests` aborting mid-flight:
+    // when the store has been removed from the map, this catch is for a
+    // store nobody is subscribed to — patching it would notify no one and
+    // bookkeeping would be moot.
+    if (isAbortError(err)) {
+      if (storesBySlug.get(slug) !== store) {
+        return
+      }
+      patchState(store, (s) => ({ ...s, status: markStatuses(s.status, 'dirty') }))
+      return
+    }
     if (store.state.rev === inFlightRev) {
       patchState(store, (s) => ({ ...s, status: markStatuses(s.status, 'save-failed') }))
     }
   } finally {
     store.inFlightToken = null
-    if (store.queued || store.state.rev !== inFlightRev) {
+    store.abortController = null
+    store.inFlightBody = null
+    // PR 4.6c Codex inline review fold (P2, 2026-05-12): when
+    // __resetForTests aborted mid-flight and the rev had moved (or queued
+    // was true), the original code would call scheduleFlush(slug). That
+    // call's getOrCreateStore would create a FRESH store + new timer in
+    // the just-cleared map — autosave work leaking into the next test.
+    // Same guard as the AbortError catch above: only reschedule when the
+    // store still owns its slug in the map.
+    if (storesBySlug.get(slug) === store && (store.queued || store.state.rev !== inFlightRev)) {
       store.queued = false
       scheduleFlush(slug)
     }
@@ -454,11 +509,36 @@ function isPendingStatus(s: WorkspaceStatus): boolean {
 // (round-24) to avoid orphaned manual provenance attached to canonical
 // (unchanged) values. editor_modes[path] is preserved — clearing the
 // value doesn't revert the analyst's MANUAL flag.
+//
+// PR 4.6c Decision K1: path-gated abort. When the cleared path is carried
+// in the current in-flight PUT body, abort the controller so the response
+// doesn't prepopulate canonical with the soon-to-be-cleared value. Path-
+// gated (not always) — clearing an unrelated path while a different path's
+// PUT is in flight does NOT abort that legitimate write. For nested-leaf
+// clears (e.g. `altitude_m.min`), the gate triggers when the PARENT
+// (`altitude_m`) is present in the in-flight side — the response would
+// otherwise re-prepopulate the parent and re-introduce the now-cleared min.
+//
+// Codex round-2 P2 fold (PR #105, 2026-05-12): the gate reads the in-flight
+// PUT BODY (the diff emitted by buildBodyFromDraft), not the whole draft.
+// After a rev-moved success the next PUT's body can be a subset of the
+// draft (paths matching lastSent are excluded); gating on the whole draft
+// would false-positive on paths already-persisted by a prior PUT, aborting
+// an unrelated legitimate save.
 export function clearFieldValue(slug: ResortSlug, path: MetricPath): void {
   const store = getOrCreateStore(slug)
   const side = sideFor(path)
   const dotIdx = path.indexOf('.')
   const parentPrefix = dotIdx === -1 ? null : `${path.slice(0, dotIdx)}.`
+  // Decision K1 path-gated abort — read inFlightBody via the side root and
+  // walk for the cleared path (top-level or nested parent). When the
+  // controller has no in-flight PUT (`inFlightBody === null`), the gate is
+  // a no-op; existing clear semantics run unchanged.
+  if (store.abortController !== null && store.inFlightBody !== null) {
+    if (isPathInBody(store.inFlightBody, side, path)) {
+      store.abortController.abort()
+    }
+  }
   patchState(store, (s) => {
     const draft = clearDraftLeaf(s.draft, side, path)
     const status: Partial<Record<MetricPath, WorkspaceStatus>> = {}
@@ -471,6 +551,54 @@ export function clearFieldValue(slug: ResortSlug, path: MetricPath): void {
     return { rev: s.rev + 1, draft, status }
   })
   scheduleFlush(slug)
+}
+
+// Decision K1 path-walker — returns true when the cleared path was
+// user-edited in the in-flight PUT body, via the field_sources entry for
+// the FULL dotted path. Every manual value edit pairs the leaf write with
+// a fresh field_sources entry (Decision D12), and diffSide includes a
+// field_sources entry only when the corresponding leaf VALUE differs from
+// lastSent (round-3 P2-D), so a body containing `field_sources[path]`
+// uniquely identifies "this exact path was edited in this PUT."
+//
+// Reads from the BODY (the diff emitted by buildBodyFromDraft) per Codex
+// round-2 P2 fold — gating on the whole draft would false-positive on
+// paths already-persisted by a prior PUT.
+//
+// Reads field_sources rather than the side root per Codex round-3 P2 fold
+// — gating on parent-key presence would false-positive on sibling-only
+// edits where the cleared leaf was hydrated from canonical (D10) for the
+// server's shallow-merge correctness rather than user-edited. Aborting
+// such PUTs would cancel the sibling's legitimate save AND drop the
+// sibling's draft+status via clearDraftLeaf → silent data loss.
+// Exported for direct unit-coverage of the defensive `fs === undefined`
+// arm (unreachable via the public API — buildBodyFromDraft always pairs
+// a populated side body with a field_sources entry per Decision D12 —
+// but reachable through the generic ResortUpsertBody schema contract,
+// same pattern diffSide uses for its Partial<T> contract fallback).
+export function isPathInBody(body: ResortUpsertBody, side: Side, path: MetricPath): boolean {
+  const sideBody = side === 'resort' ? body.resort : body.live_signal
+  if (sideBody === undefined) { return false }
+  const fs = (sideBody as { readonly field_sources?: Record<string, unknown> }).field_sources
+  if (fs === undefined) { return false }
+  return Object.prototype.hasOwnProperty.call(fs, path)
+}
+
+// Decision K1 (PR 4.6c): synchronous save-shortcut consumed by Shell's
+// `mod+enter` wiring. Clears the pending debounce timer and triggers an
+// immediate flush. Returns void — does NOT await the PUT round-trip.
+// When a flush is already in flight, the inner flush() short-circuits to
+// the queued path (existing inFlightToken contract), so flushNow during
+// in-flight is effectively a no-op until the in-flight completes; this
+// matches the "kick off the PUT this instant" UX the keyboard shortcut
+// implies rather than "block until the response."
+export function flushNow(slug: ResortSlug): void {
+  const store = getOrCreateStore(slug)
+  if (store.timer !== null) {
+    clearTimeout(store.timer)
+    store.timer = null
+  }
+  void flush(slug)
 }
 
 // Codex round-21 P2-29 + round-24 P1-34: for NESTED paths the WHOLE parent
@@ -581,6 +709,12 @@ export function useWorkspaceState(): WorkspaceStateHandle {
 export function __resetForTests(): void {
   for (const store of storesBySlug.values()) {
     if (store.timer !== null) { clearTimeout(store.timer) }
+    // PR 4.6c Decision K1: abort any in-flight controllers so the rejected
+    // promise (with AbortError) doesn't leak into the next test. The
+    // AbortError catch arm in flush() guards on `storesBySlug.get(slug) !==
+    // store`, so the post-clear rejection is silently swallowed (subscribers
+    // are gone; bookkeeping is moot).
+    if (store.abortController !== null) { store.abortController.abort() }
   }
   storesBySlug.clear()
 }
