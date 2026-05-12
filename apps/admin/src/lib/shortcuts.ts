@@ -31,7 +31,14 @@ export interface ShortcutHandlers {
 
 const EDITABLE_TAGS: ReadonlySet<string> = new Set(['INPUT', 'TEXTAREA', 'SELECT'])
 
-function isEditableTarget(): boolean {
+function isShortcutSuppressed(): boolean {
+  // Codex round-3 P2 (PR #103, 2026-05-12): suppress `g _` chords whenever a
+  // modal is open ([aria-modal="true"]) — Radix Dialog (PublishDialog and any
+  // future modal) sets this attribute. Otherwise pressing g r in modal content
+  // would navigate the page behind the modal; g i would emit a toast while a
+  // modal is active. Escape and mod+enter still fire (callers want them to
+  // reach the modal).
+  if (document.querySelector('[aria-modal="true"]') !== null) { return true }
   // document.activeElement is Element | null; treat null as <body> so the
   // null branch collapses (BODY isn't in EDITABLE_TAGS and has no
   // contenteditable ancestor, so the function still returns false). Avoids
@@ -98,13 +105,15 @@ export function useShortcuts(handlers: ShortcutHandlers): void {
         return
       }
 
-      // g _ chord: bypass when an editable element has focus. Codex round-1 P3
-      // (PR #103, 2026-05-12): when the bypass fires WHILE a chord is pending,
-      // clear the chord — otherwise a user who pressed `g` outside the editor,
-      // then focused an input within the 1 s window and typed, would have a
-      // stale chord re-fire if they later pressed `r`/`i` outside the input
-      // before the timer expired. Same idempotent-clear pattern as Escape.
-      if (isEditableTarget()) {
+      // g _ chord: suppress when an editable element has focus OR when an
+      // open modal is mounted. Codex round-1 P3 (PR #103, 2026-05-12): when
+      // the suppression fires WHILE a chord is pending, clear the chord —
+      // otherwise a user who pressed `g` outside the editor, then focused an
+      // input within the 1 s window and typed, would have a stale chord
+      // re-fire if they later pressed `r`/`i` outside the input before the
+      // timer expired. Codex round-3 P2 (same fold) extends this to modal
+      // suppression so g r doesn't navigate the page behind PublishDialog.
+      if (isShortcutSuppressed()) {
         clearPending()
         return
       }

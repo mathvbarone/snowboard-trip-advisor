@@ -154,6 +154,48 @@ describe('useShortcuts', (): void => {
     })
   })
 
+  describe('Codex round-3 P2 fold (PR #103): suppress g _ chords when modal is open', (): void => {
+    // Radix Dialog (and any future modal) sets [aria-modal="true"] on the
+    // dialog surface. While a modal is mounted, `g _` chords must NOT fire —
+    // otherwise pressing g r in PublishDialog content would navigate the page
+    // behind the modal (Shell wires g r → setRoute({ route: 'resorts' })).
+    // Escape is intentionally excluded from the suppression check (it should
+    // reach the modal so Radix can close it).
+    function mountModal(): HTMLElement {
+      const modal = document.createElement('div')
+      modal.setAttribute('role', 'dialog')
+      modal.setAttribute('aria-modal', 'true')
+      document.body.appendChild(modal)
+      return modal
+    }
+
+    it('does NOT fire onGoResorts when an aria-modal="true" surface is mounted', async (): Promise<void> => {
+      const onGoResorts = vi.fn()
+      mountModal()
+      renderHook(() => { useShortcuts({ onGoResorts }); })
+      await user.keyboard('g')
+      await user.keyboard('r')
+      expect(onGoResorts).not.toHaveBeenCalled()
+    })
+
+    it('does NOT fire onGoIntegrations when a modal is mounted', async (): Promise<void> => {
+      const onGoIntegrations = vi.fn()
+      mountModal()
+      renderHook(() => { useShortcuts({ onGoIntegrations }); })
+      await user.keyboard('g')
+      await user.keyboard('i')
+      expect(onGoIntegrations).not.toHaveBeenCalled()
+    })
+
+    it('still fires Escape while modal is mounted (so Radix can close)', async (): Promise<void> => {
+      const onEscape = vi.fn()
+      mountModal()
+      renderHook(() => { useShortcuts({ onEscape }); })
+      await user.keyboard('{Escape}')
+      expect(onEscape).toHaveBeenCalledOnce()
+    })
+  })
+
   describe('Codex round-2 P2 fold (PR #103): Escape and mod+enter cancel pending chord', (): void => {
     // Same family as round-1 P3 (editable bypass) but for the always-fires
     // shortcuts: when the user presses g and then immediately fires Escape
