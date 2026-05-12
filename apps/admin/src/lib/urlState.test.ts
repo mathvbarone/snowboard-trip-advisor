@@ -112,6 +112,15 @@ describe('parseURL — publishes route', () => {
     // crafted negative URL never originates from the UI.
     expect(parseURL('?route=publishes&page=-1')).toEqual({ route: 'publishes' })
   })
+  it('drops unsafe-integer page (?route=publishes&page=99...9 → no page key)', (): void => {
+    // 21 nines = ~1e21, well above Number.MAX_SAFE_INTEGER (2^53 - 1).
+    // Without the Number.isSafeInteger guard, PublishHistory's offset =
+    // page * PAGE_SIZE would feed an unsafe integer into ListPublishesQuery's
+    // `z.number().int()` validator, which rejects unsafe integers and surfaces
+    // a load error instead of the silent drop-invalid fall-back. Codex round-1
+    // P3 PR #102.
+    expect(parseURL('?route=publishes&page=999999999999999999999')).toEqual({ route: 'publishes' })
+  })
 })
 
 describe('serializeURL', () => {

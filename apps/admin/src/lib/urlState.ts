@@ -54,14 +54,20 @@ export function parseURL(search: string): RouteState {
   }
 
   if (route === 'publishes') {
-    // Drop-invalid pattern: only natural numbers >= 1 are preserved. page=0
-    // (default), missing, negative, non-digit all collapse to the canonical
-    // `{ route: 'publishes' }` shape per the "defaults are omitted" header
-    // comment. PublishHistory reads `route.page ?? 0` so this is functionally
-    // equivalent to explicit page=0.
+    // Drop-invalid pattern: only safe-integer natural numbers >= 1 are
+    // preserved. page=0 (default), missing, negative, non-digit, AND
+    // unsafe-integer values (e.g. `?page=9...9` exceeding Number.MAX_SAFE_INTEGER)
+    // all collapse to the canonical `{ route: 'publishes' }` shape per the
+    // "defaults are omitted" header comment. PublishHistory reads
+    // `route.page ?? 0` so this is functionally equivalent to explicit page=0.
+    // The unsafe-integer drop matters because ListPublishesQuery's `z.number()
+    // .int()` rejects unsafe integers — without this guard a crafted deep
+    // link would surface a load error instead of falling back to page 0.
     const pageRaw = params.get('page')
     const page = pageRaw !== null && /^\d+$/.test(pageRaw) ? Number(pageRaw) : undefined
-    if (page === undefined || page === 0) { return { route: 'publishes' } }
+    if (page === undefined || page === 0 || !Number.isSafeInteger(page)) {
+      return { route: 'publishes' }
+    }
     return { route: 'publishes', page }
   }
 
