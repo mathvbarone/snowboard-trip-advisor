@@ -90,8 +90,16 @@ export function useShortcuts(handlers: ShortcutHandlers): void {
         return
       }
 
-      // g _ chord: bypass when an editable element has focus.
-      if (isEditableTarget()) { return }
+      // g _ chord: bypass when an editable element has focus. Codex round-1 P3
+      // (PR #103, 2026-05-12): when the bypass fires WHILE a chord is pending,
+      // clear the chord — otherwise a user who pressed `g` outside the editor,
+      // then focused an input within the 1 s window and typed, would have a
+      // stale chord re-fire if they later pressed `r`/`i` outside the input
+      // before the timer expired.
+      if (isEditableTarget()) {
+        if (awaitingChord) { clearPending() }
+        return
+      }
 
       if (awaitingChord) {
         const second = event.key

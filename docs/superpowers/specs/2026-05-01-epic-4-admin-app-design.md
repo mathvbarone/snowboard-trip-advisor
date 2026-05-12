@@ -470,7 +470,7 @@ PRs touching these paths require an independent subagent review per AGENTS.md:
 | 4.4d | (none — UI interaction only) |
 | 4.5a | `apps/admin/server/publish.ts` (publish pipeline gate), `packages/schema/**` (touches `publishDataset` consumer) |
 | 4.5b | `packages/design-system/**` (Toast component addition) |
-| 4.6a | (none — UI polish + responsive only; no CODEOWNERS-protected paths) |
+| 4.6a | `docs/superpowers/specs/**` (this section §7.16 self-amendment per AGENTS.md §95 — see §7.16 below) |
 | 4.6b | (none — integration tests only; Dockerfile guard deferred to Epic 6 per §10.7 / C4) |
 
 ### 7.3 Cross-cutting assignments (every PR)
@@ -550,11 +550,10 @@ Tier 5 ─ Closing
 - **Tier 4 → 5 gate (after 4.5a → 4.5b merged):**
   - Publish dialog → POST → `data/published/history/` grows (verified via bridge test); Toast on success/failure; PublishHistory shows the new version.
   - Pre-publish blocking-state surface (§4.3.1) gates correctly on all four conditions: `resorts_with_failed_fields > 0`, `resorts_with_missing_provenance > 0`, `resorts_with_corrupt_workspace > 0`, `resorts_total === 0`. Each disabled-state's tooltip text verified.
-- **Tier 5 (Epic 4 done) gate (after 4.6a + 4.6b + 4.6c merged):**
+- **Tier 5 (Epic 4 done) gate (after 4.6a + 4.6b merged):**
   - `full-flow.test.tsx` green (bridge tier — composite open admin → Resorts → row click → MANUAL edit → save → publish → see in history).
-  - Keyboard shortcuts work in browser smoke for the **4 shortcuts shipped in 4.6a** (`g r`, `g i` (Toast), `mod+enter` callback (true save flush wires in 4.6c), `Escape` callback). The `/` shortcut is **deferred to Phase 2** when search functionality lands per [Tier 5 plan Decision B1](../plans/2026-05-12-epic-4-tier-5-closing-plan.md).
+  - Keyboard shortcuts work in browser smoke for the **4 shortcuts shipped in 4.6a** (`g r`, `g i` (Toast), `mod+enter` callback, `Escape` callback). The `/` shortcut is **deferred to Phase 2** when search functionality lands per [Tier 5 plan Decision B1](../plans/2026-05-12-epic-4-tier-5-closing-plan.md).
   - Responsive read-only enforced via DOM **native `disabled`** attribute on Shell header action buttons (NOT `tabindex="-1"+aria-disabled` per [Tier 5 plan Decision D1](../plans/2026-05-12-epic-4-tier-5-closing-plan.md) — design-system Button.tsx convention + WAI-ARIA 1.2 normative behavior) + render-gate-hidden edit input below `md` (NOT CSS-only; tested via simulated viewport).
-  - `useWorkspaceState` in-flight-clear race fix shipped in PR 4.6c (depends on 4.6a merge).
   - `npm run qa` green on `main`.
 
 **Parallel-capable PRs** branch from the same base commit (the prior tier's last-merged commit). They MUST NOT modify shared files; each PR's "Files" subsection enumerates its surface so a reviewer can verify disjointness at a glance. If a parallel PR's review reveals a needed shared-file change, the maintainer collapses the pair to sequential.
@@ -702,7 +701,7 @@ Status: **DONE** — merged in [#95](https://github.com/mathvbarone/snowboard-tr
 
 **Subagent review trigger:** NO (no CODEOWNERS-protected paths; Dockerfile guard deferred to Epic 6 per §10.7).
 
-**Acceptance gate:** All three integration tests green; `npm run qa` green; **Tier 5 → Epic 4 done gate** verified per §7.4 (full-flow green; keyboard shortcuts work in browser smoke per 4.6a; responsive read-only enforced via DOM `tabindex="-1"`).
+**Acceptance gate:** All three integration tests green; `npm run qa` green; **Tier 5 → Epic 4 done gate** verified per §7.4 (full-flow green; keyboard shortcuts work in browser smoke per 4.6a; responsive read-only enforced via DOM **native `disabled`** attribute on Shell header action buttons per [Tier 5 plan Decision D1](../plans/2026-05-12-epic-4-tier-5-closing-plan.md) + render-gate-hidden edit input below md).
 
 ---
 

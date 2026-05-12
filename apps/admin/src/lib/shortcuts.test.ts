@@ -154,6 +154,34 @@ describe('useShortcuts', (): void => {
     })
   })
 
+  describe('Codex round-1 P3 fold (PR #103): editable bypass cancels pending chord', (): void => {
+    // If the user starts a `g` chord outside an editor, then focuses an input
+    // within the 1 s window and types, the editable-bypass path must clear
+    // the pending chord. Otherwise a subsequent `r` outside the input (within
+    // the timer window) would mis-fire the stale chord even though the user
+    // already shifted intent to typing.
+    it('cancels a pending g chord when a keystroke arrives at an editable target', async (): Promise<void> => {
+      const onGoResorts = vi.fn()
+      renderHook(() => { useShortcuts({ onGoResorts }); })
+
+      // 1. Press g while body has focus → chord armed.
+      await user.keyboard('g')
+
+      // 2. Focus an input + type a key (editable bypass fires; pending chord
+      //    must be cleared so the next non-editable r does NOT complete it).
+      const input = document.createElement('input')
+      document.body.appendChild(input)
+      input.focus()
+      await user.keyboard('x')
+
+      // 3. Refocus body and press r — should NOT fire onGoResorts.
+      input.blur()
+      document.body.focus()
+      await user.keyboard('r')
+      expect(onGoResorts).not.toHaveBeenCalled()
+    })
+  })
+
   describe('null-activeElement guard', (): void => {
     // Per Tier 5 plan + AGENTS.md "restructure instead of suppress": the
     // isEditableTarget helper uses `document.activeElement ?? document.body`
