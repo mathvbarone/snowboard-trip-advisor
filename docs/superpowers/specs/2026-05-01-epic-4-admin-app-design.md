@@ -490,7 +490,7 @@ Epic 4 ships across **5 tiers**. Originally scoped as 13 PRs; delivered as **18 
 | 1 — Foundation | 4.1a → 4.1b → 4.1c | Sequential (each builds on the prior PR's surface) |
 | 2 — Navigation | 4.2 → 4.3 | Sequential (shared `apps/admin/src/lib/urlState.ts`) |
 | 3 — Editor | (4.4a ‖ 4.4b) → 4.4c → 4.4d | 4.4a/4.4b parallel as planned; 4.4c → 4.4d sequential (4.4d's bridge integration test invokes 4.4c's handler). **Executed serial:** PR 4.4a split into 4.4a-1 + 4.4a-2 for file-budget reasons, which dropped the `4.4a ‖ 4.4b` parallelism (see §7.11). |
-| 4 — Publish | 4.5a → 4.5b | Sequential (4.5b's bridge integration test invokes 4.5a's handler) |
+| 4 — Publish | 4.5a → 4.5b → 4.5c → 4.5d | Sequential. Spec scoped this tier as 4.5a → 4.5b; execution split the UI tier into 4.5b (Toast DS primitive) → 4.5c (state hooks + PublishDialog + Shell wire-up) → 4.5d (PublishHistory view + bridge integration) per the ≤8-file budget. See §7.15. |
 | 5 — Closing | (4.6a ‖ 4.6b) → 4.6c | 4.6a / 4.6b parallel-capable (polish + integration backfill, no shared files); 4.6c sequential after 4.6a (race-fix split-off; shares `Shell.tsx` + `useWorkspaceState.ts` with 4.6a). See §7.17.1. |
 
 ```
@@ -509,7 +509,8 @@ Tier 2 ─ Navigation
     ↓
                               ─── Tier 2 → 3 GATE ───
 Tier 3 ─ Editor
-  4.4a (Server read) ‖ 4.4b (Editor view, read-only)   ← parallel-capable
+  4.4a (Server read; spec scoped one PR — shipped as 4.4a-1 → 4.4a-2)
+    ‖ 4.4b (Editor view, read-only)         (parallelism dropped per §7.11 once 4.4a split serial)
     ↓
   4.4c (Server write + atomic-write helper)
     ↓
@@ -519,7 +520,11 @@ Tier 3 ─ Editor
 Tier 4 ─ Publish
   4.5a (Publish handler + listPublishes handler)
     ↓
-  4.5b (Publish UI + Toast + 4-state PublishDialog gating)
+  4.5b (Toast DS primitive)                   (spec scoped one UI PR — execution split into 4.5b/c/d)
+    ↓
+  4.5c (usePublish + useListPublishes + PublishDialog + Shell wire-up)
+    ↓
+  4.5d (PublishHistory + ?route=publishes + bridge integration test)
     ↓
                               ─── Tier 4 → 5 GATE ───
 Tier 5 ─ Closing
