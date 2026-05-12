@@ -501,7 +501,7 @@ The per-path SlugStore makes path-gating implicit — each path has its own `Not
 
 ### 5.3 Initial-state + cache invalidation contract
 
-- **Initial state** — `draft` initialized from `useAnalystNotes()[path]?.markdown ?? ''` ONLY when `state.paths.get(path) === undefined`. Re-renders use the stored state.
+- **Initial state** — when `state.paths.get(path) === undefined`, seed BOTH `draft` AND `lastSent` from `useAnalystNotes()[path]?.markdown` (when the note exists server-side) so an untouched mount is structurally clean against the §5.2 flush short-circuit. `lastSent = null` is reserved for the no-note / post-delete baseline (no entry server-side); when no note exists for this path, seed `draft = ''` and `lastSent = null`. Without seeding `lastSent`, a mount for an existing note would have `draft === 'saved markdown'` and `lastSent === null`, and §5.2's short-circuit `(draft === lastSent || …)` wouldn't fire — `mod+enter` immediately after opening the editor would send a spurious `PUT { markdown: 'saved markdown' }` and bump `updated_at` even though the analyst made no edit. Re-renders use the stored state (no re-seed).
 - **`invalidateAnalystNotes(slug)`** — clears `cachedPromises` + `cachedFulfilled`, notifies subscribers. **Does NOT touch drafts** (analyst edits survive cache invalidation).
 - **`prepopulateAnalystNotes(slug, response)`** — replaces `cachedFulfilled` + `cachedPromises` with the new response; notifies subscribers.
 
