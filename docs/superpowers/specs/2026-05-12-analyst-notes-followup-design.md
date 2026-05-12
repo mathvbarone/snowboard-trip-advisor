@@ -243,8 +243,9 @@ const publishedPath = join(deps.workspaceRoot, 'data', 'published', 'current.v1.
      - else → `wf.notes[path] = { schema_version: 1, markdown, created_at: existing?.created_at ?? now, updated_at: now }`
    - Stamp `wf.modified_at = now`.
    - Validate via `const parsed = WorkspaceFile.safeParse(wf); if (!parsed.success) throw new InvalidWorkspaceError(parsed.error.issues)` (mirrors [`resortUpsert.ts:145-148`](../../../apps/admin/server/resortUpsert.ts) precedent — `safeParse` then access `.data`, since `parse()` would return the value directly with no `.data` wrapper).
+   - **Render BEFORE write** (recovery-preserving order): on upsert (`markdown !== null`), compute `html = renderAnalystNoteMarkdown(parsed.data.notes[path].markdown)` inside a `try`; on render exception → throw **500 `internal`** *before* `atomicWriteWorkspaceFile` runs, so no corrupt note ever lands on disk and the analyst can edit the markdown + retry through the same UI. On delete (`markdown === null`), skip render (`html = null`; nothing to render).
    - `atomicWriteWorkspaceFile(targetPath, JSON.stringify(parsed.data, null, 2))`.
-4. Render `html` for the affected note (or `null` on delete) inside a `try`; on render exception → **500 `internal`** (file is already on disk; next GET will surface the issue). Return `{ slug, path, note: { ...note, html } | null }`.
+   - Return `{ slug, path, note: { ...parsed.data.notes[path], html } | null }`.
 
 ### 3.3 Error envelope (uses existing codes)
 
@@ -548,11 +549,28 @@ return withSlugLock(slug, async (): Promise<ResortUpsertResponse> => {
     readWorkspaceFileForSlug(workspaceDir, slug),
     readPublishedDocOrNull(publishedPath),
   ])
-  // ... existing merge logic ...
+  // ... existing merge logic (resort / live_signal / editor_modes) ...
+  const candidate: unknown = {
+    schema_version: 1,
+    slug,
+    resort: mergedResort,
+    live_signal: mergedLive,
+    modified_at: ISODateTimeString.parse(new Date().toISOString()),
+    editor_modes: mergedModes,
+    // MUST carry forward `notes` — §2.2 adds `notes: AnalystNotesMap.default({})`
+    // to `WorkspaceFile`, so omitting this key would let `safeParse` fill it with
+    // `{}` and `atomicWriteWorkspaceFile` would silently wipe every analyst note
+    // for the slug on every resort upsert. `workspaceFile` is the in-scope
+    // workspace read (renamed from `existing` in the legacy snippet at
+    // `resortUpsert.ts:113`).
+    notes: workspaceFile?.notes ?? {},
+  }
   // ... atomicWriteWorkspaceFile(targetPath, JSON.stringify(parsed.data, null, 2)) ...
   // ... return response ...
 })
 ```
+
+**Notes-preservation invariant.** Resort upsert and analyst-note upsert are independent write paths against the same `WorkspaceFile` shape. A new candidate-construction test in `apps/admin/server/resortUpsert.test.ts` must pin this carry-forward: seed a workspace fixture with non-empty `notes`, drive a resort field edit through `resortUpsert`, assert the post-write workspace file still contains the original `notes` map verbatim. Without that test, a future refactor that drops the `notes:` line is silent corruption.
 
 This is a structural change to a CODEOWNERS-protected handler — triggers Subagent Review on PR N.b3a. The K1 race-fix client-side assumption is unaffected (response shape unchanged).
 
