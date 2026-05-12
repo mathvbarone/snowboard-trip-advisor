@@ -491,7 +491,7 @@ Epic 4 ships across **5 tiers** (13 PRs total). **Inter-tier gates are blocking*
 | 2 — Navigation | 4.2 → 4.3 | Sequential (shared `apps/admin/src/lib/urlState.ts`) |
 | 3 — Editor | (4.4a ‖ 4.4b) → 4.4c → 4.4d | 4.4a/4.4b parallel as planned; 4.4c → 4.4d sequential (4.4d's bridge integration test invokes 4.4c's handler). **Executed serial:** PR 4.4a split into 4.4a-1 + 4.4a-2 for file-budget reasons, which dropped the `4.4a ‖ 4.4b` parallelism (see §7.11). |
 | 4 — Publish | 4.5a → 4.5b | Sequential (4.5b's bridge integration test invokes 4.5a's handler) |
-| 5 — Closing | 4.6a ‖ 4.6b | Parallel (no shared files; 4.6a is polish, 4.6b is integration backfill) |
+| 5 — Closing | (4.6a ‖ 4.6b) → 4.6c | 4.6a / 4.6b parallel-capable (polish + integration backfill, no shared files); 4.6c sequential after 4.6a (race-fix split-off; shares `Shell.tsx` + `useWorkspaceState.ts` with 4.6a). See §7.17.1. |
 
 ```
 Tier 1 ─ Foundation
@@ -526,6 +526,9 @@ Tier 5 ─ Closing
   4.6a (Polish: keyboard shortcuts + responsive read-only)
   4.6b (Integration backfill: dashboard + resorts-table + full-flow tests, bridge tier)
         ‖ ← parallel-capable
+    ↓
+  4.6c (useWorkspaceState in-flight-clear race fix + flushNow + Shell mod+enter wiring;
+        split-off from 4.6a per §7.17.1 — sequential because Shell.tsx is shared with 4.6a)
                               ─── Epic 4 done ───
 ```
 
