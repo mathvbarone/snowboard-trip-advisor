@@ -10,7 +10,7 @@
 
 Epic 4 ships `apps/admin`, a loopback-only Vite SPA + in-process API middleware that lets a single analyst edit `Resort` and `ResortLiveSignal` documents and trigger an all-or-nothing publish through the same `publishDataset()` pipeline `apps/public` already consumes. The admin app is **never** built into a production container image; the network boundary (`127.0.0.1:5174` `strictPort: true`) is the access control in Phase 1. Editing is read-only below the `md` breakpoint — controls are removed from the tab order, not merely disabled.
 
-**What ships in Epic 4** (originally scoped as 13 PRs; delivered as 18 PRs across foundation, navigation, editor, publish, polish — §7.10 split PR 4.4a into 4.4a-1 + 4.4a-2; §7.15 split PR 4.5b into 4.5b + 4.5c + 4.5d; §7.17.1 split PR 4.6c off PR 4.6a — all for file-budget reasons per `feedback_atomic_prs.md`. See §7 for the dependency graph and the tier-and-gate workflow):
+**What ships in Epic 4** (originally scoped as 13 PRs; delivered as 18 PRs across foundation, navigation, editor, publish, polish — §7.10 split PR 4.4a into 4.4a-1 + 4.4a-2; §7.15 split PR 4.5b into 4.5b + 4.5c + 4.5d; §7.17.1 split PR 4.6c off PR 4.6a — all for file-budget reasons per [AGENTS.md "PR Sizing Discipline"](../../../AGENTS.md#pr-sizing-discipline) (hard ceilings: ≤300 lines added, ≤5 commits, ≤8 files changed). See §7 for the dependency graph and the tier-and-gate workflow):
 
 - **Foundation** (PRs 4.1a/b/c) — `packages/schema/api/` Zod surface for 6 in-scope endpoints + `WorkspaceFile` schema (with top-level `editor_modes` + cross-key invariant per §10.2) + contract-snapshot test; the `vite-plugin-admin-api.ts` middleware skeleton + `apps/admin` Shell composition + tiered-MSW test harness (canned + bridge); design-system additions (Sidebar, StatusPill, Tabs, Popover, DropdownMenu).
 - **Navigation** (PRs 4.2 / 4.3) — Dashboard health cards + Resorts table. Both surface the cold-start empty state per §10.9.
@@ -483,7 +483,7 @@ PRs touching these paths require an independent subagent review per AGENTS.md:
 
 ### 7.4 Tiers, gates, and parallelism
 
-Epic 4 ships across **5 tiers**. Originally scoped as 13 PRs; delivered as **18 PRs / 15 ledger sections** (§7.10 collapses PRs 4.4a-1 + 4.4a-2; §7.15 collapses PRs 4.5b + 4.5c + 4.5d; §7.17.1 captures the PR 4.6c split-off — all execution-time splits for file-budget per `feedback_atomic_prs.md`). **Inter-tier gates are blocking** — no Tier N+1 PR opens until all Tier N PRs are merged AND the gate verification below passes. Within a tier, PRs marked **‖** can land in any order (parallel-capable; same base commit, no shared files); PRs marked **→** are strictly sequential (later branches stack on the predecessor).
+Epic 4 ships across **5 tiers**. Originally scoped as 13 PRs; delivered as **18 PRs / 15 ledger sections** (§7.10 collapses PRs 4.4a-1 + 4.4a-2; §7.15 collapses PRs 4.5b + 4.5c + 4.5d; §7.17.1 captures the PR 4.6c split-off — all execution-time splits for file-budget per [AGENTS.md "PR Sizing Discipline"](../../../AGENTS.md#pr-sizing-discipline)). **Inter-tier gates are blocking** — no Tier N+1 PR opens until all Tier N PRs are merged AND the gate verification below passes. Within a tier, PRs marked **‖** can land in any order (parallel-capable; same base commit, no shared files); PRs marked **→** are strictly sequential (later branches stack on the predecessor).
 
 | Tier | Contents | Within-tier order |
 |---|---|---|
