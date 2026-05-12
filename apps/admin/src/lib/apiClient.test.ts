@@ -86,6 +86,41 @@ describe('apiClient (PR 4.1a, spec §3.2 + §7.5)', (): void => {
     expect(receivedBody).toEqual({ editor_modes: { snow_depth_cm: 'manual' } })
   })
 
+  it('upsertResort(slug, body, { signal }) forwards the AbortSignal to fetch and rejects with AbortError when aborted (PR 4.6c Decision K1)', async (): Promise<void> => {
+    // MSW's request handler observes the same Request object fetch was
+    // called with, so we read `request.signal` off it. The reject-on-abort
+    // contract is what useWorkspaceState's flush() AbortError catch
+    // depends on — if fetch swallowed the abort, the race fix would never
+    // see the rejection.
+    let observedSignal: AbortSignal | undefined
+    server.use(
+      http.put('/api/resorts/kotelnica-bialczanska', async ({ request }): Promise<Response> => {
+        observedSignal = request.signal
+        return new Promise<Response>((resolve, reject): void => {
+          request.signal.addEventListener('abort', (): void => {
+            reject(new DOMException('aborted', 'AbortError'))
+          })
+          // Otherwise hang; the abort is the only path out of this handler.
+        })
+      }),
+    )
+
+    const controller = new AbortController()
+    const pendingPut = apiClient.upsertResort(
+      'kotelnica-bialczanska' as never,
+      { editor_modes: { snow_depth_cm: 'manual' } },
+      { signal: controller.signal },
+    )
+
+    // Defer the abort until after MSW has handed the request to the handler.
+    await new Promise((r): void => { setTimeout(r, 10) })
+    controller.abort()
+
+    await expect(pendingPut).rejects.toMatchObject({ name: 'AbortError' })
+    expect(observedSignal).toBeDefined()
+    expect(observedSignal?.aborted).toBe(true)
+  })
+
   it('publish() POSTs to /api/resorts/__all__/publish (no slug arg per Phase-1 convention)', async (): Promise<void> => {
     let calledUrl = ''
     let receivedBody: unknown = null

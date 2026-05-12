@@ -125,7 +125,13 @@ describe('useModeToggle (PR 4.4d Task 1, decisions log D7 + Codex rounds 1/3)', 
     })
 
     expect(spy).toHaveBeenCalledTimes(1)
-    expect(spy).toHaveBeenCalledWith(KOTELNICA, { editor_modes: { slopes_km: 'manual' } })
+    // PR 4.6c Decision K1: useWorkspaceState now passes an AbortSignal via
+    // the third options arg. The mode-only PUT carries the same body shape
+    // as before; the options carry the per-flush abort handle.
+    const [callSlug, callBody, callOptions] = spy.mock.calls[0] ?? []
+    expect(callSlug).toBe(KOTELNICA)
+    expect(callBody).toEqual({ editor_modes: { slopes_km: 'manual' } })
+    expect(callOptions?.signal).toBeInstanceOf(AbortSignal)
   })
 
   it('a second toggleMode("slopes_km") after the first PUT settles emits { editor_modes: { slopes_km: "auto" } }', async (): Promise<void> => {
@@ -206,7 +212,10 @@ describe('useModeToggle (PR 4.4d Task 1, decisions log D7 + Codex rounds 1/3)', 
     await act(async (): Promise<void> => { await vi.advanceTimersByTimeAsync(600) })
 
     expect(spy).toHaveBeenCalledTimes(1)
-    expect(spy).toHaveBeenCalledWith(KOTELNICA, { editor_modes: { slopes_km: 'auto' } })
+    const [autoSlug, autoBody, autoOptions] = spy.mock.calls[0] ?? []
+    expect(autoSlug).toBe(KOTELNICA)
+    expect(autoBody).toEqual({ editor_modes: { slopes_km: 'auto' } })
+    expect(autoOptions?.signal).toBeInstanceOf(AbortSignal)
   })
 
   it('draft override wins over canonical: server projection is manual but draft.editor_modes.slopes_km === "auto" → modeFor returns "auto"', (): void => {

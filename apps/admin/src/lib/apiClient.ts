@@ -24,21 +24,38 @@ export class ApiClientError extends Error {
   }
 }
 
+// Per Tier 5 plan Decision K1 (PR 4.6c): optional AbortSignal threaded
+// through `request()` for `upsertResort` to abort an in-flight PUT when the
+// SPA's `clearFieldValue` clears a path that was carried in the in-flight
+// draft. Spelled as `RequestOptions | undefined` (not `{ signal?: ... }`) so
+// `exactOptionalPropertyTypes: true` callers must omit the key entirely
+// rather than pass `signal: undefined` (which would type-error under that
+// option). The same options surface absorbs PR 4.5a's `Idempotency-Key`
+// extra-header parameter (Decision J1 at line 32 below) — both are optional
+// per-call concerns; keeping them in one shape avoids parameter-count drift.
+interface RequestOptions {
+  readonly extraHeaders?: Record<string, string>
+  readonly signal?: AbortSignal
+}
+
 async function request<T>(
   method: string,
   path: string,
   body: unknown,
   parser: (raw: unknown) => T,
-  // Round-12 P2 fold (Decision J1): optional 5th arg lets `publish()` inject
-  // an `Idempotency-Key` header per spec §4.9 invariant 5 (Phase 1 honors;
-  // Phase 2 enforces). Server-side header plumbing lands when the Hono
-  // service swap adds `DispatchInput.headers`; until then the dev server
-  // simply ignores unknown headers.
-  extraHeaders?: Record<string, string>,
+  // Round-12 P2 fold (Decision J1): optional `extraHeaders` lets `publish()`
+  // inject an `Idempotency-Key` header per spec §4.9 invariant 5 (Phase 1
+  // honors; Phase 2 enforces). Server-side header plumbing lands when the
+  // Hono service swap adds `DispatchInput.headers`; until then the dev
+  // server simply ignores unknown headers. Tier 5 plan Decision K1 extends
+  // this options bag with `signal` for `upsertResort`'s AbortController race
+  // fix — same options shape, both optional.
+  options?: RequestOptions,
 ): Promise<T> {
   const init: RequestInit = {
     method,
-    headers: { 'Content-Type': 'application/json', ...(extraHeaders ?? {}) },
+    headers: { 'Content-Type': 'application/json', ...(options?.extraHeaders ?? {}) },
+    ...(options?.signal !== undefined ? { signal: options.signal } : {}),
   }
   if (body !== undefined) {
     init.body = JSON.stringify(body)
@@ -96,12 +113,23 @@ export const apiClient = {
       undefined,
       (raw): ResortDetailResponse => ResortDetailResponse.parse(raw),
     ),
-  upsertResort: (slug: ResortSlug, body: ResortUpsertBody): Promise<ResortDetailResponse> =>
+  upsertResort: (
+    slug: ResortSlug,
+    body: ResortUpsertBody,
+    // Tier 5 plan Decision K1: optional `{ signal }` lets useWorkspaceState's
+    // flush() abort the PUT mid-flight when clearFieldValue fires on a path
+    // that's carried in the in-flight draft (the race fix described in spec
+    // §7.13 + handoff §52). Spelled as `RequestOptions | undefined` so
+    // `exactOptionalPropertyTypes: true` callers omit the key when no signal
+    // is needed (existing PR 4.4d / 4.5d call sites are unchanged).
+    options?: RequestOptions,
+  ): Promise<ResortDetailResponse> =>
     request(
       'PUT',
       `/api/resorts/${slug}`,
       body,
       (raw): ResortDetailResponse => ResortDetailResponse.parse(raw),
+      options,
     ),
   publish: (): Promise<PublishResponse> =>
     request(
@@ -113,7 +141,7 @@ export const apiClient = {
       // both the Vite dev runtime and the Vitest jsdom env). Phase 1 server
       // ignores the header (DispatchInput has no `headers` field); Phase 2's
       // Hono service swap will plumb it through for real dedupe.
-      { 'Idempotency-Key': crypto.randomUUID() },
+      { extraHeaders: { 'Idempotency-Key': crypto.randomUUID() } },
     ),
   listPublishes: (q: ListPublishesQuery): Promise<ListPublishesResponse> =>
     request(

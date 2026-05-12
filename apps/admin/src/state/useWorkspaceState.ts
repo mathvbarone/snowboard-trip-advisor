@@ -54,6 +54,13 @@ interface SlugStore {
   canonical: ResortDetailResponse | null
   lastSentDraft: DraftShape | null
   inFlightToken: symbol | null
+  // PR 4.6c Decision K1: AbortController + inFlightDraft snapshot let
+  // clearFieldValue abort the in-flight PUT when the cleared path was
+  // carried in the in-flight body (path-gated abort). The fields are nulled
+  // in flush()'s finally so a stale controller can't be re-aborted after
+  // the round-trip completes.
+  abortController: AbortController | null
+  inFlightDraft: DraftShape | null
   queued: boolean
   timer: ReturnType<typeof setTimeout> | null
   subscribers: Set<() => void>
@@ -73,6 +80,8 @@ function getOrCreateStore(slug: ResortSlug): SlugStore {
       canonical: null,
       lastSentDraft: null,
       inFlightToken: null,
+      abortController: null,
+      inFlightDraft: null,
       queued: false,
       timer: null,
       subscribers: new Set(),
@@ -343,6 +352,10 @@ function valueAtPathDiffersFromSent(
   return JSON.stringify(cLeaf) !== JSON.stringify(sLeaf)
 }
 
+function isAbortError(err: unknown): boolean {
+  return err instanceof DOMException && err.name === 'AbortError'
+}
+
 async function flush(slug: ResortSlug): Promise<void> {
   const store = getOrCreateStore(slug)
   if (store.inFlightToken !== null) {
@@ -353,6 +366,14 @@ async function flush(slug: ResortSlug): Promise<void> {
   const inFlightRev = store.state.rev
   const inFlightDraft = store.state.draft
   store.inFlightToken = token
+  // PR 4.6c Decision K1: fresh AbortController + snapshot of the in-flight
+  // draft so clearFieldValue can path-gate its abort. Both fields are
+  // nulled in `finally` so a controller can't be aborted after the round-
+  // trip resolves (defensive against stale references the test harness or
+  // a future code path might hold).
+  const abortController = new AbortController()
+  store.abortController = abortController
+  store.inFlightDraft = inFlightDraft
   patchState(store, (s) => ({ ...s, status: markStatuses(s.status, 'saving') }))
   try {
     const body = buildBodyFromDraft(inFlightDraft, store.lastSentDraft)
@@ -363,7 +384,7 @@ async function flush(slug: ResortSlug): Promise<void> {
       patchState(store, (s) => ({ ...s, status: markStatuses(s.status, 'saved') }))
       return
     }
-    const response = await apiClient.upsertResort(slug, body)
+    const response = await apiClient.upsertResort(slug, body, { signal: abortController.signal })
     // No race-on-token check needed: the flush early-returns when a PUT is
     // already in-flight, so `store.inFlightToken` cannot change between the
     // try-entry assignment and here. Distinguish rev-unchanged vs rev-moved
@@ -386,12 +407,31 @@ async function flush(slug: ResortSlug): Promise<void> {
       store.lastSentDraft = inFlightDraft
       prepopulateResortDetail(slug, response)
     }
-  } catch {
+  } catch (err: unknown) {
+    // PR 4.6c Decision K1: distinguish intentional abort from generic save
+    // failure. AbortError fires when clearFieldValue's path-gated abort
+    // cancels the in-flight PUT — the user's clear is the canonical intent
+    // now, so revert in-flight-draft paths from `saving` → `dirty` and
+    // skip the prepopulate + lastSentDraft updates that would otherwise
+    // surface the soon-to-be-cleared value into canonical. The
+    // storesBySlug guard handles `__resetForTests` aborting mid-flight:
+    // when the store has been removed from the map, this catch is for a
+    // store nobody is subscribed to — patching it would notify no one and
+    // bookkeeping would be moot.
+    if (isAbortError(err)) {
+      if (storesBySlug.get(slug) !== store) {
+        return
+      }
+      patchState(store, (s) => ({ ...s, status: markStatuses(s.status, 'dirty') }))
+      return
+    }
     if (store.state.rev === inFlightRev) {
       patchState(store, (s) => ({ ...s, status: markStatuses(s.status, 'save-failed') }))
     }
   } finally {
     store.inFlightToken = null
+    store.abortController = null
+    store.inFlightDraft = null
     if (store.queued || store.state.rev !== inFlightRev) {
       store.queued = false
       scheduleFlush(slug)
@@ -454,11 +494,29 @@ function isPendingStatus(s: WorkspaceStatus): boolean {
 // (round-24) to avoid orphaned manual provenance attached to canonical
 // (unchanged) values. editor_modes[path] is preserved — clearing the
 // value doesn't revert the analyst's MANUAL flag.
+//
+// PR 4.6c Decision K1: path-gated abort. When the cleared path is carried
+// in the current in-flight PUT body, abort the controller so the response
+// doesn't prepopulate canonical with the soon-to-be-cleared value. Path-
+// gated (not always) — clearing an unrelated path while a different path's
+// PUT is in flight does NOT abort that legitimate write. For nested-leaf
+// clears (e.g. `altitude_m.min`), the gate triggers when the PARENT
+// (`altitude_m`) is present in the in-flight side — the response would
+// otherwise re-prepopulate the parent and re-introduce the now-cleared min.
 export function clearFieldValue(slug: ResortSlug, path: MetricPath): void {
   const store = getOrCreateStore(slug)
   const side = sideFor(path)
   const dotIdx = path.indexOf('.')
   const parentPrefix = dotIdx === -1 ? null : `${path.slice(0, dotIdx)}.`
+  // Decision K1 path-gated abort — read inFlightDraft via the side root and
+  // walk for the cleared path (top-level or nested parent). When the
+  // controller has no in-flight PUT (`inFlightDraft === null`), the gate is
+  // a no-op; existing clear semantics run unchanged.
+  if (store.abortController !== null && store.inFlightDraft !== null) {
+    if (isPathInDraft(store.inFlightDraft, side, path)) {
+      store.abortController.abort()
+    }
+  }
   patchState(store, (s) => {
     const draft = clearDraftLeaf(s.draft, side, path)
     const status: Partial<Record<MetricPath, WorkspaceStatus>> = {}
@@ -471,6 +529,36 @@ export function clearFieldValue(slug: ResortSlug, path: MetricPath): void {
     return { rev: s.rev + 1, draft, status }
   })
   scheduleFlush(slug)
+}
+
+// Decision K1 path-walker — returns true when the cleared path is present
+// in the in-flight side. Top-level paths (`slopes_km`) check direct
+// presence; 2-segment paths (`altitude_m.min`) check parent presence
+// (because the in-flight body carries the WHOLE parent — a shallow merge
+// on the server would re-introduce the cleared leaf).
+function isPathInDraft(draft: DraftShape, side: Side, path: MetricPath): boolean {
+  const sideRoot = side === 'resort' ? draft.resort : draft.live_signal
+  if (sideRoot === undefined) { return false }
+  const dotIdx = path.indexOf('.')
+  const key = dotIdx === -1 ? path : path.slice(0, dotIdx)
+  return Object.prototype.hasOwnProperty.call(sideRoot, key)
+}
+
+// Decision K1 (PR 4.6c): synchronous save-shortcut consumed by Shell's
+// `mod+enter` wiring. Clears the pending debounce timer and triggers an
+// immediate flush. Returns void — does NOT await the PUT round-trip.
+// When a flush is already in flight, the inner flush() short-circuits to
+// the queued path (existing inFlightToken contract), so flushNow during
+// in-flight is effectively a no-op until the in-flight completes; this
+// matches the "kick off the PUT this instant" UX the keyboard shortcut
+// implies rather than "block until the response."
+export function flushNow(slug: ResortSlug): void {
+  const store = getOrCreateStore(slug)
+  if (store.timer !== null) {
+    clearTimeout(store.timer)
+    store.timer = null
+  }
+  void flush(slug)
 }
 
 // Codex round-21 P2-29 + round-24 P1-34: for NESTED paths the WHOLE parent
@@ -581,6 +669,12 @@ export function useWorkspaceState(): WorkspaceStateHandle {
 export function __resetForTests(): void {
   for (const store of storesBySlug.values()) {
     if (store.timer !== null) { clearTimeout(store.timer) }
+    // PR 4.6c Decision K1: abort any in-flight controllers so the rejected
+    // promise (with AbortError) doesn't leak into the next test. The
+    // AbortError catch arm in flush() guards on `storesBySlug.get(slug) !==
+    // store`, so the post-clear rejection is silently swallowed (subscribers
+    // are gone; bookkeeping is moot).
+    if (store.abortController !== null) { store.abortController.abort() }
   }
   storesBySlug.clear()
 }

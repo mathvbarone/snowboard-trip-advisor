@@ -12,11 +12,13 @@ import { apiClient } from '../lib/apiClient'
 import {
   __resetForTests as resetResortDetail,
   prepopulateResortDetail,
+  useResortDetail,
 } from './useResortDetail'
 import { __resetForTests as resetURLState } from './useURLState'
 import {
   __resetForTests as resetWorkspaceState,
   diffSide,
+  flushNow as workspaceFlushNow,
   setFieldValue as workspaceSetFieldValue,
   useWorkspaceState,
 } from './useWorkspaceState'
@@ -968,5 +970,306 @@ describe('useWorkspaceState — draft reset + diff PUT (D13, Codex rounds 7/16/1
 
     expect(spy).toHaveBeenCalledTimes(1) // empty-diff short-circuit
     expect(result.current.status['slopes_km']).toBe('saved')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// PR 4.6c — Decision K1 (formerly J1, renamed to avoid collision with PR
+// 4.5a's apiClient.ts:32 Idempotency-Key J1). AbortController race fix
+// against `useWorkspaceState`'s in-flight-clear gap: when the user clears a
+// field while its PUT is in flight, abort the controller so the response's
+// prepopulate is suppressed (canonical doesn't get re-populated with the
+// soon-to-be-cleared value). Path-gated: clearing an unrelated path while a
+// different path is mid-flight does NOT abort. AbortError catch is distinct
+// from generic save-failed: reverts in-flight-draft paths from `saving` to
+// `dirty` (not `save-failed`, not `saved`), skips prepopulate, skips
+// lastSentDraft update. `flushNow(slug)` is the new save-shortcut hook
+// consumed by Shell's mod+enter wiring. `__resetForTests()` aborts every
+// store's in-flight controller before clearing the map so leaked PUTs don't
+// bleed into the next test.
+//
+// Helper: a mock `upsertResort` implementation that:
+//   1. captures the signal passed by useWorkspaceState (so the test can
+//      assert `signal.aborted` after the abort fires).
+//   2. rejects with a DOMException-shaped AbortError when the signal aborts.
+//   3. otherwise resolves with `postPutResponse` (which carries a DIFFERENT
+//      slopes_km than initial canonical, so a successful PUT → prepopulate
+//      → canonical-changed is observably distinct from a suppressed PUT).
+interface AbortableMockHandle {
+  readonly capturedSignals: AbortSignal[]
+  resolveAt(index: number, value: ResortDetailResponse): void
+}
+
+function makeAbortableUpsertMock(): AbortableMockHandle {
+  const capturedSignals: AbortSignal[] = []
+  const resolvers: Array<((v: ResortDetailResponse) => void) | undefined> = []
+  vi.spyOn(apiClient, 'upsertResort').mockImplementation(
+    (_slug, _body, opts): Promise<ResortDetailResponse> => {
+      const signal = (opts as { signal?: AbortSignal } | undefined)?.signal
+      if (signal !== undefined) {
+        capturedSignals.push(signal)
+      }
+      const idx = resolvers.length
+      const promise = new Promise<ResortDetailResponse>((resolve, reject): void => {
+        resolvers[idx] = resolve
+        if (signal !== undefined) {
+          signal.addEventListener('abort', (): void => {
+            reject(new DOMException('aborted', 'AbortError'))
+          })
+        }
+      })
+      return promise
+    },
+  )
+  return {
+    capturedSignals,
+    resolveAt: (index, value): void => {
+      const resolver = resolvers[index]
+      if (resolver === undefined) {
+        throw new Error(`no resolver at index ${String(index)}`)
+      }
+      resolver(value)
+    },
+  }
+}
+
+async function drainMicrotasks(): Promise<void> {
+  await act(async (): Promise<void> => {
+    for (let i = 0; i < 20; i += 1) { await Promise.resolve() }
+  })
+}
+
+function withSlopesKm(base: ResortDetailResponse, value: number): ResortDetailResponse {
+  const baseClone = JSON.parse(JSON.stringify(base)) as Record<string, unknown>
+  const resortClone = JSON.parse(JSON.stringify(base.resort)) as Record<string, unknown>
+  return ResortDetailResponse.parse({
+    ...baseClone,
+    resort: { ...resortClone, slopes_km: value },
+  })
+}
+
+describe('useWorkspaceState — K1 in-flight-clear race fix + flushNow + abort gating (PR 4.6c)', (): void => {
+  it('race repro: clear-during-flight forwards an AbortSignal to upsertResort, aborts it, AND canonical is NOT prepopulated with the typed value', async (): Promise<void> => {
+    const initial = syntheticResponse('kotelnica-bialczanska') // slopes_km: 8
+    prepopulateResortDetail(KOTELNICA, initial)
+    const handle = makeAbortableUpsertMock()
+
+    const { result } = renderHook(() => useWorkspaceState())
+    act((): void => { result.current.setFieldValue('slopes_km', 150) })
+    await act(async (): Promise<void> => { await vi.advanceTimersByTimeAsync(600) })
+
+    // useWorkspaceState forwarded a signal to upsertResort.
+    expect(handle.capturedSignals.length).toBe(1)
+    const signal = handle.capturedSignals[0]
+    if (signal === undefined) { throw new Error('signal not captured') }
+    expect(signal.aborted).toBe(false)
+
+    // User clears mid-flight. clearFieldValue's path-gated abort fires because
+    // slopes_km is in the in-flight draft.
+    act((): void => { result.current.clearFieldValue('slopes_km') })
+    expect(signal.aborted).toBe(true)
+
+    // Drain the AbortError microtask so flush()'s catch arm runs.
+    await drainMicrotasks()
+
+    // Canonical NOT prepopulated with the typed value (still at initial 8).
+    const { result: detailResult } = renderHook(() => useResortDetail(KOTELNICA))
+    expect(detailResult.current.resort.slopes_km).toBe(8)
+
+    // Draft reflects the clear; slopes_km status entry was dropped by
+    // clearFieldValue (it was 'saving' → drop per existing isPendingStatus).
+    expect(result.current.draft.resort?.slopes_km).toBeUndefined()
+    expect(result.current.status['slopes_km']).toBeUndefined()
+  })
+
+  it('flushNow happy path: edits + flushNow → PUT fires immediately (no 500ms wait)', async (): Promise<void> => {
+    prepopulateResortDetail(KOTELNICA, syntheticResponse('kotelnica-bialczanska'))
+    const spy = vi.spyOn(apiClient, 'upsertResort').mockResolvedValue(
+      syntheticResponse('kotelnica-bialczanska'),
+    )
+
+    const { result } = renderHook(() => useWorkspaceState())
+    act((): void => { result.current.setFieldValue('slopes_km', 150) })
+    expect(spy).toHaveBeenCalledTimes(0) // debounce hasn't fired
+
+    // flushNow: synchronously cancels the timer and triggers flush.
+    await act(async (): Promise<void> => {
+      workspaceFlushNow(KOTELNICA)
+      // Drain microtasks so the flush's async upsertResort resolves and the
+      // 'saved' state propagates.
+      for (let i = 0; i < 20; i += 1) { await Promise.resolve() }
+    })
+
+    expect(spy).toHaveBeenCalledTimes(1)
+    expect(result.current.status['slopes_km']).toBe('saved')
+  })
+
+  it('flushNow during in-flight: queues per existing inFlightToken behavior (no second PUT yet)', async (): Promise<void> => {
+    prepopulateResortDetail(KOTELNICA, syntheticResponse('kotelnica-bialczanska'))
+    const handle = makeAbortableUpsertMock()
+
+    const { result } = renderHook(() => useWorkspaceState())
+    act((): void => { result.current.setFieldValue('slopes_km', 150) })
+    await act(async (): Promise<void> => { await vi.advanceTimersByTimeAsync(600) })
+    expect(handle.capturedSignals.length).toBe(1) // PUT 1 fired
+
+    // User edits again (queued) and flushNow is called mid-in-flight.
+    act((): void => { result.current.setFieldValue('lift_count', 9) })
+    act((): void => { workspaceFlushNow(KOTELNICA) })
+    await drainMicrotasks()
+    // Still only 1 PUT — the inFlightToken short-circuit holds (flushNow
+    // honors the queue rather than aborting + restarting).
+    expect(handle.capturedSignals.length).toBe(1)
+  })
+
+  it('flushNow with no dirty draft: no PUT (existing empty-diff short-circuit applies)', async (): Promise<void> => {
+    prepopulateResortDetail(KOTELNICA, syntheticResponse('kotelnica-bialczanska'))
+    const spy = vi.spyOn(apiClient, 'upsertResort').mockResolvedValue(
+      syntheticResponse('kotelnica-bialczanska'),
+    )
+
+    renderHook(() => useWorkspaceState())
+    await act(async (): Promise<void> => {
+      workspaceFlushNow(KOTELNICA)
+      for (let i = 0; i < 20; i += 1) { await Promise.resolve() }
+    })
+    expect(spy).toHaveBeenCalledTimes(0)
+  })
+
+  it('path-gated abort NEGATIVE: clearing a path NOT in the in-flight draft does NOT abort the controller', async (): Promise<void> => {
+    const initial = syntheticResponse('kotelnica-bialczanska')
+    prepopulateResortDetail(KOTELNICA, initial)
+    const handle = makeAbortableUpsertMock()
+
+    const { result } = renderHook(() => useWorkspaceState())
+
+    // First PUT carries slopes_km only.
+    act((): void => { result.current.setFieldValue('slopes_km', 150) })
+    await act(async (): Promise<void> => { await vi.advanceTimersByTimeAsync(600) })
+    expect(handle.capturedSignals.length).toBe(1)
+    const signal = handle.capturedSignals[0]
+    if (signal === undefined) { throw new Error('signal not captured') }
+
+    // User edits lift_count — this is in the DRAFT (queued for next flush)
+    // but NOT in the IN-FLIGHT draft. Clearing it should NOT abort the
+    // first PUT.
+    act((): void => { result.current.setFieldValue('lift_count', 9) })
+    act((): void => { result.current.clearFieldValue('lift_count') })
+    expect(signal.aborted).toBe(false)
+
+    // Resolve the in-flight PUT normally — prepopulate runs, canonical
+    // updates to the response's slopes_km.
+    await act(async (): Promise<void> => {
+      handle.resolveAt(0, withSlopesKm(initial, 150))
+      for (let i = 0; i < 20; i += 1) { await Promise.resolve() }
+    })
+
+    const { result: detailResult } = renderHook(() => useResortDetail(KOTELNICA))
+    expect(detailResult.current.resort.slopes_km).toBe(150)
+  })
+
+  it('clearFieldValue with no flush in flight: no abort attempt, existing clear path runs', (): void => {
+    prepopulateResortDetail(KOTELNICA, syntheticResponse('kotelnica-bialczanska'))
+    const handle = makeAbortableUpsertMock()
+
+    const { result } = renderHook(() => useWorkspaceState())
+    // Edit, then clear BEFORE the debounce fires → no PUT was started, no
+    // in-flight draft to gate against.
+    act((): void => { result.current.setFieldValue('slopes_km', 150) })
+    act((): void => { result.current.clearFieldValue('slopes_km') })
+
+    // No PUT fired yet AND no signal captured.
+    expect(handle.capturedSignals.length).toBe(0)
+    // No abort: there's no controller to abort.
+
+    // Draft cleared; status entry dropped.
+    expect(result.current.draft.resort?.slopes_km).toBeUndefined()
+    expect(result.current.status['slopes_km']).toBeUndefined()
+  })
+
+  it('path-gated abort POSITIVE for live-side path: clearing a live path that is IN the in-flight live_signal draft aborts the controller', async (): Promise<void> => {
+    prepopulateResortDetail(KOTELNICA, syntheticResponse('kotelnica-bialczanska'))
+    const handle = makeAbortableUpsertMock()
+
+    const { result } = renderHook(() => useWorkspaceState())
+    act((): void => { result.current.setFieldValue('snow_depth_cm', 200) })
+    await act(async (): Promise<void> => { await vi.advanceTimersByTimeAsync(600) })
+    expect(handle.capturedSignals.length).toBe(1)
+    const signal = handle.capturedSignals[0]
+    if (signal === undefined) { throw new Error('signal not captured') }
+    expect(signal.aborted).toBe(false)
+
+    // Clear a live-side path that IS in the in-flight draft (snow_depth_cm).
+    act((): void => { result.current.clearFieldValue('snow_depth_cm') })
+    expect(signal.aborted).toBe(true)
+    await drainMicrotasks()
+  })
+
+  it('path-gated abort NEGATIVE for cross-side: clearing a resort path while only live_signal is in-flight does NOT abort', async (): Promise<void> => {
+    prepopulateResortDetail(KOTELNICA, syntheticResponse('kotelnica-bialczanska'))
+    const handle = makeAbortableUpsertMock()
+
+    const { result } = renderHook(() => useWorkspaceState())
+    // Only a live-side edit goes in-flight.
+    act((): void => { result.current.setFieldValue('snow_depth_cm', 200) })
+    await act(async (): Promise<void> => { await vi.advanceTimersByTimeAsync(600) })
+    expect(handle.capturedSignals.length).toBe(1)
+    const signal = handle.capturedSignals[0]
+    if (signal === undefined) { throw new Error('signal not captured') }
+
+    // User edits + clears a resort-side path. inFlightDraft.resort is
+    // undefined (only live_signal is in the in-flight body), so the gate's
+    // `sideRoot === undefined` branch returns false → no abort.
+    act((): void => { result.current.setFieldValue('slopes_km', 150) })
+    act((): void => { result.current.clearFieldValue('slopes_km') })
+    expect(signal.aborted).toBe(false)
+
+    // Resolve the in-flight PUT normally to clean up.
+    await act(async (): Promise<void> => {
+      handle.resolveAt(0, syntheticResponse('kotelnica-bialczanska'))
+      for (let i = 0; i < 20; i += 1) { await Promise.resolve() }
+    })
+  })
+
+  it('path-gated abort POSITIVE for nested path: clearing altitude_m.min while altitude_m is in the in-flight draft aborts (parent-presence check)', async (): Promise<void> => {
+    prepopulateResortDetail(KOTELNICA, syntheticResponse('kotelnica-bialczanska'))
+    const handle = makeAbortableUpsertMock()
+
+    const { result } = renderHook(() => useWorkspaceState())
+    act((): void => { result.current.setFieldValue('altitude_m.min', 1700) })
+    await act(async (): Promise<void> => { await vi.advanceTimersByTimeAsync(600) })
+    expect(handle.capturedSignals.length).toBe(1)
+    const signal = handle.capturedSignals[0]
+    if (signal === undefined) { throw new Error('signal not captured') }
+
+    // The in-flight body carried `altitude_m` (the WHOLE parent — Decision
+    // D10 hydration-on-edit). Clearing the leaf must abort because the
+    // server's shallow merge would otherwise reintroduce the cleared min.
+    act((): void => { result.current.clearFieldValue('altitude_m.min') })
+    expect(signal.aborted).toBe(true)
+    await drainMicrotasks()
+  })
+
+  it('__resetForTests aborts every in-flight controller before clearing the singleton map', async (): Promise<void> => {
+    prepopulateResortDetail(KOTELNICA, syntheticResponse('kotelnica-bialczanska'))
+    const handle = makeAbortableUpsertMock()
+
+    const { result, unmount } = renderHook(() => useWorkspaceState())
+    act((): void => { result.current.setFieldValue('slopes_km', 150) })
+    await act(async (): Promise<void> => { await vi.advanceTimersByTimeAsync(600) })
+    expect(handle.capturedSignals.length).toBe(1)
+    const signal = handle.capturedSignals[0]
+    if (signal === undefined) { throw new Error('signal not captured') }
+    expect(signal.aborted).toBe(false)
+
+    // resetWorkspaceState aborts the in-flight controller.
+    unmount()
+    resetWorkspaceState()
+    expect(signal.aborted).toBe(true)
+
+    // Drain the AbortError microtask so the rejected promise doesn't leak
+    // into the next test (the AbortError handler must no-op when
+    // storesBySlug.get(slug) !== store because the store has been cleared).
+    await drainMicrotasks()
   })
 })

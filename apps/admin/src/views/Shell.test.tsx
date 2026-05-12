@@ -1,8 +1,12 @@
 import '@testing-library/jest-dom/vitest'
 import { tokens } from '@snowboard-trip-advisor/design-system'
-import { render, screen, waitFor } from '@testing-library/react'
+import { ResortSlug } from '@snowboard-trip-advisor/schema'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { setRoute, __resetForTests as resetURLState } from '../state/useURLState'
+import * as workspaceStateModule from '../state/useWorkspaceState'
 
 import { Shell } from './Shell'
 import { RESPONSIVE_CSS } from './Shell.responsive.css'
@@ -135,16 +139,39 @@ describe('Shell — composition smoke (mounts ToastProvider + useShortcuts)', ()
     })
   })
 
-  it('mod+enter and Escape fire as no-op callbacks (Phase 1 — Decisions G1, G2)', async (): Promise<void> => {
-    // Coverage anchor for Shell's no-op shortcut handlers. The handlers are
-    // wired so PR 4.6c can swap onModEnter to flushNow() without touching
-    // Shell.tsx beyond the body of the closure. Asserting "no error thrown +
-    // Shell still mounted" exercises the closures (function coverage) while
-    // honouring the Phase-1 contract that nothing visible happens.
+  it('Escape fires as a no-op callback (Phase 1 — Decision G1: Radix Dialog handles modal Escape internally)', async (): Promise<void> => {
     const user = userEvent.setup()
     render(<Shell><div /></Shell>)
-    await user.keyboard('{Meta>}{Enter}{/Meta}')
     await user.keyboard('{Escape}')
     expect(screen.getByRole('banner')).toBeInTheDocument()
+  })
+
+  it('mod+enter is route-aware (PR 4.6c Decision K1): off-route is a no-op; on-route calls flushNow(slug) — same Shell mount through setRoute', async (): Promise<void> => {
+    // The Shell mounts once and stays mounted through the setRoute
+    // transition; the route-aware onModEnter closure must read the LATEST
+    // route via the useShortcuts handlers-ref pin (lib/shortcuts.ts:66
+    // Decision F5). If a future refactor adds a stale dependency array on
+    // the document-level keydown listener, this test catches the
+    // regression: the first mod+enter (off-route) wouldn't fire flushNow,
+    // but the second mod+enter (post-setRoute) MUST call flushNow(slug).
+    const flushNowSpy = vi.spyOn(workspaceStateModule, 'flushNow').mockImplementation((): void => {})
+    const user = userEvent.setup()
+    render(<Shell><div /></Shell>)
+
+    // Off-route (dashboard) — mod+enter must NOT call flushNow.
+    await user.keyboard('{Meta>}{Enter}{/Meta}')
+    expect(flushNowSpy).not.toHaveBeenCalled()
+
+    // Navigate to the editor route via setRoute (same Shell mount).
+    const slug = ResortSlug.parse('kotelnica-bialczanska')
+    act((): void => { setRoute({ route: 'editor', slug }) })
+
+    // On-route — mod+enter MUST call flushNow with the route's slug.
+    await user.keyboard('{Meta>}{Enter}{/Meta}')
+    expect(flushNowSpy).toHaveBeenCalledTimes(1)
+    expect(flushNowSpy).toHaveBeenCalledWith(slug)
+
+    flushNowSpy.mockRestore()
+    resetURLState()
   })
 })
