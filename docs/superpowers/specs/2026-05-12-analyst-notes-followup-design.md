@@ -217,27 +217,34 @@ export type AnalystNoteUpsertResponse = z.infer<typeof AnalystNoteUpsertResponse
 
 **File:** `apps/admin/server/analystNotes.ts` (NEW)
 
-Handler signatures match the existing `apps/admin/server/*.ts` pattern (a `deps: { workspaceRoot, publishedPath }` object resolves paths; the dispatcher injects via `apps/admin/vite-plugin-admin-api.ts`).
+Handler signature matches the existing `apps/admin/server/*.ts` pattern. `HandlerDeps` is `{ workspaceRoot: string }` only (per [`apps/admin/server/listResorts.ts:16-17`](../../../apps/admin/server/listResorts.ts)); each handler derives its workspace and published paths in a fixed two-line pattern (verified against `resortDetail.ts:33-34` and `resortUpsert.ts:97-99`):
+
+```ts
+const workspaceDir = join(deps.workspaceRoot, 'data', 'admin-workspace')
+const publishedPath = join(deps.workspaceRoot, 'data', 'published', 'current.v1.json')
+```
 
 **GET `/api/analyst-notes/:slug`:**
-1. `readWorkspaceFileForSlug(deps.workspaceRoot, slug)` — if exists, use its `notes`. If missing → `readPublishedDocOrNull(deps.publishedPath)`.
-2. If neither workspace nor published has the slug → **404 `not-found`** (mirrors [`resortDetail.ts:46-67`](../../../apps/admin/server/resortDetail.ts)).
-3. If workspace JSON corrupt → **500 `workspace-corrupt`** (per Epic-4 spec §10.3.1).
-4. For each `[path, note]` in `wf?.notes ?? {}`, compute `html = renderAnalystNoteMarkdown(note.markdown)` inside a `try`; on render exception → **500 `internal`** (the workspace data is preserved; analyst sees a banner). See §3.3.
-5. Return `{ slug, notes: { [path]: { ...note, html } } }`. Cold-start path returns `{ slug, notes: {} }` when only the published doc exists.
-6. No lock — reads are concurrent-safe.
+1. Derive `workspaceDir` + `publishedPath` per the snippet above.
+2. `readWorkspaceFileForSlug(workspaceDir, slug)` — if exists, use its `notes`. If missing → `readPublishedDocOrNull(publishedPath)`.
+3. If neither workspace nor published has the slug → **404 `not-found`** (mirrors [`resortDetail.ts:46-67`](../../../apps/admin/server/resortDetail.ts)).
+4. If workspace JSON corrupt → **500 `workspace-corrupt`** (per Epic-4 spec §10.3.1).
+5. For each `[path, note]` in `wf?.notes ?? {}`, compute `html = renderAnalystNoteMarkdown(note.markdown)` inside a `try`; on render exception → **500 `internal`** (the workspace data is preserved; analyst sees a banner). See §3.3.
+6. Return `{ slug, notes: { [path]: { ...note, html } } }`. Cold-start path returns `{ slug, notes: {} }` when only the published doc exists.
+7. No lock — reads are concurrent-safe.
 
 **PUT `/api/analyst-notes/:slug`:**
 1. Validate body via `AnalystNoteUpsertBody.parse(body)`. Fail → **400 `invalid-request`** with Zod issues in `.details`.
-2. Acquire `withSlugLock(slug, async () => { ... })`:
-   - `readWorkspaceFileForSlug(deps.workspaceRoot, slug)` — if missing, hydrate from `readPublishedDocOrNull(deps.publishedPath)` (mirrors `resortUpsert.ts:117-127`). If neither → **404 `not-found`**.
+2. Derive `workspaceDir` + `publishedPath` per the snippet above; `targetPath = join(workspaceDir, ${slug}.json)`.
+3. Acquire `withSlugLock(slug, async () => { ... })`:
+   - `readWorkspaceFileForSlug(workspaceDir, slug)` — if missing, hydrate from `readPublishedDocOrNull(publishedPath)` (mirrors `resortUpsert.ts:117-127`). If neither → **404 `not-found`**.
    - Apply patch:
      - `markdown === null` → `delete wf.notes[path]`
      - else → `wf.notes[path] = { schema_version: 1, markdown, created_at: existing?.created_at ?? now, updated_at: now }`
    - Stamp `wf.modified_at = now`.
    - Validate via `WorkspaceFile.parse(wf)`.
-   - `atomicWriteWorkspaceFile(targetPath, JSON.stringify(parsed.data, null, 2))` where `targetPath = join(deps.workspaceRoot, ${slug}.json)`.
-3. Render `html` for the affected note (or `null` on delete) inside a `try`; on render exception → **500 `internal`** (file is already on disk; next GET will surface the issue). Return `{ slug, path, note: { ...note, html } | null }`.
+   - `atomicWriteWorkspaceFile(targetPath, JSON.stringify(parsed.data, null, 2))`.
+4. Render `html` for the affected note (or `null` on delete) inside a `try`; on render exception → **500 `internal`** (file is already on disk; next GET will surface the issue). Return `{ slug, path, note: { ...note, html } | null }`.
 
 ### 3.3 Error envelope (uses existing codes)
 
@@ -450,9 +457,13 @@ The per-path SlugStore makes path-gating implicit — each path has its own `Not
    - `state.rev++` (advances the rev so any in-flight upsert's response will fail the rev guard).
    - `state.abortController?.abort()` (fire-and-forget previous in-flight upsert).
    - `state.draft = ''; state.lastSent = null; state.status = 'saving'`.
+   - Capture `const flightRev = state.rev` (same race guard pattern as step 2).
    - PUT `{ markdown: null }` with a FRESH `state.abortController = new AbortController()`; fire-and-forget the previous abort, no polling.
-   - On success: `state.status = 'saved'; state.abortController = undefined`. `prepopulateAnalystNotes(slug, merge(slug, path, null))` (note removed from cache). Status terminal-after-success; next `setDraft` re-enters the upsert path with `lastSent === null`.
+   - On success:
+     - **Rev-counter guard** (same pattern as step 2): if `flightRev !== state.rev`, a newer `setDraft` / `deleteNote` happened mid-flight — skip the prepopulate, leave status as the caller set it. Without this, a `setDraft('x')` racing the delete response would be clobbered by `prepopulateAnalystNotes(... null)` while the user has 'x' typed.
+     - Else: `state.status = 'saved'; state.abortController = undefined`. `prepopulateAnalystNotes(slug, merge(slug, path, null))` (note removed from cache). Status terminal-after-success; next `setDraft` re-enters the upsert path with `lastSent === null`.
    - On `AbortError` (the delete itself got aborted by ANOTHER `setDraft`): leave status; the new `setDraft` already updated status.
+   - On other error (rev-guarded the same way): `state.status = 'save-failed'`.
 4. **Unmount:** clean up subscriber; do NOT abort in-flight saves (analyst-walks-away convention); debounce timer lives on the module store (not the component), so the timer fires post-unmount and the flush proceeds without a consumer. Next mount reads the prepopulated value. Documented trade-off: navigation away has up to 500 ms tail latency before the save completes — `flushAllForSlug` on route-change is a Phase 2 question.
 
 ### 5.2.1 No tab/window-focus refresh
