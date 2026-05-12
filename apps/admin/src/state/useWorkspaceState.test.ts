@@ -1250,6 +1250,44 @@ describe('useWorkspaceState — K1 in-flight-clear race fix + flushNow + abort g
     await drainMicrotasks()
   })
 
+  it('__resetForTests during in-flight with queued follow-up: finally must NOT scheduleFlush against the cleared map (Codex P2 fold)', async (): Promise<void> => {
+    // Codex inline review (PR #105, 2026-05-12): flush()'s finally re-
+    // schedules when `store.queued || rev !== inFlightRev`. If the user
+    // edited mid-flight (rev moved) AND we call __resetForTests, the
+    // AbortError catch's storesBySlug guard correctly no-ops, but the
+    // FINALLY still runs and would call scheduleFlush(slug). The current
+    // scheduleFlush → getOrCreateStore would re-materialise a fresh store
+    // + new timer in the just-cleared map → autosave work leaks into the
+    // next test. The fix gates the finally branch on the same guard.
+    prepopulateResortDetail(KOTELNICA, syntheticResponse('kotelnica-bialczanska'))
+    const handle = makeAbortableUpsertMock()
+
+    const { result } = renderHook(() => useWorkspaceState())
+    act((): void => { result.current.setFieldValue('slopes_km', 150) })
+    await act(async (): Promise<void> => { await vi.advanceTimersByTimeAsync(600) })
+    expect(handle.capturedSignals.length).toBe(1) // PUT 1 in-flight
+
+    // User edits mid-flight → rev moves; would normally trigger queued
+    // reschedule on the in-flight's resolution.
+    act((): void => { result.current.setFieldValue('slopes_km', 200) })
+
+    // Pre-reset baseline: setFieldValue at the previous step scheduled a
+    // 500 ms timer on the existing store. __resetForTests clears it via
+    // its clearTimeout loop; after the reset there should be 0 pending
+    // timers. If the bug is present, flush()'s finally re-schedules via
+    // scheduleFlush(slug) → getOrCreateStore creates a fresh store + new
+    // timer in the just-cleared map → pending-timer count is non-zero.
+    expect(vi.getTimerCount()).toBeGreaterThan(0) // pre-reset: existing T2
+
+    resetWorkspaceState()
+    await drainMicrotasks() // drains the AbortError microtask → catch + finally run
+
+    // After the reset + microtask drain, NO pending timer must remain.
+    // Without the fix the finally would have scheduled a new 500 ms timer
+    // via getOrCreateStore + scheduleFlush.
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
   it('__resetForTests aborts every in-flight controller before clearing the singleton map', async (): Promise<void> => {
     prepopulateResortDetail(KOTELNICA, syntheticResponse('kotelnica-bialczanska'))
     const handle = makeAbortableUpsertMock()

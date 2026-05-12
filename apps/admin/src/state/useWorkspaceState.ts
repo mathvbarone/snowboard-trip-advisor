@@ -432,7 +432,14 @@ async function flush(slug: ResortSlug): Promise<void> {
     store.inFlightToken = null
     store.abortController = null
     store.inFlightDraft = null
-    if (store.queued || store.state.rev !== inFlightRev) {
+    // PR 4.6c Codex inline review fold (P2, 2026-05-12): when
+    // __resetForTests aborted mid-flight and the rev had moved (or queued
+    // was true), the original code would call scheduleFlush(slug). That
+    // call's getOrCreateStore would create a FRESH store + new timer in
+    // the just-cleared map — autosave work leaking into the next test.
+    // Same guard as the AbortError catch above: only reschedule when the
+    // store still owns its slug in the map.
+    if (storesBySlug.get(slug) === store && (store.queued || store.state.rev !== inFlightRev)) {
       store.queued = false
       scheduleFlush(slug)
     }
