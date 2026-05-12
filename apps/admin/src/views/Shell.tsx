@@ -1,17 +1,15 @@
-import { Button, DropdownMenu, Sidebar } from '@snowboard-trip-advisor/design-system'
-import type { JSX, ReactNode } from 'react'
+import { Button, DropdownMenu, Sidebar, ToastProvider } from '@snowboard-trip-advisor/design-system'
+import { useState, type JSX, type ReactNode } from 'react'
 
-// Admin app shell (Epic 4 §5.1). The PR 4.1b placeholder set the
-// `banner` / `navigation` / `main` landmarks; this PR (4.1c) replaces the
-// placeholder header / nav contents with the real `<DropdownMenu>` and
-// `<Sidebar>` chrome. Landmarks themselves are unchanged so App.test.tsx
-// + tests/integration/apps/admin/shell.test.tsx continue to pass without
-// modification.
-//
-// Sidebar items + dropdown items below are static for now; PR 4.2's
-// router work wires `activeHref` from URL state, and the dropdown's
-// onSelect handlers route to the real Sources / Integrations / History
-// views as those land.
+import { PublishDialog } from './PublishDialog'
+
+// Admin app shell (Epic 4 §5.1). PR 4.5c adds the Publish header button +
+// ToastProvider wrapper + the conditionally-mounted PublishDialog. The
+// dialog is mounted only when `publishOpen` so each open re-runs
+// useHealth() on mount (Decision G1; round-3 + round-17 + round-19 folds
+// of the plan-PR loop). Mounting unconditionally would freeze the dialog's
+// health snapshot at app boot and let stale Dashboard health leak into the
+// dialog's pre-publish gate.
 
 const SIDEBAR_ITEMS = [
   { href: '/', label: 'Dashboard' },
@@ -24,22 +22,35 @@ export interface ShellProps {
 }
 
 export function Shell({ children }: ShellProps): JSX.Element {
+  const [publishOpen, setPublishOpen] = useState<boolean>(false)
   return (
-    <div className="app-shell">
-      <header role="banner" className="app-shell__header">
-        <span className="app-shell__brand">Admin</span>
-        <DropdownMenu
-          trigger={<Button>Account</Button>}
-          label="Account menu"
-          items={[
-            { label: 'Sources', onSelect: (): void => {} },
-            { label: 'Integrations', onSelect: (): void => {} },
-            { label: 'History', onSelect: (): void => {} },
-          ]}
-        />
-      </header>
-      <Sidebar items={SIDEBAR_ITEMS} />
-      <main>{children}</main>
-    </div>
+    <ToastProvider>
+      <div className="app-shell">
+        <header role="banner" className="app-shell__header">
+          <span className="app-shell__brand">Admin</span>
+          <Button
+            onClick={(): void => {
+              setPublishOpen(true)
+            }}
+          >
+            Publish
+          </Button>
+          <DropdownMenu
+            trigger={<Button>Account</Button>}
+            label="Account menu"
+            items={[
+              { label: 'Sources', onSelect: (): void => {} },
+              { label: 'Integrations', onSelect: (): void => {} },
+              { label: 'History', onSelect: (): void => {} },
+            ]}
+          />
+        </header>
+        <Sidebar items={SIDEBAR_ITEMS} />
+        <main>{children}</main>
+        {publishOpen && (
+          <PublishDialog open={publishOpen} onOpenChange={setPublishOpen} />
+        )}
+      </div>
+    </ToastProvider>
   )
 }

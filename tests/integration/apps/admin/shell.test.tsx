@@ -75,4 +75,14 @@ describe('admin Shell render integration (PR 4.1b §2.7 → PR 4.1c §3.6, spec 
     }
     expect(screen.queryByRole('menu')).toBeNull()
   })
+
+  it('Publish header button mounts the PublishDialog on click (PR 4.5c)', async (): Promise<void> => {
+    const user = userEvent.setup()
+    render(<App />)
+    expect(screen.queryByRole('dialog')).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Publish' }))
+    expect(
+      await screen.findByRole('dialog', { name: 'Publish' }),
+    ).toBeInTheDocument()
+  })
 })
