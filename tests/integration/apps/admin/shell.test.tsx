@@ -57,7 +57,7 @@ describe('admin Shell render integration (PR 4.1b §2.7 → PR 4.1c §3.6, spec 
     render(<App />)
     expect(screen.getByRole('link', { name: 'Dashboard' })).toHaveAttribute('href', '/')
     expect(screen.getByRole('link', { name: 'Resorts' })).toHaveAttribute('href', '/resorts')
-    expect(screen.getByRole('link', { name: 'Publishes' })).toHaveAttribute('href', '/publishes')
+    expect(screen.getByRole('link', { name: 'Publishes' })).toHaveAttribute('href', '/?route=publishes')
   })
 
   it('renders the Account dropdown with Sources / Integrations / History items (PR 4.1c)', async (): Promise<void> => {

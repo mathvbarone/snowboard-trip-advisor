@@ -11,10 +11,16 @@ import { PublishDialog } from './PublishDialog'
 // health snapshot at app boot and let stale Dashboard health leak into the
 // dialog's pre-publish gate.
 
+// The Publishes link uses the query-string form so urlState's parser
+// (?route=publishes branch) routes correctly. Dashboard / Resorts keep their
+// pathname-form hrefs — fixing the full Sidebar pathname-vs-query mismatch is
+// Tier 5 polish per the post-Tier-2 handoff and out of scope here. Only the
+// new Publishes link gets the in-scope fix since it is the route this PR
+// adds.
 const SIDEBAR_ITEMS = [
   { href: '/', label: 'Dashboard' },
   { href: '/resorts', label: 'Resorts' },
-  { href: '/publishes', label: 'Publishes' },
+  { href: '/?route=publishes', label: 'Publishes' },
 ] as const
 
 export interface ShellProps {

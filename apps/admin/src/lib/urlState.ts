@@ -3,11 +3,11 @@ import { z } from 'zod'
 
 // URL state for the admin app — source of truth for shareable route state.
 //
-// Route surface (this PR — 4.3, Tier 2):
+// Route surface:
 //   - 'dashboard' (PR 4.2)
-//   - 'resorts'   (this PR; supports country + hasFailures filters)
-//   - 'editor'    (typing-only this PR; render branch lands in PR 4.4b)
-// Tier 4 (PR 4.5b) extends with 'publishes'.
+//   - 'resorts'   (PR 4.3; supports country + hasFailures filters)
+//   - 'editor'    (PR 4.3 typing-only; render branch in PR 4.4b)
+//   - 'publishes' (PR 4.5d; supports page index, 0-default)
 //
 // Why ship 'editor' as typing-only now: row-click in the resorts table
 // (Task 2.4) calls setRoute({ route: 'editor', slug }) end-to-end and the
@@ -27,13 +27,28 @@ import { z } from 'zod'
 //   - 'editor' + missing/invalid slug → 'dashboard' (slug is required on
 //     the editor variant; partial editor state is not a valid shape)
 
-const ROUTE_VALUES = ['dashboard', 'resorts', 'editor'] as const
+const ROUTE_VALUES = ['dashboard', 'resorts', 'editor', 'publishes'] as const
 const RouteValue = z.enum(ROUTE_VALUES)
+
+// Single source of truth for the publishes-route page size. PublishHistory
+// imports this so the URL-contract bound check below (MAX_SAFE_PUBLISHES_PAGE)
+// stays in lockstep with the multiplier the consumer actually uses to derive
+// the API offset.
+export const PUBLISHES_PAGE_SIZE = 20
+
+// The page index is multiplied by PUBLISHES_PAGE_SIZE to derive the API
+// offset, and ListPublishesQuery's `z.number().int()` rejects unsafe integers.
+// Cap at the largest page whose derived offset stays inside the safe-integer
+// range so a crafted deep link can't force a load error in PublishHistory;
+// over-cap inputs drop to the canonical first-page form. Codex round-2 P2
+// PR #102.
+const MAX_SAFE_PUBLISHES_PAGE = Math.floor(Number.MAX_SAFE_INTEGER / PUBLISHES_PAGE_SIZE)
 
 export type Route =
   | { route: 'dashboard' }
   | { route: 'resorts'; country?: ISOCountryCode; hasFailures?: boolean }
   | { route: 'editor'; slug: ResortSlug }
+  | { route: 'publishes'; page?: number }
 
 export type RouteState = Route
 
@@ -50,6 +65,25 @@ export function parseURL(search: string): RouteState {
     const slugParsed = slug !== null ? ResortSlug.safeParse(slug) : null
     if (slugParsed?.success !== true) { return { route: 'dashboard' } }
     return { route: 'editor', slug: slugParsed.data }
+  }
+
+  if (route === 'publishes') {
+    // Drop-invalid pattern: only safe-integer natural numbers in the inclusive
+    // range [1, MAX_SAFE_PUBLISHES_PAGE] are preserved. page=0 (default),
+    // missing, negative, non-digit, and over-cap values all collapse to the
+    // canonical `{ route: 'publishes' }` shape per the "defaults are omitted"
+    // header comment. PublishHistory reads `route.page ?? 0` so this is
+    // functionally equivalent to explicit page=0. The bound matters because
+    // PublishHistory multiplies `page * PUBLISHES_PAGE_SIZE` to derive the API
+    // offset, and ListPublishesQuery's `z.number().int()` rejects unsafe
+    // integers — without the cap a crafted deep link would surface a load
+    // error instead of falling back to page 0.
+    const pageRaw = params.get('page')
+    const page = pageRaw !== null && /^\d+$/.test(pageRaw) ? Number(pageRaw) : undefined
+    if (page === undefined || page === 0 || page > MAX_SAFE_PUBLISHES_PAGE) {
+      return { route: 'publishes' }
+    }
+    return { route: 'publishes', page }
   }
 
   // route === 'resorts' — fields are conditionally included so the returned
@@ -81,6 +115,17 @@ export function serializeURL(state: RouteState): string {
     const params = new URLSearchParams()
     params.set('route', 'editor')
     params.set('slug', state.slug)
+    return `?${params.toString()}`
+  }
+  if (state.route === 'publishes') {
+    // Default-0 page omitted to match the header's "defaults are omitted"
+    // pattern. Round-trip-stable for the canonical `{ route: 'publishes' }`
+    // shape (parseURL collapses ?page=0 to the same omitted-key form).
+    const params = new URLSearchParams()
+    params.set('route', 'publishes')
+    if (state.page !== undefined && state.page > 0) {
+      params.set('page', String(state.page))
+    }
     return `?${params.toString()}`
   }
   // state.route === 'resorts'
