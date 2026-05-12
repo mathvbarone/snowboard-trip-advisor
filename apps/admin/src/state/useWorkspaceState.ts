@@ -54,13 +54,17 @@ interface SlugStore {
   canonical: ResortDetailResponse | null
   lastSentDraft: DraftShape | null
   inFlightToken: symbol | null
-  // PR 4.6c Decision K1: AbortController + inFlightDraft snapshot let
-  // clearFieldValue abort the in-flight PUT when the cleared path was
-  // carried in the in-flight body (path-gated abort). The fields are nulled
-  // in flush()'s finally so a stale controller can't be re-aborted after
-  // the round-trip completes.
+  // PR 4.6c Decision K1 (+ Codex round-2 P2 fold 2026-05-12): AbortController
+  // + the BODY of the in-flight PUT (not the whole draft) let clearFieldValue
+  // path-gate the abort only when the cleared path is in the wire-side body.
+  // The body is the DIFF emitted by buildBodyFromDraft — after a rev-moved
+  // success, the next PUT can carry a subset of the draft's paths (paths
+  // that match lastSent are excluded). Gating on the whole draft would
+  // false-positive on paths already-persisted by a prior PUT, aborting an
+  // unrelated legitimate save. Fields are nulled in flush()'s finally so a
+  // stale controller can't be re-aborted after the round-trip completes.
   abortController: AbortController | null
-  inFlightDraft: DraftShape | null
+  inFlightBody: ResortUpsertBody | null
   queued: boolean
   timer: ReturnType<typeof setTimeout> | null
   subscribers: Set<() => void>
@@ -81,7 +85,7 @@ function getOrCreateStore(slug: ResortSlug): SlugStore {
       lastSentDraft: null,
       inFlightToken: null,
       abortController: null,
-      inFlightDraft: null,
+      inFlightBody: null,
       queued: false,
       timer: null,
       subscribers: new Set(),
@@ -366,14 +370,16 @@ async function flush(slug: ResortSlug): Promise<void> {
   const inFlightRev = store.state.rev
   const inFlightDraft = store.state.draft
   store.inFlightToken = token
-  // PR 4.6c Decision K1: fresh AbortController + snapshot of the in-flight
-  // draft so clearFieldValue can path-gate its abort. Both fields are
-  // nulled in `finally` so a controller can't be aborted after the round-
-  // trip resolves (defensive against stale references the test harness or
-  // a future code path might hold).
+  // PR 4.6c Decision K1: fresh AbortController so clearFieldValue can
+  // path-gate its abort. The inFlightBody field is set BELOW (after the
+  // empty-diff short-circuit), once the actual PUT body is known — per
+  // Codex round-2 P2 fold, we gate on the body diff, not the whole draft
+  // (a rev-moved success means the next PUT may carry only a subset of
+  // the draft's paths; gating on the whole draft would abort unrelated
+  // legitimate saves). Both fields are nulled in `finally` so a stale
+  // controller can't be aborted after the round-trip resolves.
   const abortController = new AbortController()
   store.abortController = abortController
-  store.inFlightDraft = inFlightDraft
   patchState(store, (s) => ({ ...s, status: markStatuses(s.status, 'saving') }))
   try {
     const body = buildBodyFromDraft(inFlightDraft, store.lastSentDraft)
@@ -381,9 +387,11 @@ async function flush(slug: ResortSlug): Promise<void> {
       // Per Codex round-18 P2-25: empty-diff short-circuit. Workspace already
       // matches the current draft (user edit-then-reverted, or queued flush
       // saw no remaining changes). Mark statuses saved and exit; no PUT.
+      // inFlightBody stays null since no body is in flight.
       patchState(store, (s) => ({ ...s, status: markStatuses(s.status, 'saved') }))
       return
     }
+    store.inFlightBody = body
     const response = await apiClient.upsertResort(slug, body, { signal: abortController.signal })
     // No race-on-token check needed: the flush early-returns when a PUT is
     // already in-flight, so `store.inFlightToken` cannot change between the
@@ -431,7 +439,7 @@ async function flush(slug: ResortSlug): Promise<void> {
   } finally {
     store.inFlightToken = null
     store.abortController = null
-    store.inFlightDraft = null
+    store.inFlightBody = null
     // PR 4.6c Codex inline review fold (P2, 2026-05-12): when
     // __resetForTests aborted mid-flight and the rev had moved (or queued
     // was true), the original code would call scheduleFlush(slug). That
@@ -510,17 +518,24 @@ function isPendingStatus(s: WorkspaceStatus): boolean {
 // clears (e.g. `altitude_m.min`), the gate triggers when the PARENT
 // (`altitude_m`) is present in the in-flight side — the response would
 // otherwise re-prepopulate the parent and re-introduce the now-cleared min.
+//
+// Codex round-2 P2 fold (PR #105, 2026-05-12): the gate reads the in-flight
+// PUT BODY (the diff emitted by buildBodyFromDraft), not the whole draft.
+// After a rev-moved success the next PUT's body can be a subset of the
+// draft (paths matching lastSent are excluded); gating on the whole draft
+// would false-positive on paths already-persisted by a prior PUT, aborting
+// an unrelated legitimate save.
 export function clearFieldValue(slug: ResortSlug, path: MetricPath): void {
   const store = getOrCreateStore(slug)
   const side = sideFor(path)
   const dotIdx = path.indexOf('.')
   const parentPrefix = dotIdx === -1 ? null : `${path.slice(0, dotIdx)}.`
-  // Decision K1 path-gated abort — read inFlightDraft via the side root and
+  // Decision K1 path-gated abort — read inFlightBody via the side root and
   // walk for the cleared path (top-level or nested parent). When the
-  // controller has no in-flight PUT (`inFlightDraft === null`), the gate is
+  // controller has no in-flight PUT (`inFlightBody === null`), the gate is
   // a no-op; existing clear semantics run unchanged.
-  if (store.abortController !== null && store.inFlightDraft !== null) {
-    if (isPathInDraft(store.inFlightDraft, side, path)) {
+  if (store.abortController !== null && store.inFlightBody !== null) {
+    if (isPathInBody(store.inFlightBody, side, path)) {
       store.abortController.abort()
     }
   }
@@ -539,16 +554,21 @@ export function clearFieldValue(slug: ResortSlug, path: MetricPath): void {
 }
 
 // Decision K1 path-walker — returns true when the cleared path is present
-// in the in-flight side. Top-level paths (`slopes_km`) check direct
+// in the in-flight PUT body. Top-level paths (`slopes_km`) check direct
 // presence; 2-segment paths (`altitude_m.min`) check parent presence
 // (because the in-flight body carries the WHOLE parent — a shallow merge
 // on the server would re-introduce the cleared leaf).
-function isPathInDraft(draft: DraftShape, side: Side, path: MetricPath): boolean {
-  const sideRoot = side === 'resort' ? draft.resort : draft.live_signal
-  if (sideRoot === undefined) { return false }
+//
+// Reads from the BODY (the diff emitted by buildBodyFromDraft) per Codex
+// round-2 P2 fold — gating on the whole draft would false-positive on
+// paths already-persisted by a prior PUT (the rev-moved success path
+// updates lastSent so subsequent diffs exclude those paths from the body).
+function isPathInBody(body: ResortUpsertBody, side: Side, path: MetricPath): boolean {
+  const sideBody = side === 'resort' ? body.resort : body.live_signal
+  if (sideBody === undefined) { return false }
   const dotIdx = path.indexOf('.')
   const key = dotIdx === -1 ? path : path.slice(0, dotIdx)
-  return Object.prototype.hasOwnProperty.call(sideRoot, key)
+  return Object.prototype.hasOwnProperty.call(sideBody, key)
 }
 
 // Decision K1 (PR 4.6c): synchronous save-shortcut consumed by Shell's

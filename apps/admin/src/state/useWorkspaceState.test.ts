@@ -1250,6 +1250,58 @@ describe('useWorkspaceState — K1 in-flight-clear race fix + flushNow + abort g
     await drainMicrotasks()
   })
 
+  it('path-gated abort gates on the PUT body (diff), not the whole draft (Codex round-2 P2 fold): clearing a path that was already persisted in a prior PUT does NOT abort an unrelated in-flight diff', async (): Promise<void> => {
+    // Codex inline review round 2 (PR #105, 2026-05-12 14:59 UTC) flagged
+    // a real false-positive in the abort gate: `inFlightDraft` snapshots
+    // the WHOLE draft, but buildBodyFromDraft can send a smaller diff
+    // (e.g., after a rev-moved success the next PUT carries only the
+    // paths added mid-flight). Clearing a path that was committed by the
+    // PRIOR PUT (and is still in the draft but NOT in the current diff
+    // body) would otherwise satisfy the old whole-draft check and abort
+    // an unrelated legitimate save. Fix: gate on the BODY's keys.
+    prepopulateResortDetail(KOTELNICA, syntheticResponse('kotelnica-bialczanska'))
+    const handle = makeAbortableUpsertMock()
+
+    const { result } = renderHook(() => useWorkspaceState())
+
+    // Step 1: edit slopes_km → debounce → PUT 1 in flight (carries slopes_km).
+    act((): void => { result.current.setFieldValue('slopes_km', 150) })
+    await act(async (): Promise<void> => { await vi.advanceTimersByTimeAsync(600) })
+    expect(handle.capturedSignals.length).toBe(1)
+
+    // Step 2: edit lift_count while PUT 1 is in flight (rev moves; queued
+    // for the next flush). slopes_km is still in the draft (carried over
+    // by patchDraftLeaf's nextSideRoot spread).
+    act((): void => { result.current.setFieldValue('lift_count', 9) })
+
+    // Step 3: resolve PUT 1 (rev-moved branch sets lastSent = inFlightDraft
+    // which has slopes_km). The next flush's diff is lift_count-only.
+    await act(async (): Promise<void> => {
+      handle.resolveAt(0, syntheticResponse('kotelnica-bialczanska'))
+      for (let i = 0; i < 20; i += 1) { await Promise.resolve() }
+    })
+
+    // Step 4: drain the queued debounce → PUT 2 fires with the lift_count
+    // diff. slopes_km is NOT in PUT 2's body (it matches lastSent).
+    await act(async (): Promise<void> => { await vi.advanceTimersByTimeAsync(600) })
+    expect(handle.capturedSignals.length).toBe(2)
+    const put2Signal = handle.capturedSignals[1]
+    if (put2Signal === undefined) { throw new Error('PUT 2 signal not captured') }
+    expect(put2Signal.aborted).toBe(false)
+
+    // Step 5: user clears slopes_km. slopes_km is NOT in PUT 2's body, so
+    // the path-gated abort MUST NOT fire — PUT 2 is a legitimate lift_count
+    // save that has nothing to do with the cleared path.
+    act((): void => { result.current.clearFieldValue('slopes_km') })
+    expect(put2Signal.aborted).toBe(false)
+
+    // Cleanup: resolve PUT 2 so the test exits cleanly.
+    await act(async (): Promise<void> => {
+      handle.resolveAt(1, syntheticResponse('kotelnica-bialczanska'))
+      for (let i = 0; i < 20; i += 1) { await Promise.resolve() }
+    })
+  })
+
   it('__resetForTests during in-flight with queued follow-up: finally must NOT scheduleFlush against the cleared map (Codex P2 fold)', async (): Promise<void> => {
     // Codex inline review (PR #105, 2026-05-12): flush()'s finally re-
     // schedules when `store.queued || rev !== inFlightRev`. If the user
