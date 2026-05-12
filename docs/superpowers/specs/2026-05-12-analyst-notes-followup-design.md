@@ -259,8 +259,24 @@ const publishedPath = join(deps.workspaceRoot, 'data', 'published', 'current.v1.
 1. Validate body via `AnalystNoteUpsertBody.parse(body)`. Fail → **400 `invalid-request`** with Zod issues in `.details`.
 2. Derive `workspaceDir` + `publishedPath` per the snippet above; `targetPath = join(workspaceDir, ${slug}.json)`.
 3. Acquire `withSlugLock(slug, async () => { ... })`:
-   - `readWorkspaceFileForSlug(workspaceDir, slug)` — if missing, hydrate from `readPublishedDocOrNull(publishedPath)` (mirrors `resortUpsert.ts:117-127`). If neither → **404 `not-found`**.
-   - **Cold-start seed** (required): the hydrated `wf` MUST carry `notes: wf.notes ?? {}` before the patch step. Published docs do not carry `notes` per §2.6, so a workspace object hydrated solely from `readPublishedDocOrNull` has `notes === undefined`; the next bullet's `wf.notes[path] = …` would throw `TypeError: Cannot set properties of undefined`, breaking the first analyst-note PUT for every published-only resort. Equivalent alternative: round-trip the hydrated candidate through `WorkspaceFile.safeParse` so §2.3's `AnalystNotesMap.default({})` applies before the patch — either form must execute before the patch step.
+   - Read `workspaceFile = readWorkspaceFileForSlug(workspaceDir, slug)` and `publishedDoc = readPublishedDocOrNull(publishedPath)` (Promise.all). If neither carries the slug → **404 `not-found`**.
+   - **Build the candidate `wf: WorkspaceFile`.** This step has to produce a *fully-formed* `WorkspaceFile`-shaped object, not just a notes seed, because `readPublishedDocOrNull` returns a `PublishedDataset` (a per-slug array search; mirrors `resortUpsert.ts:117-125`), not a `WorkspaceFile`. Two cases:
+     - **Hot path** (`workspaceFile !== null`): `wf = workspaceFile`. The schema-level `AnalystNotesMap.default({})` (§2.3) guarantees `wf.notes` is always an object, even for Epic-4-era fixtures that pre-date `notes`.
+     - **Cold-start** (`workspaceFile === null && publishedDoc has slug`): assemble explicitly:
+       ```ts
+       const fromPublished = publishedDoc?.resorts.find((r): boolean => r.slug === slug)
+       if (fromPublished === undefined) throw new NotFoundError(...)
+       const wf: WorkspaceFile = WorkspaceFile.parse({
+         schema_version: 1,
+         slug,
+         resort: fromPublished,
+         live_signal: publishedDoc?.live_signals.find((ls): boolean => ls.resort_slug === slug) ?? null,
+         modified_at: ISODateTimeString.parse(new Date().toISOString()),
+         editor_modes: {},
+         // omit `notes` — let WorkspaceFile.parse apply AnalystNotesMap.default({})
+       })
+       ```
+       The `WorkspaceFile.parse` round-trip is the canonical way to apply §2.3's default. Without parsing through `WorkspaceFile`, the patch step's `wf.notes[path] = …` would throw `TypeError: Cannot set properties of undefined` for every published-only resort's first analyst-note PUT.
    - Apply patch:
      - `markdown === null` → `delete wf.notes[path]`
      - else → `wf.notes[path] = { schema_version: 1, markdown, created_at: existing?.created_at ?? now, updated_at: now }`
@@ -394,7 +410,7 @@ Extends `rehype-sanitize`'s `defaultSchema` (GFM-aware baseline) with:
 - **`clobberPrefix: 'analyst-'`** — prefixes user-supplied `id`/`name` attributes to prevent DOM-clobbering attacks (e.g., `<div id="defaultView">` becomes `<div id="analyst-defaultView">`).
 
 Inherited from `defaultSchema` (do NOT override):
-- Block: `<script>`, `<iframe>`, `<style>`, `<object>`, `<embed>`, `<form>`, `<noscript>`, `<template>` (note: `<input>` is *not* blocked outright — see the GFM task-list carve-out above; any input shape outside `type="checkbox"` + `disabled`/`checked` is still rejected by the value-restricted schema)
+- Block: `<script>`, `<iframe>`, `<style>`, `<object>`, `<embed>`, `<form>`, `<noscript>`, `<template>` (note: `<input>` is not on `defaultSchema`'s `tagNames` allowlist — `rehype-sanitize` is an allowlist model, not a denylist — so the GFM task-list carve-out above is an *additive widening* of the allowlist, not a relaxation of an outright block; value-restricted attributes ensure any input shape outside `type="checkbox"` + `disabled`/`checked` has its non-matching attributes stripped on output)
 - Block: `on*` event handlers, `srcset`, `crossorigin`, `referrerpolicy`
 - Block: `data:`, `javascript:`, `vbscript:` URLs
 
@@ -431,7 +447,7 @@ export function renderAnalystNoteMarkdown(markdown: string): string {
 ### 4.6 Test corpus
 
 - **OWASP XSS Filter Evasion Cheat Sheet** adopted wholesale: `<script>`, `<img onerror>`, `javascript:` href, `<iframe>`, `<style>`, `<details ontoggle>`, `<svg onload>`, `<math><annotation-xml encoding=text/html><script>` (mXSS classic), `<iframe srcdoc>`, `<noscript>` parser confusion, `<template>` content escapes, CRLF in attribute values, percent-encoded `javascript:` (`javascript&#58;`), reference-style link defs with `javascript:` URLs (`[x][y]\n\n[y]: javascript:...`).
-- **GFM correctness:** tables, task lists, autolinks, strikethrough, fenced code blocks with language hints. Task-list positive: `- [x] done` renders as `<li><input type="checkbox" disabled checked> done</li>`; task-list negative: `<input type="text" name="x">` → input element stripped (only the §4.4 narrow `checkbox` shape passes).
+- **GFM correctness:** tables, task lists, autolinks, strikethrough, fenced code blocks with language hints. Task-list positive: `- [x] done` renders as `<li><input type="checkbox" disabled checked> done</li>`; task-list negative: `<input type="text" name="x">` → `<input>` (bare void element — `rehype-sanitize`'s value-restricted attribute model strips the non-matching `type` and the non-allowlisted `name`, but the `<input>` tag itself remains on the §4.4 `tagNames` allowlist; a bare void element has no executable surface and renders as nothing, so the security boundary holds without an additional pass).
 - **c2-widening positives:** `<kbd>Cmd+K</kbd>`, `<details open>…</details>`, `<sub>2</sub>`, `<sup>3</sup>`, `<abbr title="…">…</abbr>`, `<figure>…<figcaption>…</figcaption></figure>`.
 - **DOM-clobbering:** `<h2 id="head">` → `<h2 id="analyst-head">`; `<a href="#section">` → `<a href="#analyst-section">` via `rehypeAnchorRewrite`. (Uses a heading because §4.4 narrows the `id` allowlist to `<h1>`–`<h6>` + `<figure>`; a `<div id=…>` would have its `id` stripped before the rewrite step ever runs.)
 - **Empty / non-string contract:** `renderAnalystNoteMarkdown('') === ''`; `renderAnalystNoteMarkdown(null as never)` throws `TypeError`.
@@ -441,7 +457,7 @@ Plus `markdown.fuzz.test.ts` (fast-check): for any random string input, **parses
 - No `<iframe>`, `<object>`, `<embed>`, `<form>`, `<style>`, `<noscript>`, `<template>` element exists.
 - No element has an `on*` event-handler attribute (regex `/^on[a-z]+$/i` on attribute names).
 - No `href` / `src` / `cite` / `xlink:href` attribute has a value that, after `decodeURIComponent` + lowercase + trim, starts with `javascript:`, `vbscript:`, or `data:` (`data:` is allowed only on `<img src>` per §4.4 if we explicitly widen the protocol list, which we currently do not).
-- No `<input>` element exists outside the §4.4 narrow GFM task-list carve-out (`type="checkbox"` + only `disabled`/`checked` attributes).
+- Every `<input>` element has only attributes from the §4.4 allowlist (`type`, `disabled`, `checked`); if `type` is set, its value is exactly `checkbox`. A bare `<input>` with no attributes vacuously satisfies the allowlist — it's the residue of sanitizing a hostile `<input type="text" name="x">`, has no executable surface, and is acceptable.
 
 A raw substring scan would reject safe output where the renderer legitimately emits `javascript:` as plain text in a paragraph or code block (e.g., a note saying `Don't paste \`javascript:\` URLs into href`), or where `onclick=` appears inside a `<code>` example — these are not security boundaries, the actual sanitizer pass already neutralized any executable form. The AST-level property tests the *real* invariant (no executable code path survives) rather than a proxy that drops valid documentation.
 
@@ -471,7 +487,7 @@ PR N.b1 authors `docs/adr/0013-markdown-sanitizer-choice.md`:
 - **`useAnalystNotes(slug): AnalystNotesGetResponse`** — Suspense-friendly read; module-level dual cache (`cachedPromises` + `cachedFulfilled`) per [ADR-0010](../../adr/0010-usedataset-rejected-promise-pinning.md); subscribed via `useSyncExternalStore`. Mirrors [`useResortDetail.ts`](../../../apps/admin/src/state/useResortDetail.ts) exactly. HMR reset in sibling `.hmr.ts`.
 - **`useAnalystNoteDraft(slug, path)`** — per-path write-side state. Mirrors [`useWorkspaceState`](../../../apps/admin/src/state/useWorkspaceState.ts)'s SlugStore pattern; module-level `Map<ResortSlug, SlugNotesStore>`. Per-path `NotesPathState` carries `{ draft, lastSent, status, debounceTimer, abortController, rev, lastFlightKind }` where:
   - `lastSent: string | null` — the markdown the server currently holds for this path, OR `null` iff no note exists for this path. This invariant is load-bearing for the §5.2 short-circuit + retry-routing.
-  - `lastFlightKind: 'upsert' | 'delete' | null` — what the most recently STARTED flight was; decouples retry-intent from `lastSent` so §5.2's failed-delete retry can be detected without violating the `lastSent` invariant. Set on flight start; reset to `null` on terminal success.
+  - `lastFlightKind: 'upsert' | 'delete' | null` — kind of the most recent flight OR the intent of the most recent `setDraft` / `deleteNote` if a flight has not yet started for that intent. Decouples retry-intent from `lastSent` so §5.2's failed-delete retry can be detected without violating the `lastSent` invariant. Set on `setDraft` (`'upsert'`), `deleteNote` entry (`'delete'`), and flush flight-start (idempotent re-affirm). Reset to `null` only on terminal success (step 2 success-else, step 3 success-else).
 
 ### 5.2 `useAnalystNoteDraft` lifecycle (per-path, mirrors K1 machinery)
 
@@ -481,7 +497,7 @@ The per-path SlugStore makes path-gating implicit — each path has its own `Not
 2. **Flush (debounce OR `flushNow()`):**
    - Cancel debounce timer.
    - **Failed-delete retry routing:** if `state.lastFlightKind === 'delete' && state.status === 'save-failed' && state.draft === ''`, the failed flight was a `deleteNote()` — the flush path always sends an upsert, so without this branch the retry would `PUT { markdown: '' }` and resurrect the note as an empty upsert (per §3.1 semantics). Instead, dispatch through `deleteNote()` (re-acquires a fresh controller, re-sends `PUT { markdown: null }`, follows step 3's terminal handlers). Return after dispatching. The `lastFlightKind` field decouples the retry intent from `lastSent` (so R7's invariant `lastSent === server's current markdown OR null iff no note` stays true even on failed-delete state); the `draft === ''` guard ensures that if the analyst typed after the failed delete, `setDraft` already flipped `lastFlightKind` back to `'upsert'` and the user's typed text retries through the upsert path naturally.
-   - Structural equality short-circuit: if `(state.draft === state.lastSent || (state.lastSent === null && state.draft === '')) && state.status !== 'save-failed'` → return. The first disjunct is the normal "no pending change" case; the second handles the post-delete baseline. After `deleteNote()` succeeds, step 3 leaves `lastSent === null` (note removed server-side, nothing to compare against) and `draft === ''` (textarea cleared). Without the disjunct, the *next* flush trigger — `flushNow()`, the 500 ms debounce, or `flushAllForSlug` via Shell mod+enter — would observe `'' !== null`, fall through, send `PUT { markdown: '' }`, and immediately recreate the just-deleted note as an empty upsert (per the spec §3.1 semantics `markdown: ''` is upsert-empty, NOT delete). The second-disjunct guard fires only when both halves match the deleted-baseline shape; the regular dirty-resurrection path (analyst types after delete → `draft = 'x'`, `lastSent = null`, `'x' !== null` → flush proceeds and PUTs `{ markdown: 'x' }`) is unaffected.
+   - Structural equality short-circuit: if `(state.draft === state.lastSent || (state.lastSent === null && state.draft === '')) && state.status !== 'save-failed'` → set `state.status = 'saved'` (the `dirty` flag set by step 1 was speculative; once we observe equality, there is nothing to save — leaving status at `'dirty'` would strand the UI's status indicator on a perpetual unsaved-changes signal — mirrors [`useWorkspaceState.ts:391`](../../../apps/admin/src/state/useWorkspaceState.ts)'s empty-diff short-circuit that calls `patchState(..., 'saved')` for the same reason), notify subscribers, and return. The first disjunct is the normal "no pending change" case; the second handles the post-delete baseline. After `deleteNote()` succeeds, step 3 leaves `lastSent === null` (note removed server-side, nothing to compare against) and `draft === ''` (textarea cleared). Without the disjunct, the *next* flush trigger — `flushNow()`, the 500 ms debounce, or `flushAllForSlug` via Shell mod+enter — would observe `'' !== null`, fall through, send `PUT { markdown: '' }`, and immediately recreate the just-deleted note as an empty upsert (per the spec §3.1 semantics `markdown: ''` is upsert-empty, NOT delete). The second-disjunct guard fires only when both halves match the deleted-baseline shape; the regular dirty-resurrection path (analyst types after delete → `draft = 'x'`, `lastSent = null`, `'x' !== null` → flush proceeds and PUTs `{ markdown: 'x' }`) is unaffected.
    - `state.abortController?.abort()` (fire-and-forget previous in-flight).
    - Capture `const flightRev = state.rev` (rev-counter race guard).
    - `const localController = (state.abortController = new AbortController()); state.status = 'saving'; state.lastFlightKind = 'upsert'`. The `localController` capture is the **controller-identity guard** — any subsequent cleanup that clears `state.abortController` MUST first verify `state.abortController === localController`. Without it, a `deleteNote` that runs between this flight's start and its terminal handler will install a fresh controller; clearing unconditionally would lose the ability to abort that newer request.
