@@ -154,6 +154,34 @@ describe('useShortcuts', (): void => {
     })
   })
 
+  describe('Codex round-2 P2 fold (PR #103): Escape and mod+enter cancel pending chord', (): void => {
+    // Same family as round-1 P3 (editable bypass) but for the always-fires
+    // shortcuts: when the user presses g and then immediately fires Escape
+    // (e.g., to dismiss a modal) or mod+enter (save), the pending chord must
+    // be cleared. Otherwise a follow-up r within the 1 s window mis-fires.
+    it('Escape cancels a pending g chord', async (): Promise<void> => {
+      const onGoResorts = vi.fn()
+      const onEscape = vi.fn()
+      renderHook(() => { useShortcuts({ onGoResorts, onEscape }); })
+      await user.keyboard('g')
+      await user.keyboard('{Escape}')
+      await user.keyboard('r')
+      expect(onEscape).toHaveBeenCalledOnce()
+      expect(onGoResorts).not.toHaveBeenCalled()
+    })
+
+    it('mod+enter cancels a pending g chord', async (): Promise<void> => {
+      const onGoResorts = vi.fn()
+      const onModEnter = vi.fn()
+      renderHook(() => { useShortcuts({ onGoResorts, onModEnter }); })
+      await user.keyboard('g')
+      await user.keyboard('{Meta>}{Enter}{/Meta}')
+      await user.keyboard('r')
+      expect(onModEnter).toHaveBeenCalledOnce()
+      expect(onGoResorts).not.toHaveBeenCalled()
+    })
+  })
+
   describe('Codex round-1 P3 fold (PR #103): editable bypass cancels pending chord', (): void => {
     // If the user starts a `g` chord outside an editor, then focuses an input
     // within the 1 s window and types, the editable-bypass path must clear

@@ -76,16 +76,24 @@ export function useShortcuts(handlers: ShortcutHandlers): void {
 
       // Escape: fire regardless of focus target. Radix Dialog handles modal
       // Escape internally — Shell's wired callback is a no-op in Phase 1
-      // (Tier 5 plan Decision G1).
+      // (Tier 5 plan Decision G1). Codex round-2 P2 (PR #103, 2026-05-12):
+      // clear any pending g chord first so a follow-up r/i within the 1 s
+      // window can't fire a stale chord (e.g., user presses g, then Escape
+      // to dismiss something, then r — chord must NOT navigate).
+      // clearPending() is idempotent (no-op when no chord is pending), so
+      // we call it unconditionally — keeps the branch surface minimal.
       if (event.key === 'Escape') {
+        clearPending()
         h.onEscape?.()
         return
       }
 
       // mod+enter (Meta+Enter on macOS, Ctrl+Enter on Linux/Windows): fire
       // regardless of focus target (spec §3.10 expects this from inside
-      // editor inputs).
+      // editor inputs). Codex round-2 P2 (same fold as Escape above): clear
+      // any pending g chord first; idempotent when nothing pending.
       if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+        clearPending()
         h.onModEnter?.()
         return
       }
@@ -95,9 +103,9 @@ export function useShortcuts(handlers: ShortcutHandlers): void {
       // clear the chord — otherwise a user who pressed `g` outside the editor,
       // then focused an input within the 1 s window and typed, would have a
       // stale chord re-fire if they later pressed `r`/`i` outside the input
-      // before the timer expired.
+      // before the timer expired. Same idempotent-clear pattern as Escape.
       if (isEditableTarget()) {
-        if (awaitingChord) { clearPending() }
+        clearPending()
         return
       }
 
