@@ -73,10 +73,32 @@ import { ISODateTimeString } from './branded'
  * Phase 2 may tighten via a path-superset enum (METRIC_FIELDS ∪ non-metric)
  * if a real need arises.
  */
-export const NotePath = z.string().regex(
-  /^[a-z_][a-z0-9_]*(\.[a-z_][a-z0-9_]*)*$/,
-  { message: 'note path must be dot-separated lowercase identifiers' },
-)
+// Prototype-pollution guard: `__proto__`, `constructor`, etc. match the lowercase
+// identifier regex above, so without this refine a client could send
+// `{"path": "__proto__"}` and the §3.2 PUT step would execute `wf.notes['__proto__'] = …`
+// on a plain object — that assignment hits the inherited prototype setter instead
+// of creating an own entry, losing the note and corrupting Object.prototype for
+// downstream code in the same process. Mirrors the existing hardening at
+// `apps/admin/server/dispatch.ts:173-179` (Object.create(null)) and `:193-196`
+// (Map instead of Record for the route table). Rejecting at the Zod boundary is
+// the simpler fix here because `notes` is persisted as JSON and a Record/object
+// representation is the natural storage shape.
+const FORBIDDEN_PATH_SEGMENTS: ReadonlySet<string> = new Set([
+  '__proto__', 'constructor', 'prototype',
+  'toString', 'hasOwnProperty', 'isPrototypeOf', 'propertyIsEnumerable',
+  'valueOf', '__defineGetter__', '__defineSetter__',
+  '__lookupGetter__', '__lookupSetter__',
+])
+
+export const NotePath = z.string()
+  .regex(
+    /^[a-z_][a-z0-9_]*(\.[a-z_][a-z0-9_]*)*$/,
+    { message: 'note path must be dot-separated lowercase identifiers' },
+  )
+  .refine(
+    (path): boolean => path.split('.').every((seg): boolean => !FORBIDDEN_PATH_SEGMENTS.has(seg)),
+    { message: 'note path contains a reserved Object.prototype segment (prototype-pollution guard)' },
+  )
 
 export const AnalystNote = z.object({
   schema_version: z.literal(1),
@@ -354,7 +376,7 @@ it('plugin order is the documented security invariant', () => {
 
 Extends `rehype-sanitize`'s `defaultSchema` (GFM-aware baseline) with:
 
-- **ADD tags:** `details`, `summary`, `kbd`, `sub`, `sup`, `mark`, `figure`, `figcaption`, `abbr`, `dfn`, `cite`, `q`, `time`, `div`, `span`.
+- **ADD tags:** `details`, `summary`, `kbd`, `sub`, `sup`, `mark`, `figure`, `figcaption`, `abbr`, `dfn`, `cite`, `q`, `time`, `div`, `span`, `input` (narrow allowlist — see "GFM task-list carve-out" below).
 - **ADD attributes:**
   - `<a>`: `href`, `title`, `rel`, `target` (with M2 auto-injection)
   - `<img>`: `src`, `alt`, `title`, `width`, `height`, `loading`
@@ -364,6 +386,7 @@ Extends `rehype-sanitize`'s `defaultSchema` (GFM-aware baseline) with:
   - `<details>`: `open`
   - `<th>`, `<td>`: + `colspan`, `rowspan`, `align`
   - `<abbr>`: `title`; `<q>`: `cite`; `<time>`: `datetime`
+  - `<input>`: **GFM task-list carve-out** — `rehype-sanitize` value-restricted form `[['type', 'checkbox']]` plus boolean attributes `disabled`, `checked`. This matches the *exact* shape `remark-gfm` emits for `- [x] / - [ ]` task list items (`<input type="checkbox" disabled [checked]>`); any other input type, name, value, or attribute is rejected by the value-restricted schema. Without this carve-out, §4.6's "tables, task lists, autolinks, strikethrough" promise silently regresses to "tables, autolinks, strikethrough" because `<input>` would inherit `defaultSchema`'s block. Test corpus row in §4.6 must include a task-list positive (`- [x] done` → renders with the disabled checkbox) and a task-list negative (`<input type="text">` → input element stripped).
 - **Protocols (explicit enumeration, NOT inheritance):**
   - `href`: `http`, `https`, `mailto`, `irc`, `ircs`, `tel`, `#`
   - `src`: `http`, `https`
@@ -371,7 +394,7 @@ Extends `rehype-sanitize`'s `defaultSchema` (GFM-aware baseline) with:
 - **`clobberPrefix: 'analyst-'`** — prefixes user-supplied `id`/`name` attributes to prevent DOM-clobbering attacks (e.g., `<div id="defaultView">` becomes `<div id="analyst-defaultView">`).
 
 Inherited from `defaultSchema` (do NOT override):
-- Block: `<script>`, `<iframe>`, `<style>`, `<object>`, `<embed>`, `<form>`, `<input>`, `<noscript>`, `<template>`
+- Block: `<script>`, `<iframe>`, `<style>`, `<object>`, `<embed>`, `<form>`, `<noscript>`, `<template>` (note: `<input>` is *not* blocked outright — see the GFM task-list carve-out above; any input shape outside `type="checkbox"` + `disabled`/`checked` is still rejected by the value-restricted schema)
 - Block: `on*` event handlers, `srcset`, `crossorigin`, `referrerpolicy`
 - Block: `data:`, `javascript:`, `vbscript:` URLs
 
@@ -408,7 +431,7 @@ export function renderAnalystNoteMarkdown(markdown: string): string {
 ### 4.6 Test corpus
 
 - **OWASP XSS Filter Evasion Cheat Sheet** adopted wholesale: `<script>`, `<img onerror>`, `javascript:` href, `<iframe>`, `<style>`, `<details ontoggle>`, `<svg onload>`, `<math><annotation-xml encoding=text/html><script>` (mXSS classic), `<iframe srcdoc>`, `<noscript>` parser confusion, `<template>` content escapes, CRLF in attribute values, percent-encoded `javascript:` (`javascript&#58;`), reference-style link defs with `javascript:` URLs (`[x][y]\n\n[y]: javascript:...`).
-- **GFM correctness:** tables, task lists, autolinks, strikethrough, fenced code blocks with language hints.
+- **GFM correctness:** tables, task lists, autolinks, strikethrough, fenced code blocks with language hints. Task-list positive: `- [x] done` renders as `<li><input type="checkbox" disabled checked> done</li>`; task-list negative: `<input type="text" name="x">` → input element stripped (only the §4.4 narrow `checkbox` shape passes).
 - **c2-widening positives:** `<kbd>Cmd+K</kbd>`, `<details open>…</details>`, `<sub>2</sub>`, `<sup>3</sup>`, `<abbr title="…">…</abbr>`, `<figure>…<figcaption>…</figcaption></figure>`.
 - **DOM-clobbering:** `<h2 id="head">` → `<h2 id="analyst-head">`; `<a href="#section">` → `<a href="#analyst-section">` via `rehypeAnchorRewrite`. (Uses a heading because §4.4 narrows the `id` allowlist to `<h1>`–`<h6>` + `<figure>`; a `<div id=…>` would have its `id` stripped before the rewrite step ever runs.)
 - **Empty / non-string contract:** `renderAnalystNoteMarkdown('') === ''`; `renderAnalystNoteMarkdown(null as never)` throws `TypeError`.
