@@ -532,14 +532,21 @@ export async function withSlugLock<T>(slug: ResortSlug, fn: () => Promise<T>): P
 The existing handler reads workspace + published OUTSIDE any lock at `resortUpsert.ts:105-158`. Retrofit moves those reads INSIDE the lock-wrapped function:
 
 ```ts
+// Path derivation stays at top of handler — unchanged from current
+// resortUpsert.ts:97-99 (two-arg signatures verified against
+// apps/admin/server/workspace.ts:42 + :109).
+const workspaceDir = join(deps.workspaceRoot, 'data', 'admin-workspace')
+const publishedPath = join(deps.workspaceRoot, 'data', 'published', 'current.v1.json')
+const targetPath = join(workspaceDir, `${slug}.json`)
+
 return withSlugLock(slug, async (): Promise<ResortUpsertResponse> => {
   // MOVED INSIDE the lock — was outside previously
   const [workspaceFile, publishedDoc] = await Promise.all([
-    readWorkspaceFileForSlug(slug),
-    readPublishedDocOrNull(slug),
+    readWorkspaceFileForSlug(workspaceDir, slug),
+    readPublishedDocOrNull(publishedPath),
   ])
   // ... existing merge logic ...
-  // ... atomicWriteWorkspaceFile ...
+  // ... atomicWriteWorkspaceFile(targetPath, JSON.stringify(parsed.data, null, 2)) ...
   // ... return response ...
 })
 ```
@@ -760,6 +767,12 @@ The amendment ships alongside the sanitizer implementation per AGENTS.md §95 do
 
 ## Appendix A — Reviewer-fold log
 
-This section will be populated as Codex / subagent rounds happen on each PR. Format mirrors the Tier-3 / Tier-4 / Tier-5 plan reviewer-fold logs.
+Format mirrors the Tier-3 / Tier-4 / Tier-5 plan reviewer-fold logs.
 
-(empty at spec write time)
+### Spec-document-reviewer rounds (during brainstorming)
+
+- **Round 1 (2026-05-12)** — 10 MUST-FIX + 11 SHOULD-FIX + 6 NIT folded into commit `272a067`. Highlights: ErrorCode enum value (`internal` not `internal-error`); `Buffer.byteLength` → `TextEncoder` for Node + browser compatibility; `readWorkspaceFileForSlug(workspaceDir, slug)` signature; `atomicWriteWorkspaceFile(targetPath, body)` signature; `Route.pathPattern` field name + RouteHandler wrapping; `packages/schema/package.json` exports map uses bare strings (`"./src/markdown.ts"`); Subagent Review triggers split mechanical-vs-discretionary per AGENTS.md §60 closed list; 9 PRs (not 8) after splitting N.c1 read+write; lifecycle typo fix (`state.draft = state.lastSent` no-op dropped); rev-counter race guard on upsert success branch (mirrors `useWorkspaceState.ts:369-371`); render-pipeline exception path; fs error path; parent-spec §3.9 amendment scoped to PR N.b1 to justify `dangerouslySetInnerHTML`.
+- **Round 2 (2026-05-12)** — 1 MUST-FIX + 1 SHOULD-FIX folded into commit `1518ea3`. M3: HandlerDeps is `{ workspaceRoot: string }` only (not `{ workspaceRoot, publishedPath }`); handlers derive both paths in-body per the two-line snippet at `resortDetail.ts:33-34` / `resortUpsert.ts:97-99`. S1: rev-counter guard extended to `deleteNote` success + error branches (was only on upsert in round 1).
+- **Round 3 (2026-05-12)** — 1 MUST-FIX + 1 NIT folded into a follow-up commit. M4: §5.6 `resortUpsert` retrofit snippet still showed single-arg `readWorkspaceFileForSlug(slug)` / `readPublishedDocOrNull(slug)` after round 2's §3.2 fix; updated to match the codebase + show the path-derivation lines above the lock-wrapped function. N1: this appendix backfilled (was placeholder).
+
+(Future Codex / subagent rounds during PR execution will append here as each PR ships.)
