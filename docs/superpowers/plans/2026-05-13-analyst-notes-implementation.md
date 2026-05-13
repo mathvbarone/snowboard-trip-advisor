@@ -850,16 +850,16 @@ Run whatever script regenerates it (likely `npm --workspace=packages/schema run 
 
 - [ ] **Step 9: Write failing test — `apiClient.getAnalystNotes` happy path**
 
+The existing `apps/admin/src/lib/apiClient.test.ts` uses MSW + `HttpResponse.json` (NOT raw `global.fetch` mocks); MSW lifecycle is wired in `apps/admin/src/test-setup.ts` (PR 4.1b §2.5). Per-test overrides via `server.use(...)`. The real `request()` reads `await res.text()` then `JSON.parse(text)` — raw `{ json: async () => ... }` mocks would fail with `res.text is not a function`. Match the surrounding pattern:
+
 ```ts
-// apps/admin/src/lib/apiClient.test.ts (extend)
-import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest'
-import { apiClient } from './apiClient'
+// apps/admin/src/lib/apiClient.test.ts (extend — server + http/HttpResponse already imported at top)
+import { http, HttpResponse } from 'msw'
+import { server } from '../mocks/server'
+import { apiClient, ApiClientError } from './apiClient'
 
-describe('apiClient.getAnalystNotes', () => {
-  beforeEach(() => { global.fetch = vi.fn() })
-  afterEach(() => { vi.restoreAllMocks() })
-
-  it('GETs /api/analyst-notes/:slug and returns parsed response', async () => {
+describe('apiClient.getAnalystNotes (PR N.b2)', () => {
+  it('GETs /api/analyst-notes/:slug and returns parsed response', async (): Promise<void> => {
     const payload = {
       slug: 'kotelnica-bialczanska',
       notes: {
@@ -870,26 +870,20 @@ describe('apiClient.getAnalystNotes', () => {
         },
       },
     }
-    ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: true,
-      json: async () => payload,
-    })
-    const result = await apiClient.getAnalystNotes('kotelnica-bialczanska')
-    expect(global.fetch).toHaveBeenCalledWith(
-      '/api/analyst-notes/kotelnica-bialczanska',
-      expect.objectContaining({ method: 'GET' }),
-    )
+    server.use(http.get('/api/analyst-notes/kotelnica-bialczanska', () => HttpResponse.json(payload)))
+    const result = await apiClient.getAnalystNotes('kotelnica-bialczanska' as never)
     expect(result).toStrictEqual(payload)
   })
 
-  it('threads AbortSignal', async () => {
+  it('threads AbortSignal through to the request', async (): Promise<void> => {
     const controller = new AbortController()
-    ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ slug: 'x', notes: {} }),
-    })
-    await apiClient.getAnalystNotes('x', { signal: controller.signal })
-    expect((global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].signal).toBe(controller.signal)
+    let receivedSignal: AbortSignal | null = null
+    server.use(http.get('/api/analyst-notes/x', ({ request }) => {
+      receivedSignal = request.signal
+      return HttpResponse.json({ slug: 'x', notes: {} })
+    }))
+    await apiClient.getAnalystNotes('x' as never, { signal: controller.signal })
+    expect(receivedSignal).not.toBeNull()
   })
 })
 ```
@@ -904,39 +898,46 @@ Verify the existing method shape (look at how options + signal threading + error
 
 - [ ] **Step 13: Write failing test — `upsertAnalystNote` upsert + delete + error**
 
+`ApiClientError` constructor is `new ApiClientError(status, envelope)` where `envelope: ErrorEnvelope` (imported from `@snowboard-trip-advisor/schema/api`) — check `apiClient.ts` for the exact `ErrorEnvelope` shape (it's wrapped: `{ error: { code, message, details? } }`, NOT a bare `{ code, message }`). Mirror the existing `upsertResort` error-envelope tests in `apiClient.test.ts`:
+
 ```ts
-describe('apiClient.upsertAnalystNote', () => {
-  it('PUTs JSON body with upsert payload', async () => {
+describe('apiClient.upsertAnalystNote (PR N.b2)', () => {
+  it('PUTs JSON body with upsert payload', async (): Promise<void> => {
+    let receivedMethod = ''
+    let receivedBody: unknown = null
     const response = {
       slug: 'x', path: 'slopes_km',
       note: { schema_version: 1, markdown: 'note', html: '<p>note</p>',
               created_at: '2026-05-13T00:00:00.000Z', updated_at: '2026-05-13T00:00:00.000Z' },
     }
-    ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: true, json: async () => response,
-    })
-    const result = await apiClient.upsertAnalystNote('x', { path: 'slopes_km', markdown: 'note' })
-    expect((global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].method).toBe('PUT')
-    expect(JSON.parse((global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body))
-      .toStrictEqual({ path: 'slopes_km', markdown: 'note' })
+    server.use(http.put('/api/analyst-notes/x', async ({ request }) => {
+      receivedMethod = request.method
+      receivedBody = await request.json()
+      return HttpResponse.json(response)
+    }))
+    const result = await apiClient.upsertAnalystNote('x' as never, { path: 'slopes_km' as never, markdown: 'note' })
+    expect(receivedMethod).toBe('PUT')
+    expect(receivedBody).toStrictEqual({ path: 'slopes_km', markdown: 'note' })
     expect(result).toStrictEqual(response)
   })
 
-  it('returns null note on delete confirmation', async () => {
-    ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: true, json: async () => ({ slug: 'x', path: 'slopes_km', note: null }),
-    })
-    const result = await apiClient.upsertAnalystNote('x', { path: 'slopes_km', markdown: null })
+  it('returns null note on delete confirmation', async (): Promise<void> => {
+    server.use(http.put('/api/analyst-notes/x', () =>
+      HttpResponse.json({ slug: 'x', path: 'slopes_km', note: null }),
+    ))
+    const result = await apiClient.upsertAnalystNote('x' as never, { path: 'slopes_km' as never, markdown: null })
     expect(result.note).toBeNull()
   })
 
-  it('rejects on non-ok with parsed error envelope', async () => {
-    ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: false, status: 400,
-      json: async () => ({ code: 'invalid-request', message: 'bad path' }),
-    })
-    await expect(apiClient.upsertAnalystNote('x', { path: 'Slopes', markdown: 'x' }))
-      .rejects.toThrow()
+  it('rejects with ApiClientError carrying parsed envelope on 400', async (): Promise<void> => {
+    server.use(http.put('/api/analyst-notes/x', () =>
+      HttpResponse.json(
+        { error: { code: 'invalid-request', message: 'bad path' } },
+        { status: 400 },
+      ),
+    ))
+    await expect(apiClient.upsertAnalystNote('x' as never, { path: 'Slopes' as never, markdown: 'x' }))
+      .rejects.toBeInstanceOf(ApiClientError)
   })
 })
 ```
@@ -1425,7 +1426,7 @@ Per §1.3. Local: `apps/admin` tests, `npm run test:integration`, `npm run qa`. 
 - **Create:** [apps/admin/src/state/useAnalystNotes.test.tsx](apps/admin/src/state/useAnalystNotes.test.tsx)
 - **Create:** [apps/admin/src/state/flushAll.ts](apps/admin/src/state/flushAll.ts)
 - **Create:** [apps/admin/src/state/flushAll.test.ts](apps/admin/src/state/flushAll.test.ts)
-- **Modify:** [vite.config.ts](vite.config.ts) — extend HMR coverage-exclusion glob to include `useAnalystNotes.hmr.ts`
+- **Modify:** [apps/admin/vite.config.ts](apps/admin/vite.config.ts) — extend HMR coverage-exclusion glob to include `useAnalystNotes.hmr.ts` (no root `vite.config.ts` exists; the admin SPA's config owns this exclusion)
 
 ### 8.2 Tasks
 
@@ -1482,7 +1483,7 @@ Public surface:
 
 - [ ] **Step 10: Implement `useAnalystNotes.hmr.ts` — resets all three module-level Maps on `import.meta.hot`**
 
-Mirror `useResortDetail.hmr.ts`. Add the file to `vite.config.ts`'s coverage exclusion glob (or wherever HMR siblings are excluded — check existing entries).
+Mirror `useResortDetail.hmr.ts`. Add the file to `apps/admin/vite.config.ts`'s coverage exclusion glob (or wherever HMR siblings are excluded — check existing entries; verify that the admin Vite config is where the exclusion lives, since each workspace has its own `vite.config.ts`).
 
 - [ ] **Step 11: Run `npm run qa` to confirm coverage gates still 100% × 4**
 
@@ -1555,7 +1556,7 @@ export async function flushAllForSlug(slug: ResortSlug): Promise<void> {
 git add apps/admin/src/state/useAnalystNotes.ts apps/admin/src/state/useAnalystNotes.hmr.ts \
         apps/admin/src/state/useAnalystNotes.test.tsx \
         apps/admin/src/state/flushAll.ts apps/admin/src/state/flushAll.test.ts \
-        vite.config.ts
+        apps/admin/vite.config.ts
 git commit -m "Analyst notes PR N.c1 — useAnalystNotes read hook + flushAll registry"
 ```
 
