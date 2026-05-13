@@ -146,6 +146,7 @@ Per ai-clean-code-adherence §5: every new file declares imports, public surface
 | `packages/schema/src/workspaceFile.ts` | N.a | Add `notes: AnalystNotesMap.default({})` to the object schema. Existing `.loose()` + `superRefine` unchanged. |
 | `packages/schema/src/index.ts` (barrel) | N.a | Re-export `AnalystNote`, `NotePath`, `AnalystNotesMap` types. **Do NOT** re-export from `./markdown` (that lives behind the `./markdown` sub-export per spec §4.2). |
 | `packages/schema/package.json` | N.b1 | Add `"./markdown": "./src/markdown.ts"` to `exports` map (bare-string form per existing `./node` / `./api` pattern). Add `unified`, `remark-*`, `rehype-*`, `unist-util-visit` as dependencies (NOT devDependencies — runtime use). Add `fast-check` as devDependency. |
+| `package-lock.json` (root) | N.b1 | Auto-updated by `npm --workspace=packages/schema install ...` in Step 1. **MUST be staged** in the commit — CI runs `npm ci` (`.github/workflows/quality-gate.yml:26,111`) which fails on manifest/lockfile drift. |
 | `packages/schema/src/exports-map.test.ts` | N.b1 | Extend snapshot to cover the new `./markdown` entry; assert bare-string shape. |
 | `packages/schema/api/index.ts` (barrel) | N.b2 | Re-export `AnalystNotesGetResponse`, `AnalystNoteUpsertBody`, `AnalystNoteUpsertResponse` and inferred types. |
 | Contract snapshot (`packages/schema/api/__snapshots__/*` or similar) | N.b2 | Regen via `npm run` snapshot command (verify path during execution). |
@@ -381,6 +382,7 @@ Per §1.3. Local test plan: `npm --workspace=packages/schema run test`, `npm run
 - **Create:** [packages/schema/src/markdown.fuzz.test.ts](packages/schema/src/markdown.fuzz.test.ts)
 - **Create:** [docs/adr/0013-markdown-sanitizer-choice.md](docs/adr/0013-markdown-sanitizer-choice.md)
 - **Modify:** [packages/schema/package.json](packages/schema/package.json) — exports map + deps
+- **Modify:** [package-lock.json](package-lock.json) — auto-updated by Step 1's `npm install`; MUST be staged (CI uses `npm ci`)
 - **Modify:** [packages/schema/src/exports-map.test.ts](packages/schema/src/exports-map.test.ts) — pin new entry
 - **Modify:** [docs/superpowers/specs/2026-04-22-product-pivot-design.md](docs/superpowers/specs/2026-04-22-product-pivot-design.md) — §3.9 amendment
 
@@ -396,7 +398,7 @@ npm --workspace=packages/schema install \
 npm --workspace=packages/schema install --save-dev fast-check parse5
 ```
 
-Verify exact versions land in `packages/schema/package.json`. Pin to exact versions (no `^`) for the security-boundary deps — spec §4.7.
+Verify exact versions land in `packages/schema/package.json`. Pin to exact versions (no `^`) for the security-boundary deps — spec §4.7. **The root `package-lock.json` is auto-updated by these workspace installs and MUST be staged in Step 28's commit** — CI runs `npm ci` (`.github/workflows/quality-gate.yml`), which fails on manifest/lockfile drift before tests run.
 
 - [ ] **Step 2: Write failing test — plugin-order pin**
 
@@ -730,11 +732,14 @@ npm run qa
 
 ```bash
 git add packages/schema/src/markdown*.ts packages/schema/src/markdownSanitizeSchema.ts \
-        packages/schema/package.json packages/schema/src/exports-map.test.ts \
+        packages/schema/package.json package-lock.json \
+        packages/schema/src/exports-map.test.ts \
         docs/adr/0013-markdown-sanitizer-choice.md \
         docs/superpowers/specs/2026-04-22-product-pivot-design.md
 git commit -m "Analyst notes PR N.b1 — sanitizer pipeline + ADR-0013 + parent-spec amendment"
 ```
+
+Verify lockfile-manifest sync before pushing: `git diff --staged package-lock.json | head -50` should show the new dependency entries matching `packages/schema/package.json`. Run `npm ci` locally as a sanity check (per [quality-gate.yml:26](.github/workflows/quality-gate.yml:26)) — it must complete without re-resolving.
 
 ### 4.3 Subagent Review
 
