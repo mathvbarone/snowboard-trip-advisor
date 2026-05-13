@@ -146,7 +146,7 @@ Per ai-clean-code-adherence §5: every new file declares imports, public surface
 | `packages/schema/src/workspaceFile.ts` | N.a | Add `notes: AnalystNotesMap.default({})` to the object schema. Existing `.loose()` + `superRefine` unchanged. |
 | `packages/schema/src/index.ts` (barrel) | N.a | Re-export `AnalystNote`, `NotePath`, `AnalystNotesMap` types. **Do NOT** re-export from `./markdown` (that lives behind the `./markdown` sub-export per spec §4.2). |
 | `packages/schema/package.json` | N.b1 | Add `"./markdown": "./src/markdown.ts"` to `exports` map (bare-string form per existing `./node` / `./api` pattern). Add `unified`, `remark-*`, `rehype-*`, `unist-util-visit` as dependencies (NOT devDependencies — runtime use). Add `fast-check` as devDependency. |
-| `packages/schema/exports-map.test.ts` | N.b1 | Extend snapshot to cover the new `./markdown` entry; assert bare-string shape. |
+| `packages/schema/src/exports-map.test.ts` | N.b1 | Extend snapshot to cover the new `./markdown` entry; assert bare-string shape. |
 | `packages/schema/api/index.ts` (barrel) | N.b2 | Re-export `AnalystNotesGetResponse`, `AnalystNoteUpsertBody`, `AnalystNoteUpsertResponse` and inferred types. |
 | Contract snapshot (`packages/schema/api/__snapshots__/*` or similar) | N.b2 | Regen via `npm run` snapshot command (verify path during execution). |
 | `apps/admin/src/lib/apiClient.ts` | N.b2 | Add `getAnalystNotes(slug, {signal})` + `upsertAnalystNote(slug, body, {signal})`. Mirror existing `getResortDetail` / `upsertResort` shapes. |
@@ -381,7 +381,7 @@ Per §1.3. Local test plan: `npm --workspace=packages/schema run test`, `npm run
 - **Create:** [packages/schema/src/markdown.fuzz.test.ts](packages/schema/src/markdown.fuzz.test.ts)
 - **Create:** [docs/adr/0013-markdown-sanitizer-choice.md](docs/adr/0013-markdown-sanitizer-choice.md)
 - **Modify:** [packages/schema/package.json](packages/schema/package.json) — exports map + deps
-- **Modify:** [packages/schema/exports-map.test.ts](packages/schema/exports-map.test.ts) — pin new entry
+- **Modify:** [packages/schema/src/exports-map.test.ts](packages/schema/src/exports-map.test.ts) — pin new entry
 - **Modify:** [docs/superpowers/specs/2026-04-22-product-pivot-design.md](docs/superpowers/specs/2026-04-22-product-pivot-design.md) — §3.9 amendment
 
 ### 4.2 Tasks
@@ -641,10 +641,18 @@ describe('renderAnalystNoteMarkdown fuzz', () => {
           // No javascript:/vbscript:/data: in href/src/cite
           for (const attr of el.attrs) {
             if (['href', 'src', 'cite', 'xlink:href'].includes(attr.name)) {
-              const decoded = decodeURIComponent(attr.value).toLowerCase().trim()
-              expect(decoded.startsWith('javascript:')).toBe(false)
-              expect(decoded.startsWith('vbscript:')).toBe(false)
-              expect(decoded.startsWith('data:')).toBe(false)
+              // Fuzz inputs can produce malformed percent-escapes (e.g. an
+              // otherwise-safe `https://example.com/%` survives sanitization).
+              // decodeURIComponent throws URIError on those — don't false-fail.
+              // The dangerous schemes don't contain `%`, so the raw-value
+              // check below catches them regardless of decode failure.
+              const raw = attr.value.toLowerCase().trim()
+              let decoded = raw
+              try { decoded = decodeURIComponent(attr.value).toLowerCase().trim() } catch { /* malformed escape — fall back to raw */ }
+              for (const scheme of ['javascript:', 'vbscript:', 'data:']) {
+                expect(raw.startsWith(scheme)).toBe(false)
+                expect(decoded.startsWith(scheme)).toBe(false)
+              }
             }
           }
 
@@ -681,7 +689,7 @@ npm --workspace=packages/schema run test -- markdown.fuzz.test.ts
 
 Bare-string shape (NOT conditional-object). Per spec §4.2.
 
-- [ ] **Step 22: Extend `exports-map.test.ts` to pin the new entry**
+- [ ] **Step 22: Extend `packages/schema/src/exports-map.test.ts` to pin the new entry**
 
 ```ts
 it('exposes ./markdown as ./src/markdown.ts (bare-string form)', () => {
@@ -690,7 +698,7 @@ it('exposes ./markdown as ./src/markdown.ts (bare-string form)', () => {
 })
 ```
 
-Verify file path of existing `exports-map.test.ts` first.
+(File is at `packages/schema/src/exports-map.test.ts`, not the package root — verified.)
 
 - [ ] **Step 23: Run exports-map test, verify pass**
 
@@ -722,7 +730,7 @@ npm run qa
 
 ```bash
 git add packages/schema/src/markdown*.ts packages/schema/src/markdownSanitizeSchema.ts \
-        packages/schema/package.json packages/schema/exports-map.test.ts \
+        packages/schema/package.json packages/schema/src/exports-map.test.ts \
         docs/adr/0013-markdown-sanitizer-choice.md \
         docs/superpowers/specs/2026-04-22-product-pivot-design.md
 git commit -m "Analyst notes PR N.b1 — sanitizer pipeline + ADR-0013 + parent-spec amendment"
