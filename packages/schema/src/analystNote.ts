@@ -52,7 +52,32 @@ export const AnalystNote = z.object({
   updated_at: ISODateTimeString,
 })
 
-export const AnalystNotesMap = z.record(NotePath, AnalystNote).default({})
+// Pre-record guard: JSON.parse('{"__proto__":…}') returns an object where
+// `__proto__` is an OWN property (ECMA-262 §24.5.1.1). z.record iterates
+// own keys but the engine intercepts the `__proto__` key before it reaches
+// the per-key NotePath validator — the forbidden-segment refine never fires,
+// safeParse returns success:true with an empty {} (data loss), and the
+// caller sees a false "accepted" rather than the expected rejection. Adding
+// a z.preprocess step that inspects Object.keys() BEFORE z.record runs
+// catches the own `__proto__` case and rejects it with a clear error.
+export const AnalystNotesMap = z.preprocess(
+  (input, ctx): unknown => {
+    if (input !== null && typeof input === 'object' && !Array.isArray(input)) {
+      for (const key of Object.keys(input)) {
+        if (FORBIDDEN_PATH_SEGMENTS.has(key)) {
+          ctx.addIssue({
+            code: 'custom',
+            path: [key],
+            message: 'note key contains a reserved Object.prototype segment (prototype-pollution guard)',
+          })
+          return z.NEVER
+        }
+      }
+    }
+    return input
+  },
+  z.record(NotePath, AnalystNote),
+).default({})
 
 export type AnalystNote = z.infer<typeof AnalystNote>
 export type AnalystNotesMap = z.infer<typeof AnalystNotesMap>

@@ -53,4 +53,23 @@ describe('AnalystNotesMap', () => {
   it('defaults to empty object when key missing', () => {
     expect(AnalystNotesMap.parse(undefined)).toStrictEqual({})
   })
+
+  it('rejects own __proto__ key from JSON.parse (prototype-pollution guard, pre-record check)', () => {
+    // JSON.parse returns an object where `__proto__` is an OWN property per
+    // ECMA-262; z.record silently drops it and returns success:{} instead of
+    // rejecting — this test pins the fix that adds a pre-validation step.
+    const malicious: unknown = JSON.parse('{"__proto__":{"schema_version":1,"markdown":"x","created_at":"2026-05-14T00:00:00.000Z","updated_at":"2026-05-14T00:00:00.000Z"}}')
+    expect(AnalystNotesMap.safeParse(malicious).success).toBe(false)
+  })
+
+  it('rejects own constructor key from JSON.parse', () => {
+    const malicious: unknown = JSON.parse('{"constructor":{"schema_version":1,"markdown":"x","created_at":"2026-05-14T00:00:00.000Z","updated_at":"2026-05-14T00:00:00.000Z"}}')
+    expect(AnalystNotesMap.safeParse(malicious).success).toBe(false)
+  })
+
+  it('rejects array input (passes through preprocess guard; z.record rejects non-object)', () => {
+    // Covers the Array.isArray branch of the preprocess guard — arrays bypass
+    // the key-scan and fall through to z.record which rejects them.
+    expect(AnalystNotesMap.safeParse([]).success).toBe(false)
+  })
 })
