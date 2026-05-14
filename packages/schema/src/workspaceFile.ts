@@ -1,5 +1,6 @@
 import { z } from 'zod'
 
+import { AnalystNotesMap } from './analystNote'
 import { ISODateTimeString, ResortSlug } from './branded'
 import { ResortLiveSignal } from './liveSignal'
 import { METRIC_FIELDS } from './metricFields'
@@ -14,6 +15,7 @@ export const WorkspaceFile = z.object({
   editor_modes: z
     .partialRecord(z.enum(METRIC_FIELDS), z.enum(['manual', 'auto']))
     .default({}),
+  notes: AnalystNotesMap,
 }).loose().superRefine((wf, ctx): void => {
   const ghosts = Object.keys(wf.editor_modes).filter(
     (path): boolean => !(path.length > 0 && path in wf.resort.field_sources),

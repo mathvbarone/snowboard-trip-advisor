@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+
 import { describe, expect, it } from 'vitest'
 
 import { Resort } from './resort'
@@ -175,7 +178,7 @@ describe('WorkspaceFile (PR 4.1a, spec §10.2)', (): void => {
     })
   })
 
-  it('passthrough preserves unknown top-level keys (forward-compat for analyst-notes)', (): void => {
+  it('passthrough preserves unknown top-level keys via .loose()', (): void => {
     const r = baseResort()
     const input = {
       schema_version: 1,
@@ -183,9 +186,18 @@ describe('WorkspaceFile (PR 4.1a, spec §10.2)', (): void => {
       resort: r,
       live_signal: null,
       modified_at: OBS_AT,
-      notes: { snow_depth_cm: { md: 'note' } },
+      _future_key: 'some-future-value',
     }
-    const wf = WorkspaceFile.parse(input) as { notes?: unknown }
-    expect(wf.notes).toEqual(input.notes)
+    const wf = WorkspaceFile.parse(input) as { _future_key?: unknown }
+    expect(wf._future_key).toEqual('some-future-value')
   })
+})
+
+it('parses Epic-4-era workspace fixtures without notes; notes defaults to empty map', () => {
+  const epicFourFixture = JSON.parse(readFileSync(
+    fileURLToPath(new URL('../../../tests/fixtures/admin-workspace/kotelnica-bialczanska.json', import.meta.url)),
+    'utf-8',
+  )) as unknown
+  const wf = WorkspaceFile.parse(epicFourFixture)
+  expect(wf.notes).toStrictEqual({})
 })
