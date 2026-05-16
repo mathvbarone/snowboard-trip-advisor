@@ -54,6 +54,40 @@ const headingIdAttributes: SchemaAttributes = Object.fromEntries(
   HEADING_TAGS.map((tag) => [tag, ['id']]),
 )
 
+// GFM footnote carve-out (Codex P2 round-2). `remark-gfm` renders
+// `See[^1]` as a `<sup><a href="#user-content-fn-1"
+// id="user-content-fnref-1" data-footnote-ref aria-describedby=…>` ref
+// link plus a `<section data-footnotes class="footnotes"><ol>
+// <li id="user-content-fn-1"> … <a href="#user-content-fnref-1"
+// data-footnote-backref aria-label=…>↩</a></li></ol></section>` body.
+// Two id locations carry the nav targets: the ref `<a id=…>` (backref
+// target) and the body `<li id=…>` (ref target). §4.4 narrowed the
+// universal `id` allowlist to headings + <figure> (above), which strips
+// BOTH — and the per-tag `a` override below strips the footnote-only
+// attributes — leaving the generated `href="#…"` anchors dangling.
+//
+// Re-grant `id` on `<li>` and the footnote-specific attributes on `<a>`
+// (`id` for the backref target, plus the `data-footnote-*` markers and
+// the aria hooks GFM emits — these mirror `defaultSchema.attributes.a`).
+// CLOBBER SAFETY: `id` survivors are still rewritten by
+// `clobberPrefix='analyst-'` (`clobber` includes `id`/`name`/aria refs),
+// so `user-content-fn-1` → `analyst-user-content-fn-1`; the matching
+// `href="#…"` fragments are independently prefixed to the SAME value by
+// `rehypeAnchorRewrite` (markdown.ts) — one consistent prefixing each,
+// no double-prefix (rehypeAnchorRewrite is idempotent and `href` is NOT
+// in `clobber`). DOM-clobbering defense is unchanged: every surviving
+// `id`/`name` still carries the `analyst-` prefix. `<li>` only gains
+// `id` (no URL-bearing attribute); the `<a>` grant adds no new protocol
+// surface (`href` already governed by the explicit `protocols` map).
+const footnoteRefAttributes: NonNullable<SchemaAttributes['a']> = [
+  'id',
+  'dataFootnoteRef',
+  'dataFootnoteBackref',
+  'ariaDescribedBy',
+  'ariaLabel',
+  ['className', 'data-footnote-backref'],
+]
+
 // `defaultSchema.tagNames` inherits `picture` + `source`, and
 // `defaultSchema.attributes.source = ['srcSet']`. §4.4 allows only
 // `<img>` (src/alt/title/width/height/loading) — `<picture>`/`<source>`
@@ -86,7 +120,11 @@ const attributes: SchemaAttributes = {
   source: [],
   ...headingIdAttributes,
   figure: ['id'],
-  a: ['href', 'title', 'rel', 'target'],
+  // GFM footnote body item carries the ref-link's `href` target as its
+  // `id` (clobber-prefixed — see footnoteRefAttributes note). No other
+  // attribute is granted on <li>.
+  li: ['id'],
+  a: ['href', 'title', 'rel', 'target', ...footnoteRefAttributes],
   img: ['src', 'alt', 'title', 'width', 'height', 'loading'],
   code: [['className', /^language-[\w-]+$/]],
   pre: [['className', /^language-[\w-]+$/]],

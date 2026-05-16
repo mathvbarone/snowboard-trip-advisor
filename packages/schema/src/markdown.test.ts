@@ -141,6 +141,104 @@ describe('inherited srcSet vector (Codex P2 regression)', () => {
   })
 })
 
+/**
+ * GFM footnote-navigation end-to-end (Codex P2 round-2, PR N.b1 fold).
+ *
+ * `remark-gfm` emits a `<sup><a href="#user-content-fn-1"
+ * id="user-content-fnref-1" data-footnote-ref>` ref link and a
+ * `<section class="footnotes"><ol><li id="user-content-fn-1"> …
+ * <a href="#user-content-fnref-1" data-footnote-backref>↩</a></li></ol>
+ * </section>` body. The analyst schema strips the universal `id` grant
+ * (re-granted only to headings + <figure>) and overrides `a` to
+ * `['href','title','rel','target']` — so both footnote `id`s and the
+ * footnote-specific `a` attributes were removed, leaving the ref/backref
+ * `<a href="#…">` links pointing at ids the sanitizer had stripped
+ * (broken nav). The fix re-grants the GFM footnote id locations +
+ * attributes; `clobberPrefix='analyst-'` rewrites surviving `id`s and
+ * `rehypeAnchorRewrite` rewrites the matching `#…` fragments to the
+ * SAME prefix, so the end-to-end href↔id mapping must hold.
+ *
+ * AST-level, consistent with the OWASP corpus (spec §4.6).
+ */
+describe('GFM footnote navigation (Codex P2 round-2)', () => {
+  function idSet(els: P5Element[]): Set<string> {
+    const ids = new Set<string>()
+    for (const el of els) {
+      const idAttr = el.attrs.find((a) => a.name === 'id')
+      if (idAttr) {
+        ids.add(idAttr.value)
+      }
+    }
+    return ids
+  }
+
+  function internalHrefs(els: P5Element[]): string[] {
+    const out: string[] = []
+    for (const el of els) {
+      if (el.tagName !== 'a') {
+        continue
+      }
+      const href = el.attrs.find((a) => a.name === 'href')?.value
+      if (href && href.startsWith('#')) {
+        out.push(href.slice(1))
+      }
+    }
+    return out
+  }
+
+  it('renders a footnote ref link and a backref link', () => {
+    const out = html('See note[^1].\n\n[^1]: The footnote body.')
+    const els = elements(out)
+    // Ref link lives inside the <sup>.
+    const sup = els.find((el) => el.tagName === 'sup')
+    expect(sup).toBeDefined()
+    // Backref link carries the GFM data-footnote-backref marker.
+    const backref = els.find(
+      (el) =>
+        el.tagName === 'a' &&
+        el.attrs.some((a) => a.name === 'data-footnote-backref'),
+    )
+    expect(backref).toBeDefined()
+  })
+
+  it('preserves the footnote container <section>', () => {
+    const out = html('See note[^1].\n\n[^1]: The footnote body.')
+    const els = elements(out)
+    const section = els.find(
+      (el) =>
+        el.tagName === 'section' &&
+        el.attrs.some((a) => a.name === 'data-footnotes'),
+    )
+    expect(section).toBeDefined()
+  })
+
+  it('resolves every footnote anchor end-to-end (href↔id match)', () => {
+    const out = html('See note[^1] and another[^2].\n\n[^1]: First body.\n\n[^2]: Second body.')
+    const els = elements(out)
+    const ids = idSet(els)
+    const hrefs = internalHrefs(els)
+    // There must be footnote nav links at all (4: 2 refs + 2 backrefs).
+    expect(hrefs.length).toBe(4)
+    // EVERY internal footnote anchor must resolve to a real element id —
+    // this is the end-to-end nav invariant, not merely "an id exists".
+    for (const frag of hrefs) {
+      expect(ids.has(frag)).toBe(true)
+    }
+  })
+
+  it('clobber-prefixes the footnote ids (DOM-clobber safe)', () => {
+    const out = html('See note[^1].\n\n[^1]: The footnote body.')
+    const els = elements(out)
+    const ids = [...idSet(els)]
+    const footnoteIds = ids.filter((i) => i.includes('user-content-fn'))
+    expect(footnoteIds.length).toBeGreaterThan(0)
+    // No surviving footnote id may be un-prefixed (clobber safety).
+    for (const id of footnoteIds) {
+      expect(id.startsWith('analyst-')).toBe(true)
+    }
+  })
+})
+
 describe('GFM', () => {
   it('renders tables', () => {
     const out = html('| a | b |\n|---|---|\n| 1 | 2 |')
