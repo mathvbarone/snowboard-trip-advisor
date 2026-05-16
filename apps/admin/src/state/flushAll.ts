@@ -43,12 +43,18 @@ export function registerSlugFlusher(
  * Resolves when all flushers have settled. Rejects if any flusher rejects
  * (spec §5.4 — rejection-propagation; caller wraps in try/catch).
  *
+ * Each flusher is scheduled via `Promise.resolve().then(fn)` so that a
+ * synchronous throw inside `fn` becomes a per-flusher rejected promise rather
+ * than aborting the `.map` callback. This guarantees ALL registered flushers
+ * are invoked even when an earlier one throws synchronously, while still
+ * propagating rejections through `Promise.all` (no rejections are swallowed).
+ *
  * Returns `undefined` immediately when no flushers are registered for the slug.
  */
 export async function flushAllForSlug(slug: ResortSlug): Promise<void> {
   const set = flushers.get(slug)
   if (set === undefined) { return }
-  await Promise.all([...set].map((fn) => Promise.resolve(fn())))
+  await Promise.all([...set].map((fn) => Promise.resolve().then(fn)))
 }
 
 /** Test-only: clear all module-level state between tests. */

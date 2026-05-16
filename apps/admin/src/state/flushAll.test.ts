@@ -87,6 +87,28 @@ describe('flushAll registry (PR N.c1 — spec §5.4)', (): void => {
     expect(fn).not.toHaveBeenCalled()
   })
 
+  it('sync-throwing flusher does NOT abort sibling flushers (Codex P2 #117)', async (): Promise<void> => {
+    // Regression: with `Promise.resolve(fn())` the sync throw aborts `.map` so
+    // the second flusher is never invoked. With `Promise.resolve().then(fn)` the
+    // throw is deferred to a microtask and ALL flushers are scheduled before any
+    // rejection propagates. flushAllForSlug must STILL reject (rejection-
+    // propagation per spec §5.4), but the sibling flusher must have run too.
+    const slug = ResortSlug.parse('kotelnica-bialczanska')
+    const siblingRan: boolean[] = []
+
+    registerSlugFlusher(slug, (): void => {
+      throw new Error('sync boom')
+    })
+    registerSlugFlusher(slug, (): void => {
+      siblingRan.push(true)
+    })
+
+    // (a) rejects with the synchronous throw
+    await expect(flushAllForSlug(slug)).rejects.toThrow('sync boom')
+    // (b) sibling flusher still ran — this is the regression guard
+    expect(siblingRan).toStrictEqual([true])
+  })
+
   it('disposing one flusher from a set with multiple leaves the remaining flushers intact', async (): Promise<void> => {
     // Covers the if (set.size === 0) false branch: after deleting fnA the set
     // still has fnB, so flushers.delete(slug) should NOT fire yet.
