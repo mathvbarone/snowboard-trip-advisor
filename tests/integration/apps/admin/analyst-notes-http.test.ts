@@ -179,23 +179,30 @@ describe('GET /PUT /api/analyst-notes/:slug — HTTP e2e (MSW bridge → real di
   //
   // Why this fails on regression:
   //   The assertion checks that note.html does NOT contain '<script' or
-  //   'onerror=' AND that it DOES contain '<img src="x">' (allowing the
-  //   safe attribute) and the text 'safe'. If the sanitizer were bypassed
-  //   (raw markdown echoed as html), the returned html would contain
-  //   `<script>alert(1)</script>` and `onerror=alert(1)` verbatim — the
-  //   `.not.toContain('<script')` and `.not.toContain('onerror=')` checks
-  //   would both fail. Conversely, if the render pipeline were removed and
-  //   the handler returned an empty string or null, the `.toContain('safe')`
-  //   check would fail. The assertion is thus tight in both directions.
+  //   'onerror=' AND that it DOES contain the https img src (proving the
+  //   safe attribute survived sanitization) and the text 'safe'. If the
+  //   sanitizer were bypassed (raw markdown echoed as html), the returned
+  //   html would contain `<script>alert(1)</script>` and `onerror=alert(1)`
+  //   verbatim — the `.not.toContain('<script')` and
+  //   `.not.toContain('onerror=')` checks would both fail. Conversely, if
+  //   the render pipeline were removed and the handler returned an empty
+  //   string or null, the `.toContain('safe')` check would fail. The
+  //   assertion is thus tight in both directions.
   //
   //   Additionally, the on-disk check verifies the raw markdown (NOT html)
   //   is stored — if the handler started storing rendered/sanitized html
   //   in the file (violating render-on-read), the `html` key would be
   //   present and the `toBeUndefined` assertion would fail.
+  //
+  //   ADR-0013 note: the payload uses an https img src (ADR-0013-allowed
+  //   protocol for `src`) rather than a relative src. A future ADR-conformant
+  //   tightening of the img-src policy to http/https-only will NOT
+  //   false-fail this test, while sanitizer-bypass (script/onerror
+  //   surviving) and render-removal ('safe' missing) still fail it.
 
   it('5. Sanitizer-through-HTTP: script stripped, onerror stripped, safe text preserved; raw markdown on disk (no html key)', async (): Promise<void> => {
     await seedWorkspace(workspaceDir, SLUG)
-    const xssMarkdown = '<script>alert(1)</script><img src=x onerror=alert(1)>safe'
+    const xssMarkdown = '<script>alert(1)</script><img src="https://example.com/safe.png" onerror=alert(1)>safe'
     const res = await put(SLUG, { path: 'slopes_km', markdown: xssMarkdown })
     expect(res.status).toBe(200)
     const body = await res.json() as { note: { html: string; markdown: string } }
@@ -205,8 +212,8 @@ describe('GET /PUT /api/analyst-notes/:slug — HTTP e2e (MSW bridge → real di
     expect(html).not.toContain('<script')
     // No event handler attribute survives (onerror= stripped).
     expect(html).not.toContain('onerror=')
-    // The safe img src attribute is preserved (sanitizer allows src=x on img).
-    expect(html).toContain('<img src="x">')
+    // The https img src is preserved (ADR-0013-allowed protocol survives sanitizer).
+    expect(html).toContain('src="https://example.com/safe.png"')
     // The safe text node is preserved.
     expect(html).toContain('safe')
 
