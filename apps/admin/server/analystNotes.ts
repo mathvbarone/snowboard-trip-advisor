@@ -33,11 +33,11 @@ import {
 // errorEnvelope.ts — no enum extension per spec §3.3); the redundant
 // `.status` field is the direct-call contract the handler-unit tests +
 // the cross-handler bridge test assert against (they bypass dispatch).
-// WorkspaceCorruptError thrown by readWorkspaceFileForSlug already carries
-// `.code = 'workspace-corrupt'`; dispatch maps it to 500 unchanged. We add
-// `.status` to it lazily at the throw site is unnecessary — the unit test
-// asserts `status: 500` so we re-wrap corrupt reads into a local error
-// that carries both fields, preserving `.details` for the envelope.
+// `readWorkspaceFileForSlug` throws workspace.ts's `WorkspaceCorruptError`,
+// which carries `.code` + `.details` but not `.status`. The direct-call
+// unit/bridge tests assert `status: 500`, so we re-wrap into the local error
+// that carries both fields, copying `.details` through unchanged for the
+// envelope.
 
 class NotFoundError extends Error {
   public readonly status = 404 as const
