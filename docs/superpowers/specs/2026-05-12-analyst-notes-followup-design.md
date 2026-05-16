@@ -409,11 +409,13 @@ Extends `rehype-sanitize`'s `defaultSchema` (GFM-aware baseline) with:
   - `src`: `http`, `https`
   - `cite`: `http`, `https`
 - **`clobberPrefix: 'analyst-'`** — prefixes user-supplied `id`/`name` attributes to prevent DOM-clobbering attacks (e.g., `<div id="defaultView">` becomes `<div id="analyst-defaultView">`).
+- **NARROW inherited image-fallback tags (ADR-0013, Codex P2 / PR N.b1):** `defaultSchema.tagNames` includes `picture` + `source` and `defaultSchema.attributes.source = ['srcSet']`. Because the schema spreads `...defaultSchema` for both `tagNames` and `attributes` and the explicit protocol enumeration above defines **no** `srcSet` entry, an inherited `<picture><source srcset="javascript:…">` (or a `data:` candidate) reached output *unvalidated* — `srcSet` was inherited **open**, not inherited-blocked. Mitigation (defense-in-depth, narrowing only — no tag/attribute/protocol added): (1) `picture`/`source` are filtered out of the inherited `tagNames` base list; (2) the inherited `attributes.source` grant is overridden to `[]` so even a residual `<source>` injected by a future plugin carries no URL-bearing attribute. Spec admits only `<img>`; `<picture>`/`<source>` and `srcset`/`srcSet` were never intended.
 
 Inherited from `defaultSchema` (do NOT override):
 - Block: `<script>`, `<iframe>`, `<style>`, `<object>`, `<embed>`, `<form>`, `<noscript>`, `<template>` (note: `<input>` is not on `defaultSchema`'s `tagNames` allowlist — `rehype-sanitize` is an allowlist model, not a denylist — so the GFM task-list carve-out above is an *additive widening* of the allowlist, not a relaxation of an outright block; value-restricted attributes ensure any input shape outside `type="checkbox"` + `disabled`/`checked` has its non-matching attributes stripped on output)
-- Block: `on*` event handlers, `srcset`, `crossorigin`, `referrerpolicy`
+- Block: `on*` event handlers, `crossorigin`, `referrerpolicy`
 - Block: `data:`, `javascript:`, `vbscript:` URLs
+- **Correction (Codex P2):** `srcset`/`srcSet` was previously listed on the `on*`-handlers line as a benign inherited block. That was wrong — `defaultSchema` *grants* it on `<source>` (`attributes.source = ['srcSet']`) with no matching `protocols` entry, so it was inherited *open*, not inherited *blocked*. It is now actively removed via the NARROW bullet above, not relied on as a default-deny. See ADR-0013 ("Inherited image-fallback tags removed").
 
 ### 4.5 Render function
 
