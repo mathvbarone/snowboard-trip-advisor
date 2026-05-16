@@ -3,11 +3,6 @@ import { z } from 'zod'
 import { AnalystNote, NotePath } from '../src/analystNote'
 import { ResortSlug } from '../src/branded'
 
-import { ResortSlugParam } from './resortDetail' // REUSE — do NOT redefine
-
-// Re-export ResortSlugParam so consumers can import without hitting resortDetail directly
-export { ResortSlugParam }
-
 // Server-rendered + sanitized HTML attached to the storage shape
 const RenderedAnalystNote = AnalystNote.extend({ html: z.string() })
 
@@ -27,6 +22,11 @@ export const AnalystNotesGetResponse = z.object({
  */
 export const AnalystNoteUpsertBody = z.object({
   path: NotePath,
+  // SYNC NOTE: The 10 KB byte-limit below is intentionally kept in sync with
+  // AnalystNote.markdown in ../src/analystNote.ts (~line 47-50). Both refines
+  // must change together if the limit ever changes. Do NOT extract a shared
+  // constant — analystNote.ts is an N.a-foundation file; cross-package coupling
+  // would widen this PR's scope beyond its atomic boundary.
   markdown: z.string()
     .refine(
       (s): boolean => new TextEncoder().encode(s).byteLength <= 10_000,

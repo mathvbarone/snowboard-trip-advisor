@@ -342,15 +342,35 @@ describe('apiClient.getAnalystNotes (PR N.b2)', () => {
     expect(result).toStrictEqual(payload)
   })
 
-  it('threads AbortSignal through to the request', async (): Promise<void> => {
+  it('threads AbortSignal through to fetch and rejects with AbortError when aborted (mirrors K1 abort test)', async (): Promise<void> => {
+    // MSW handler hangs — the abort is the only path out, proving the signal
+    // is actually forwarded to the underlying fetch rather than silently dropped.
+    let observedSignal: AbortSignal | undefined
+    server.use(
+      http.get('/api/analyst-notes/kotelnica-bialczanska', async ({ request }): Promise<Response> => {
+        observedSignal = request.signal
+        return new Promise<Response>((resolve, reject): void => {
+          request.signal.addEventListener('abort', (): void => {
+            reject(new DOMException('aborted', 'AbortError'))
+          })
+          // Otherwise hang; the abort is the only path out of this handler.
+        })
+      }),
+    )
+
     const controller = new AbortController()
-    let receivedSignal: AbortSignal | null = null
-    server.use(http.get('/api/analyst-notes/x', ({ request }) => {
-      receivedSignal = request.signal
-      return HttpResponse.json({ slug: 'x', notes: {} })
-    }))
-    await apiClient.getAnalystNotes('x' as never, { signal: controller.signal })
-    expect(receivedSignal).not.toBeNull()
+    const pendingGet = apiClient.getAnalystNotes(
+      'kotelnica-bialczanska' as never,
+      { signal: controller.signal },
+    )
+
+    // Defer the abort until after MSW has handed the request to the handler.
+    await new Promise((r): void => { setTimeout(r, 10) })
+    controller.abort()
+
+    await expect(pendingGet).rejects.toMatchObject({ name: 'AbortError' })
+    expect(observedSignal).toBeDefined()
+    expect(observedSignal?.aborted).toBe(true)
   })
 })
 
@@ -389,7 +409,9 @@ describe('apiClient.upsertAnalystNote (PR N.b2)', () => {
         { status: 400 },
       ),
     ))
-    await expect(apiClient.upsertAnalystNote('x' as never, { path: 'Slopes', markdown: 'x' }))
+    // Body is a valid payload — the MSW stub returns 400 unconditionally.
+    // The test exercises error-envelope parsing, not client-side path validation.
+    await expect(apiClient.upsertAnalystNote('x' as never, { path: 'slopes_km', markdown: 'x' }))
       .rejects.toBeInstanceOf(ApiClientError)
   })
 })
