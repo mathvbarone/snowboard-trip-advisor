@@ -1,5 +1,8 @@
 import type { ResortSlug } from '@snowboard-trip-advisor/schema'
 import {
+  AnalystNotesGetResponse,
+  type AnalystNoteUpsertBody,
+  AnalystNoteUpsertResponse,
   ErrorEnvelope,
   HealthResponse,
   type ListPublishesQuery,
@@ -156,5 +159,28 @@ export const apiClient = {
       '/api/health',
       undefined,
       (raw): HealthResponse => HealthResponse.parse(raw),
+    ),
+  getAnalystNotes: (
+    slug: ResortSlug,
+    options?: RequestOptions,
+  ): Promise<AnalystNotesGetResponse> =>
+    request(
+      'GET',
+      `/api/analyst-notes/${slug}`,
+      undefined,
+      (raw): AnalystNotesGetResponse => AnalystNotesGetResponse.parse(raw),
+      options,
+    ),
+  upsertAnalystNote: (
+    slug: ResortSlug,
+    body: AnalystNoteUpsertBody,
+    options?: RequestOptions,
+  ): Promise<AnalystNoteUpsertResponse> =>
+    request(
+      'PUT',
+      `/api/analyst-notes/${slug}`,
+      body,
+      (raw): AnalystNoteUpsertResponse => AnalystNoteUpsertResponse.parse(raw),
+      options,
     ),
 } as const

@@ -20,6 +20,14 @@ describe('packages/schema exports map (PR 4.0)', (): void => {
     expect(exports['./node']).toBe('./src/node.ts')
   })
 
+  it('exposes ./markdown as ./src/markdown.ts (bare-string form) (PR N.b1)', (): void => {
+    // Sub-export keeps the `unified` pipeline off the barrel surface so
+    // `apps/public` cannot accidentally pull the sanitizer deps — consumers
+    // must explicitly import `@snowboard-trip-advisor/schema/markdown`.
+    // Bare-string shape mirrors `./node` / `./api` (spec §4.2).
+    expect(exports['./markdown']).toBe('./src/markdown.ts')
+  })
+
   it('re-exports atomicWriteText from /node (PR 4.4c §B1)', (): void => {
     // PR 4.4c needs apps/admin/server's atomicWriteWorkspaceFile to import the
     // canonical atomicWriteText impl from packages/schema/node rather than

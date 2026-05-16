@@ -21,6 +21,7 @@ import {
   atomicWriteWorkspaceFile,
   readPublishedDocOrNull,
   readWorkspaceFileForSlug,
+  withSlugLock,
 } from './workspace'
 
 // PR 4.4c §7.12 — PUT /api/resorts/:slug end-to-end.
@@ -98,97 +99,105 @@ export async function resortUpsertHandler(
   const publishedPath = join(deps.workspaceRoot, 'data', 'published', 'current.v1.json')
   const targetPath = join(workspaceDir, `${slug}.json`)
 
-  // Read base state — workspace takes precedence per spec §4.1.1; fall through
-  // to the published doc on cold-start; throw NotFoundError if neither carries
-  // the slug. WorkspaceCorruptError from readWorkspaceFileForSlug propagates
-  // unchanged BEFORE the write — the corrupt file on disk is not touched.
-  const [existing, publishedDoc] = await Promise.all([
-    readWorkspaceFileForSlug(workspaceDir, slug),
-    readPublishedDocOrNull(publishedPath),
-  ])
+  // Per spec §5.6 (PR N.b3a): the read-merge-write is wrapped in the
+  // per-slug intra-process mutex so a concurrent resortUpsert (or the
+  // analyst-note PUT handler) for the same slug cannot interleave its read
+  // between this handler's read and atomic write and clobber state.
+  // Path derivation above stays OUTSIDE the lock — deterministic, no I/O.
+  return withSlugLock(slug, async (): Promise<ResortDetailResponse> => {
+    // Read base state — workspace takes precedence per spec §4.1.1; fall
+    // through to the published doc on cold-start; throw NotFoundError if
+    // neither carries the slug. WorkspaceCorruptError from
+    // readWorkspaceFileForSlug propagates unchanged BEFORE the write — the
+    // corrupt file on disk is not touched. MOVED INSIDE the lock per §5.6.
+    const [existing, publishedDoc] = await Promise.all([
+      readWorkspaceFileForSlug(workspaceDir, slug),
+      readPublishedDocOrNull(publishedPath),
+    ])
 
-  let baseResort: Resort
-  let baseLive: ResortLiveSignal | null
-  let baseModes: Partial<Record<string, 'manual' | 'auto'>>
-  if (existing !== null) {
-    baseResort = existing.resort
-    baseLive = existing.live_signal
-    baseModes = existing.editor_modes
-  } else {
-    const fromPublished = publishedDoc?.resorts.find((r): boolean => r.slug === slug)
-    if (fromPublished === undefined) {
-      throw new NotFoundError(
-        `resort "${slug}" not found in workspace or published doc`,
-      )
+    let baseResort: Resort
+    let baseLive: ResortLiveSignal | null
+    let baseModes: Partial<Record<string, 'manual' | 'auto'>>
+    if (existing !== null) {
+      baseResort = existing.resort
+      baseLive = existing.live_signal
+      baseModes = existing.editor_modes
+    } else {
+      const fromPublished = publishedDoc?.resorts.find((r): boolean => r.slug === slug)
+      if (fromPublished === undefined) {
+        throw new NotFoundError(
+          `resort "${slug}" not found in workspace or published doc`,
+        )
+      }
+      baseResort = fromPublished
+      baseLive = publishedDoc?.live_signals.find((ls): boolean => ls.resort_slug === slug) ?? null
+      baseModes = {}
     }
-    baseResort = fromPublished
-    baseLive = publishedDoc?.live_signals.find((ls): boolean => ls.resort_slug === slug) ?? null
-    baseModes = {}
-  }
 
-  // Apply merge per spec §4.3:
-  //   - resort: shallow top-level merge, deep field_sources merge per-path
-  //   - live_signal: shallow merge OR explicit-null clear OR cold-start hydrate
-  //   - editor_modes: shallow per-key override
-  const mergedResort = mergeResort(baseResort, input.body.resort)
-  const mergedLive = mergeLiveSignal(baseLive, input.body.live_signal, slug)
-  const mergedModes = { ...baseModes, ...(input.body.editor_modes ?? {}) }
+    // Apply merge per spec §4.3:
+    //   - resort: shallow top-level merge, deep field_sources merge per-path
+    //   - live_signal: shallow merge OR explicit-null clear OR cold-start hydrate
+    //   - editor_modes: shallow per-key override
+    const mergedResort = mergeResort(baseResort, input.body.resort)
+    const mergedLive = mergeLiveSignal(baseLive, input.body.live_signal, slug)
+    const mergedModes = { ...baseModes, ...(input.body.editor_modes ?? {}) }
 
-  const candidate: unknown = {
-    schema_version: 1,
-    slug,
-    resort: mergedResort,
-    live_signal: mergedLive,
-    modified_at: ISODateTimeString.parse(new Date().toISOString()),
-    editor_modes: mergedModes,
-    // Plan §5.6 scheduled the full notes carry-forward + withSlugLock retrofit
-    // for PR N.b3a. The withSlugLock retrofit stays there (independent
-    // concurrency concern). The one-line carry-forward moves up to N.a because
-    // shipping the AnalystNotesMap schema default without it creates a temporal
-    // regression window: any notes manually added between N.a merge and N.b3a
-    // merge would be silently wiped by the next resort PUT. On cold-start
-    // (workspace absent) existing is null and the default {} applies correctly.
-    notes: existing?.notes ?? {},
-  }
-  const parsed = WorkspaceFile.safeParse(candidate)
-  if (!parsed.success) {
-    throw new InvalidResortError(parsed.error.issues)
-  }
+    const candidate: unknown = {
+      schema_version: 1,
+      slug,
+      resort: mergedResort,
+      live_signal: mergedLive,
+      modified_at: ISODateTimeString.parse(new Date().toISOString()),
+      editor_modes: mergedModes,
+      // Plan §5.6 scheduled the full notes carry-forward + withSlugLock retrofit
+      // for PR N.b3a. The withSlugLock retrofit stays there (independent
+      // concurrency concern). The one-line carry-forward moves up to N.a because
+      // shipping the AnalystNotesMap schema default without it creates a temporal
+      // regression window: any notes manually added between N.a merge and N.b3a
+      // merge would be silently wiped by the next resort PUT. On cold-start
+      // (workspace absent) existing is null and the default {} applies correctly.
+      notes: existing?.notes ?? {},
+    }
+    const parsed = WorkspaceFile.safeParse(candidate)
+    if (!parsed.success) {
+      throw new InvalidResortError(parsed.error.issues)
+    }
 
-  // Codex round-3 P1 + round-4 P2 fold: provenance pairing — defense-in-depth
-  // for the wire schema's optional field_sources. See assertProvenancePairing.
-  assertProvenancePairing(
-    { resort: baseResort, live: baseLive },
-    { resort: parsed.data.resort, live: parsed.data.live_signal },
-    input.body,
-  )
+    // Codex round-3 P1 + round-4 P2 fold: provenance pairing — defense-in-depth
+    // for the wire schema's optional field_sources. See assertProvenancePairing.
+    assertProvenancePairing(
+      { resort: baseResort, live: baseLive },
+      { resort: parsed.data.resort, live: parsed.data.live_signal },
+      input.body,
+    )
 
-  await atomicWriteWorkspaceFile(targetPath, JSON.stringify(parsed.data, null, 2))
+    await atomicWriteWorkspaceFile(targetPath, JSON.stringify(parsed.data, null, 2))
 
-  // Codex round-2 P2 fold: mirror the resortDetail GET handler's draft check.
-  // When the resort is a draft (workspace file exists but slug NOT in
-  // published doc) the GET handler returns `live_signal: null` per spec §4.2.1.
-  // The PUT response MUST hide live_signal the same way — otherwise PR 4.4d's
-  // `prepopulateResortDetail` would cache a response carrying live values
-  // that a fresh GET would hide, and the editor would briefly show
-  // inconsistent draft data until the next manual cache invalidation. The
-  // on-disk workspace file still carries the live_signal as-is (per the
-  // suggestion: "without necessarily deleting the on-disk live data") — only
-  // the projected response strips it.
-  const isDraft = publishedDoc === null
-    || !publishedDoc.resorts.some((r): boolean => r.slug === slug)
-  const responseLive: ResortLiveSignal | null = isDraft ? null : parsed.data.live_signal
+    // Codex round-2 P2 fold: mirror the resortDetail GET handler's draft check.
+    // When the resort is a draft (workspace file exists but slug NOT in
+    // published doc) the GET handler returns `live_signal: null` per spec §4.2.1.
+    // The PUT response MUST hide live_signal the same way — otherwise PR 4.4d's
+    // `prepopulateResortDetail` would cache a response carrying live values
+    // that a fresh GET would hide, and the editor would briefly show
+    // inconsistent draft data until the next manual cache invalidation. The
+    // on-disk workspace file still carries the live_signal as-is (per the
+    // suggestion: "without necessarily deleting the on-disk live data") — only
+    // the projected response strips it.
+    const isDraft = publishedDoc === null
+      || !publishedDoc.resorts.some((r): boolean => r.slug === slug)
+    const responseLive: ResortLiveSignal | null = isDraft ? null : parsed.data.live_signal
 
-  return {
-    resort: parsed.data.resort,
-    live_signal: responseLive,
-    field_states: projectFieldStates(
-      parsed.data.resort,
-      responseLive,
-      parsed.data.editor_modes,
-      new Date(),
-    ),
-  }
+    return {
+      resort: parsed.data.resort,
+      live_signal: responseLive,
+      field_states: projectFieldStates(
+        parsed.data.resort,
+        responseLive,
+        parsed.data.editor_modes,
+        new Date(),
+      ),
+    }
+  })
 }
 
 function mergeResort(base: Resort, patch: ResortUpsertBody['resort']): unknown {

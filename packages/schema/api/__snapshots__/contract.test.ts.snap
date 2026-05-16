@@ -5,6 +5,155 @@ exports[`schema/api contract snapshot (PR 4.1a, spec §4.9 invariant 3) > captur
   {
     "jsonSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "notes": {
+          "additionalProperties": {
+            "additionalProperties": false,
+            "properties": {
+              "created_at": {
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                "type": "string",
+              },
+              "html": {
+                "type": "string",
+              },
+              "markdown": {
+                "type": "string",
+              },
+              "schema_version": {
+                "const": 1,
+                "type": "number",
+              },
+              "updated_at": {
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                "type": "string",
+              },
+            },
+            "required": [
+              "schema_version",
+              "markdown",
+              "created_at",
+              "updated_at",
+              "html",
+            ],
+            "type": "object",
+          },
+          "propertyNames": {
+            "pattern": "^[a-z_][a-z0-9_]*(\\.[a-z_][a-z0-9_]*)*$",
+            "type": "string",
+          },
+          "type": "object",
+        },
+        "slug": {
+          "pattern": "^[a-z0-9-]{1,64}$",
+          "type": "string",
+        },
+      },
+      "required": [
+        "slug",
+        "notes",
+      ],
+      "type": "object",
+    },
+    "name": "AnalystNotesGetResponse",
+  },
+  {
+    "jsonSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "markdown": {
+          "anyOf": [
+            {
+              "type": "string",
+            },
+            {
+              "type": "null",
+            },
+          ],
+        },
+        "path": {
+          "pattern": "^[a-z_][a-z0-9_]*(\\.[a-z_][a-z0-9_]*)*$",
+          "type": "string",
+        },
+      },
+      "required": [
+        "path",
+        "markdown",
+      ],
+      "type": "object",
+    },
+    "name": "AnalystNoteUpsertBody",
+  },
+  {
+    "jsonSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "note": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "created_at": {
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                  "type": "string",
+                },
+                "html": {
+                  "type": "string",
+                },
+                "markdown": {
+                  "type": "string",
+                },
+                "schema_version": {
+                  "const": 1,
+                  "type": "number",
+                },
+                "updated_at": {
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                  "type": "string",
+                },
+              },
+              "required": [
+                "schema_version",
+                "markdown",
+                "created_at",
+                "updated_at",
+                "html",
+              ],
+              "type": "object",
+            },
+            {
+              "type": "null",
+            },
+          ],
+        },
+        "path": {
+          "pattern": "^[a-z_][a-z0-9_]*(\\.[a-z_][a-z0-9_]*)*$",
+          "type": "string",
+        },
+        "slug": {
+          "pattern": "^[a-z0-9-]{1,64}$",
+          "type": "string",
+        },
+      },
+      "required": [
+        "slug",
+        "path",
+        "note",
+      ],
+      "type": "object",
+    },
+    "name": "AnalystNoteUpsertResponse",
+  },
+  {
+    "jsonSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "enum": [
         "invalid-request",
         "invalid-resort",
