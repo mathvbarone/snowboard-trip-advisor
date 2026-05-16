@@ -35,9 +35,11 @@ import {
 // the cross-handler bridge test assert against (they bypass dispatch).
 // `readWorkspaceFileForSlug` throws workspace.ts's `WorkspaceCorruptError`,
 // which carries `.code` + `.details` but not `.status`. The direct-call
-// unit/bridge tests assert `status: 500`, so we re-wrap into the local error
-// that carries both fields, copying `.details` through unchanged for the
-// envelope.
+// unit/bridge tests assert `status: 500`, so we re-wrap into the local
+// `RewrappedWorkspaceCorruptError` (distinct name on purpose — it is NOT
+// workspace.ts's class; do not swap in an `instanceof` against the imported
+// one) that carries both fields, copying `.details` through unchanged for
+// the envelope.
 
 class NotFoundError extends Error {
   public readonly status = 404 as const
@@ -60,14 +62,14 @@ class InvalidRequestError extends Error {
   }
 }
 
-class WorkspaceCorruptError extends Error {
+class RewrappedWorkspaceCorruptError extends Error {
   public readonly status = 500 as const
   public readonly code = 'workspace-corrupt' as const
   public readonly details: unknown
 
   public constructor(message: string, details: unknown) {
     super(message)
-    this.name = 'WorkspaceCorruptError'
+    this.name = 'RewrappedWorkspaceCorruptError'
     this.details = details
   }
 }
@@ -132,7 +134,7 @@ export async function analystNotesGet(
     if (!isWorkspaceCorrupt(err)) {
       throw err
     }
-    throw new WorkspaceCorruptError((err as Error).message, (err as { details?: unknown }).details)
+    throw new RewrappedWorkspaceCorruptError((err as Error).message, (err as { details?: unknown }).details)
   }
 
   if (workspaceFile === null) {
@@ -201,7 +203,7 @@ export async function analystNotesPut(
       if (!isWorkspaceCorrupt(err)) {
         throw err
       }
-      throw new WorkspaceCorruptError(
+      throw new RewrappedWorkspaceCorruptError(
         (err as Error).message,
         (err as { details?: unknown }).details,
       )
@@ -323,7 +325,7 @@ export async function analystNotesPut(
        because the spec requires the post-merge atomic re-validation and a
        Phase-2 schema change could make it reachable. */
     if (!parsed.success) {
-      throw new WorkspaceCorruptError(
+      throw new RewrappedWorkspaceCorruptError(
         `merged workspace file for "${slug}" failed schema validation`,
         { slug, issues: parsed.error.issues },
       )
