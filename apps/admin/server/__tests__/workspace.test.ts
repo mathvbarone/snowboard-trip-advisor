@@ -11,6 +11,8 @@ import {
   ensureWorkspaceDir,
   readPublishedDocOrNull,
   readWorkspaceFileForSlug,
+  slugLocks,
+  withSlugLock,
   WorkspaceCorruptError,
 } from '../workspace'
 
@@ -228,5 +230,79 @@ describe('readPublishedDocOrNull (PR 4.4a-2, spec §10.9)', (): void => {
     expect(doc).not.toBeNull()
     expect(doc?.resorts).toHaveLength(1)
     expect(doc?.resorts[0]?.slug).toBe('kotelnica-bialczanska')
+  })
+})
+
+describe('withSlugLock (PR N.b3a §5.5 — intra-process per-slug write mutex)', (): void => {
+  it('serializes two concurrent ops on the same slug', async (): Promise<void> => {
+    const log: string[] = []
+    const slow = withSlugLock('a' as never, async (): Promise<number> => {
+      log.push('start-1')
+      await new Promise((r): void => {
+        setTimeout(r, 30)
+      })
+      log.push('end-1')
+      return 1
+    })
+    const fast = withSlugLock('a' as never, (): Promise<number> => {
+      log.push('start-2')
+      log.push('end-2')
+      return Promise.resolve(2)
+    })
+    const results = await Promise.all([slow, fast])
+    expect(results).toStrictEqual([1, 2])
+    expect(log).toStrictEqual(['start-1', 'end-1', 'start-2', 'end-2'])
+  })
+
+  it('does NOT serialize across distinct slugs', async (): Promise<void> => {
+    const log: string[] = []
+    await Promise.all([
+      withSlugLock('a' as never, async (): Promise<void> => {
+        log.push('start-a')
+        await new Promise((r): void => {
+          setTimeout(r, 20)
+        })
+        log.push('end-a')
+      }),
+      withSlugLock('b' as never, (): Promise<void> => {
+        log.push('start-b')
+        log.push('end-b')
+        return Promise.resolve()
+      }),
+    ])
+    // 'b' must complete before 'a' (no cross-slug serialization).
+    expect(log.indexOf('end-b')).toBeLessThan(log.indexOf('end-a'))
+  })
+
+  it('releases the lock after rejection so next op can proceed', async (): Promise<void> => {
+    let secondRan = false
+    const first = withSlugLock('a' as never, (): Promise<void> => {
+      return Promise.reject(new Error('boom'))
+    })
+    const second = withSlugLock('a' as never, (): Promise<void> => {
+      secondRan = true
+      return Promise.resolve()
+    })
+    await expect(first).rejects.toThrow('boom')
+    await second
+    expect(secondRan).toBe(true)
+  })
+
+  it('cleans up the map entry on identity match (no leak)', async (): Promise<void> => {
+    for (let i = 0; i < 100; i++) {
+      await withSlugLock(`s${String(i)}` as never, (): Promise<void> => Promise.resolve())
+    }
+    // Direct internal probe: every settled op deletes its own entry.
+    expect(slugLocks.size).toBe(0)
+  })
+
+  it('cleans up the map entry even when the op rejects (no leak on failure)', async (): Promise<void> => {
+    await expect(
+      withSlugLock('fail-slug' as never, (): Promise<void> => {
+        return Promise.reject(new Error('nope'))
+      }),
+    ).rejects.toThrow('nope')
+    expect(slugLocks.has('fail-slug' as never)).toBe(false)
+    expect(slugLocks.size).toBe(0)
   })
 })
