@@ -141,6 +141,14 @@ export async function resortUpsertHandler(
     live_signal: mergedLive,
     modified_at: ISODateTimeString.parse(new Date().toISOString()),
     editor_modes: mergedModes,
+    // Plan §5.6 scheduled the full notes carry-forward + withSlugLock retrofit
+    // for PR N.b3a. The withSlugLock retrofit stays there (independent
+    // concurrency concern). The one-line carry-forward moves up to N.a because
+    // shipping the AnalystNotesMap schema default without it creates a temporal
+    // regression window: any notes manually added between N.a merge and N.b3a
+    // merge would be silently wiped by the next resort PUT. On cold-start
+    // (workspace absent) existing is null and the default {} applies correctly.
+    notes: existing?.notes ?? {},
   }
   const parsed = WorkspaceFile.safeParse(candidate)
   if (!parsed.success) {

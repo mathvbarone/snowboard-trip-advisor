@@ -15,6 +15,7 @@
 // Tests / Node call sites (admin app, integration tests) import from
 // `@snowboard-trip-advisor/schema/node` for the Node-only surface.
 
+export * from './analystNote'
 export * from './branded'
 export * from './primitives'
 export * from './metricFields'

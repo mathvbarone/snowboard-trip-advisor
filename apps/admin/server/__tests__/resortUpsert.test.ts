@@ -321,6 +321,45 @@ describe('resortUpsertHandler — happy paths (PR 4.4c spec §7.12)', (): void =
     )
     expect(wf.live_signal).toBeNull()
   })
+
+  it('carry-forward: pre-existing notes survive a resort field edit (Codex round-1 P2 fold)', async (): Promise<void> => {
+    // Bug: the handler candidate construction omitted `notes`, so WorkspaceFile
+    // filled in `.default({})` and atomicWriteWorkspaceFile wiped any notes
+    // that were manually added between PR N.a merge and PR N.b3a merge.
+    // The fix is the one-line `notes: existing?.notes ?? {}` carry-forward.
+    const seed = JSON.parse(
+      readFileSync(join(SEED_FIXTURE_DIR, 'kotelnica-bialczanska.json'), 'utf8'),
+    ) as Record<string, unknown>
+    const seedWithNotes = {
+      ...seed,
+      notes: {
+        slopes_km: {
+          schema_version: 1,
+          markdown: 'Analyst note for slopes_km.',
+          created_at: '2026-05-14T00:00:00.000Z',
+          updated_at: '2026-05-14T00:00:00.000Z',
+        },
+      },
+    }
+    await writeFile(
+      join(workspaceDir, 'kotelnica-bialczanska.json'),
+      JSON.stringify(seedWithNotes),
+      'utf8',
+    )
+    await resortUpsertHandler(
+      {
+        params: { slug: KOTELNICA },
+        body: { editor_modes: { slopes_km: 'manual' } },
+      },
+      { workspaceRoot: root },
+    )
+    const wf = WorkspaceFile.parse(
+      JSON.parse(await readFile(join(workspaceDir, 'kotelnica-bialczanska.json'), 'utf-8')),
+    )
+    // Notes must survive the PUT — the handler must carry them forward.
+    expect(wf.notes['slopes_km']).toBeDefined()
+    expect(wf.notes['slopes_km']?.markdown).toBe('Analyst note for slopes_km.')
+  })
 })
 
 describe('resortUpsertHandler — reject paths', (): void => {
