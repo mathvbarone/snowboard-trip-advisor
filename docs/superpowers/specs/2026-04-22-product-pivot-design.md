@@ -220,7 +220,7 @@ Phase 1 ships only the two states the admin UI and publish pipeline actually use
 
 ### 3.9 Analyst notes
 
-Per-resort, per-field Markdown-formatted notes stored alongside the workspace. Rendered safely (no `dangerouslySetInnerHTML`; Markdown-to-AST parser + sanitizer). Not published; internal-only.
+Per-resort, per-field Markdown-formatted notes stored alongside the workspace. Rendered safely via a Markdown-to-AST parser + allowlist sanitizer (`@snowboard-trip-advisor/schema/markdown`); the sanitized HTML output is consumed via `dangerouslySetInnerHTML` ONLY by the analyst-notes view, which is the sanctioned single boundary. The sanitizer config is the security boundary; see `packages/schema/src/markdownSanitizeSchema.ts` and ADR-0013. Not published; internal-only.
 
 ### 3.10 Keyboard shortcuts
 
