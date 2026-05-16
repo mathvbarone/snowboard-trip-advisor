@@ -26,6 +26,48 @@ describe('AnalystNotesGetResponse', () => {
     }
     expect(AnalystNotesGetResponse.safeParse(payload).success).toBe(false)
   })
+
+  // Prototype-pollution guard (Codex P2): JSON.parse('{"__proto__":{…}}') produces
+  // an object where `__proto__` is a real own property (ECMA-262 §24.5.1.1). Without
+  // the pre-record scan, z.record iterates own keys but the engine intercepts the
+  // `__proto__` key before the NotePath refine fires — safeParse wrongly returns
+  // success:true with an empty {} (silent data loss). The guard must reject it.
+  it('rejects GET notes map with __proto__ own key (prototype-pollution guard)', () => {
+    const raw: unknown = JSON.parse('{"slug":"kotelnica-bialczanska","notes":{"__proto__":{"schema_version":1,"markdown":"x","html":"<p>x</p>","created_at":"2026-05-13T00:00:00.000Z","updated_at":"2026-05-13T00:00:00.000Z"}}}')
+    const result = AnalystNotesGetResponse.safeParse(raw)
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects array notes value (covers non-object branch of preprocess guard)', () => {
+    // Covers the Array.isArray guard branch — arrays bypass the key-scan and
+    // fall through to z.record which rejects them. Mirrors the same coverage
+    // test in AnalystNotesMap (../src/analystNote.test.ts).
+    const payload = { slug: 'kotelnica-bialczanska', notes: [] }
+    expect(AnalystNotesGetResponse.safeParse(payload).success).toBe(false)
+  })
+
+  it('accepts valid notes map (positive regression after guard applied)', () => {
+    const payload = {
+      slug: 'kotelnica-bialczanska',
+      notes: {
+        'altitude_m.min': {
+          schema_version: 1,
+          markdown: 'ok',
+          html: '<p>ok</p>',
+          created_at: '2026-05-13T00:00:00.000Z',
+          updated_at: '2026-05-13T00:00:00.000Z',
+        },
+        slopes_km: {
+          schema_version: 1,
+          markdown: 'note',
+          html: '<p>note</p>',
+          created_at: '2026-05-13T00:00:00.000Z',
+          updated_at: '2026-05-13T00:00:00.000Z',
+        },
+      },
+    }
+    expect(AnalystNotesGetResponse.safeParse(payload).success).toBe(true)
+  })
 })
 
 describe('AnalystNoteUpsertBody', () => {
