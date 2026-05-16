@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 import {
+  AnalystNoteUpsertBody,
   HealthQuery,
   ListPublishesQuery,
   ListResortsQuery,
@@ -12,6 +13,7 @@ import {
 } from '@snowboard-trip-advisor/schema/api'
 import { z } from 'zod'
 
+import { analystNotesGet, analystNotesPut } from './analystNotes'
 import { healthHandler } from './health'
 import { listPublishesHandler } from './listPublishes'
 import { listResortsHandler, type HandlerDeps } from './listResorts'
@@ -86,6 +88,25 @@ const ROUTES: ReadonlyArray<Route> = [
     bodySchema: ResortUpsertBody,
     handler: async (args, deps): Promise<unknown> =>
       resortUpsertHandler({ params: args.params as never, body: args.body as never }, deps),
+  },
+  {
+    method: 'GET',
+    pathPattern: '/api/analyst-notes/:slug',
+    paramSchema: ResortSlugParam,
+    // No `bodySchema` field — `Route.bodySchema` is optional (`?: z.ZodType`),
+    // and the dispatcher at `:267-269` treats only `undefined` as "no body
+    // schema". Setting `null` would crash with
+    // `Cannot read properties of null (reading 'parse')` (spec §3.4).
+    handler: async (args, deps): Promise<unknown> =>
+      analystNotesGet({ params: args.params as never }, deps),
+  },
+  {
+    method: 'PUT',
+    pathPattern: '/api/analyst-notes/:slug',
+    paramSchema: ResortSlugParam,
+    bodySchema: AnalystNoteUpsertBody,
+    handler: async (args, deps): Promise<unknown> =>
+      analystNotesPut({ params: args.params as never, body: args.body }, deps),
   },
   {
     method: 'POST',

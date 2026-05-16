@@ -505,6 +505,68 @@ describe('dispatch (PR 4.1b §2.1, spec §10.1 + §7.6)', (): void => {
     )
     expect(r).toBeNull()
   })
+
+  // PR N.b3b §7.2 step 18 — analyst-notes route wiring (spec §3.4).
+  // Per-handler semantics are pinned by analystNotes.test.ts; these cases
+  // prove dispatch routes the two new endpoints (non-null result =
+  // matched-and-dispatched, not a route-miss which returns null).
+
+  it('routes GET /api/analyst-notes/:slug to analystNotesGet (clean tmpdir → 404 not-found)', async (): Promise<void> => {
+    const r = await dispatch(
+      {
+        method: 'GET',
+        pathname: '/api/analyst-notes/kotelnica-bialczanska',
+        search: '',
+        body: undefined,
+      },
+      { workspaceRoot },
+    )
+    expect(r).not.toBeNull()
+    expect(r?.status).toBe(404)
+    expect(r?.body).toMatchObject({ error: { code: 'not-found' } })
+  })
+
+  it('routes PUT /api/analyst-notes/:slug to analystNotesPut with body validation (200, affected path echoed)', async (): Promise<void> => {
+    // Seed the on-disk fixture so the PUT lands a note + the handler echoes
+    // the affected path. Proves bodySchema = AnalystNoteUpsertBody is wired
+    // (path/markdown parsed) AND the handler executes end-to-end.
+    const wsDir = join(workspaceRoot, 'data', 'admin-workspace')
+    await mkdir(wsDir, { recursive: true })
+    const seed = readFileSync(
+      join(resolveWorkspaceRoot(), 'tests/fixtures/admin-workspace/kotelnica-bialczanska.json'),
+      'utf8',
+    )
+    await writeFile(join(wsDir, 'kotelnica-bialczanska.json'), seed, 'utf8')
+
+    const r = await dispatch(
+      {
+        method: 'PUT',
+        pathname: '/api/analyst-notes/kotelnica-bialczanska',
+        search: '',
+        body: { path: 'slopes_km', markdown: '# hi' },
+      },
+      { workspaceRoot },
+    )
+    expect(r?.status).toBe(200)
+    expect(r?.body).toMatchObject({ slug: 'kotelnica-bialczanska', path: 'slopes_km' })
+    const body = r?.body as { note: { markdown: string; html: string } }
+    expect(body.note.markdown).toBe('# hi')
+    expect(body.note.html).toBe('<h1>hi</h1>')
+  })
+
+  it('returns 400 invalid-request on a bad analyst-note path via dispatch bodySchema', async (): Promise<void> => {
+    const r = await dispatch(
+      {
+        method: 'PUT',
+        pathname: '/api/analyst-notes/kotelnica-bialczanska',
+        search: '',
+        body: { path: 'Slopes_KM', markdown: 'x' },
+      },
+      { workspaceRoot },
+    )
+    expect(r?.status).toBe(400)
+    expect(r?.body).toMatchObject({ error: { code: 'invalid-request' } })
+  })
 })
 
 describe('resolveWorkspaceRoot (PR 4.1b §2.1, P0 #7 from second review)', (): void => {
