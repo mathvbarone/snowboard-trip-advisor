@@ -391,8 +391,8 @@ describe('useAnalystNotes (PR N.c1 — Suspense read hook)', (): void => {
     // Race: a GET fires; before it resolves, prepopulate is called with newer data.
     // The older GET MUST NOT clobber cachedFulfilled when it eventually resolves.
     let resolveGet: (value: AnalystNotesGetResponse) => void = (): void => {}
-    const olderResponse = makeSyntheticResponse('older-slug')
-    const newerResponse = makeSyntheticResponse('kotelnica-bialczanska')
+    const olderResponse = makeSyntheticResponse('older-analyst-slug')
+    const newerResponse = makeSyntheticResponse('newer-analyst-slug')
     const spy = vi.spyOn(apiClient, 'getAnalystNotes').mockImplementation(
       (): Promise<AnalystNotesGetResponse> =>
         new Promise<AnalystNotesGetResponse>((resolve): void => { resolveGet = resolve }),
@@ -427,7 +427,7 @@ describe('useAnalystNotes (PR N.c1 — Suspense read hook)', (): void => {
       })
 
       // The next read returns the NEWER response (synchronous fast path).
-      expect(screen.getByTestId('probe-slug')).toHaveTextContent('kotelnica-bialczanska')
+      expect(screen.getByTestId('probe-slug')).toHaveTextContent('newer-analyst-slug')
     } finally {
       spy.mockRestore()
     }
