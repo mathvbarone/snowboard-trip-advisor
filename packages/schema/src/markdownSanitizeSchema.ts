@@ -121,9 +121,13 @@ const attributes: SchemaAttributes = {
   ...headingIdAttributes,
   figure: ['id'],
   // GFM footnote body item carries the ref-link's `href` target as its
-  // `id` (clobber-prefixed — see footnoteRefAttributes note). No other
-  // attribute is granted on <li>.
-  li: ['id'],
+  // `id` (clobber-prefixed — see footnoteRefAttributes note). The
+  // `defaultSchema.attributes.li` baseline grants `[['className',
+  // 'task-list-item']]` for GFM task-list items (`- [x]`/`- [ ]`);
+  // overriding `li` entirely with `['id']` would silently strip that
+  // inherited marker class (GFM-fidelity regression). Preserve the
+  // value-restricted className tuple alongside `id`.
+  li: [['className', /^task-list-item$/], 'id'],
   a: ['href', 'title', 'rel', 'target', ...footnoteRefAttributes],
   img: ['src', 'alt', 'title', 'width', 'height', 'loading'],
   code: [['className', /^language-[\w-]+$/]],

@@ -251,6 +251,39 @@ describe('GFM', () => {
     expect(out).toMatch(/<input[^>]*type="checkbox"[^>]*disabled/i)
   })
 
+  /**
+   * GFM task-list item className regression (PR N.b1 fidelity fix).
+   *
+   * `remark-gfm` emits `<li class="task-list-item">` for `- [x]` / `- [ ]`
+   * items. The round-2 footnote fold set `li: ['id']`, which is a FULL
+   * override of `defaultSchema.attributes.li` (`[['className',
+   * 'task-list-item']]`), silently stripping the GFM-marker class. The
+   * spec promises full GFM; this class must survive sanitization.
+   *
+   * AST-level, consistent with the surrounding OWASP corpus (spec §4.6).
+   */
+  it('preserves task-list-item className on <li> (GFM marker class)', () => {
+    const out = html('- [x] done\n- [ ] todo')
+    const els = elements(out)
+    const taskListItems = els.filter(
+      (el) =>
+        el.tagName === 'li' &&
+        el.attrs.some(
+          (a) => a.name === 'class' && a.value === 'task-list-item',
+        ),
+    )
+    // Both items must carry the GFM-marker class.
+    expect(taskListItems.length).toBe(2)
+    // The disabled checkbox must still be present inside a task-list item.
+    const checkboxes = els.filter(
+      (el) =>
+        el.tagName === 'input' &&
+        el.attrs.some((a) => a.name === 'type' && a.value === 'checkbox') &&
+        el.attrs.some((a) => a.name === 'disabled'),
+    )
+    expect(checkboxes.length).toBe(2)
+  })
+
   it('renders strikethrough', () => {
     expect(html('~~old~~')).toContain('<del>')
   })
