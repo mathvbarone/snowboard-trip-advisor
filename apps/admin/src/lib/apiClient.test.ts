@@ -324,3 +324,72 @@ describe('apiClient (PR 4.1a, spec §3.2 + §7.5)', (): void => {
     expect(new URL(capturedURL).search).toBe('')
   })
 })
+
+describe('apiClient.getAnalystNotes (PR N.b2)', () => {
+  it('GETs /api/analyst-notes/:slug and returns parsed response', async (): Promise<void> => {
+    const payload = {
+      slug: 'kotelnica-bialczanska',
+      notes: {
+        slopes_km: {
+          schema_version: 1, markdown: 'x', html: '<p>x</p>',
+          created_at: '2026-05-13T00:00:00.000Z',
+          updated_at: '2026-05-13T00:00:00.000Z',
+        },
+      },
+    }
+    server.use(http.get('/api/analyst-notes/kotelnica-bialczanska', () => HttpResponse.json(payload)))
+    const result = await apiClient.getAnalystNotes('kotelnica-bialczanska' as never)
+    expect(result).toStrictEqual(payload)
+  })
+
+  it('threads AbortSignal through to the request', async (): Promise<void> => {
+    const controller = new AbortController()
+    let receivedSignal: AbortSignal | null = null
+    server.use(http.get('/api/analyst-notes/x', ({ request }) => {
+      receivedSignal = request.signal
+      return HttpResponse.json({ slug: 'x', notes: {} })
+    }))
+    await apiClient.getAnalystNotes('x' as never, { signal: controller.signal })
+    expect(receivedSignal).not.toBeNull()
+  })
+})
+
+describe('apiClient.upsertAnalystNote (PR N.b2)', () => {
+  it('PUTs JSON body with upsert payload', async (): Promise<void> => {
+    let receivedMethod = ''
+    let receivedBody: unknown = null
+    const response = {
+      slug: 'x', path: 'slopes_km',
+      note: { schema_version: 1, markdown: 'note', html: '<p>note</p>',
+              created_at: '2026-05-13T00:00:00.000Z', updated_at: '2026-05-13T00:00:00.000Z' },
+    }
+    server.use(http.put('/api/analyst-notes/x', async ({ request }) => {
+      receivedMethod = request.method
+      receivedBody = await request.json()
+      return HttpResponse.json(response)
+    }))
+    const result = await apiClient.upsertAnalystNote('x' as never, { path: 'slopes_km', markdown: 'note' })
+    expect(receivedMethod).toBe('PUT')
+    expect(receivedBody).toStrictEqual({ path: 'slopes_km', markdown: 'note' })
+    expect(result).toStrictEqual(response)
+  })
+
+  it('returns null note on delete confirmation', async (): Promise<void> => {
+    server.use(http.put('/api/analyst-notes/x', () =>
+      HttpResponse.json({ slug: 'x', path: 'slopes_km', note: null }),
+    ))
+    const result = await apiClient.upsertAnalystNote('x' as never, { path: 'slopes_km', markdown: null })
+    expect(result.note).toBeNull()
+  })
+
+  it('rejects with ApiClientError carrying parsed envelope on 400', async (): Promise<void> => {
+    server.use(http.put('/api/analyst-notes/x', () =>
+      HttpResponse.json(
+        { error: { code: 'invalid-request', message: 'bad path' } },
+        { status: 400 },
+      ),
+    ))
+    await expect(apiClient.upsertAnalystNote('x' as never, { path: 'Slopes', markdown: 'x' }))
+      .rejects.toBeInstanceOf(ApiClientError)
+  })
+})
