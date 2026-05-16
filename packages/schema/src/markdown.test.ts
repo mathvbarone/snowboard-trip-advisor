@@ -101,6 +101,46 @@ describe('OWASP XSS corpus', () => {
   })
 })
 
+/**
+ * Inherited-`srcSet` XSS regression (Codex P2, PR N.b1 fold).
+ *
+ * `rehype-sanitize`'s `defaultSchema` lists `picture`/`source` in
+ * `tagNames` and `attributes.source = ['srcSet']`. The analyst-note
+ * schema spreads `...defaultSchema` for both, and its explicit
+ * `protocols` map does NOT define `srcSet` — so `hast-util-sanitize`
+ * waved every `<source srcset>` value through unvalidated, including
+ * `javascript:` and `data:` candidates. Spec §4.4 allows only `<img>`
+ * (src/alt/title/width/height/loading); `<picture>`/`<source>` and
+ * `srcset`/`srcSet` are NOT in the intended allowlist. AST-level,
+ * consistent with the OWASP corpus (a raw substring scan false-fails
+ * on safe inert-text output — see spec §4.6).
+ */
+describe('inherited srcSet vector (Codex P2 regression)', () => {
+  function hasSrcsetAttr(htmlString: string): boolean {
+    return elements(htmlString).some((el) =>
+      el.attrs.some((a) => a.name.toLowerCase() === 'srcset'),
+    )
+  }
+
+  it.each([
+    '<picture><source srcset="javascript:alert(1)"><img src=x></picture>',
+    '<picture><source srcset="data:text/html,<script>alert(1)</script>"><img src=x></picture>',
+    '<source srcset="vbscript:msgbox(1)">',
+    '<img srcset="javascript:alert(1)" src=x>',
+  ])('strips <picture>/<source>/srcset — %s', (input) => {
+    const out = html(input)
+    // No <picture>/<source> element survives the allowlist.
+    expect(hasElement(out, 'picture')).toBe(false)
+    expect(hasElement(out, 'source')).toBe(false)
+    // No surviving srcset/srcSet attribute on ANY element (the inherited
+    // `attributes.source` grant must be dropped, not merely the tag).
+    expect(hasSrcsetAttr(out)).toBe(false)
+    // Defense-in-depth: nothing carries a dangerous scheme either.
+    expect(hasExecutableUrl(out)).toBe(false)
+    expect(hasElement(out, 'script')).toBe(false)
+  })
+})
+
 describe('GFM', () => {
   it('renders tables', () => {
     const out = html('| a | b |\n|---|---|\n| 1 | 2 |')

@@ -23,10 +23,25 @@ function findAllElements(node: P5Node): P5Element[] {
   return result
 }
 
+// `picture`/`source` added (Codex P2): they are inherited via the
+// `...defaultSchema` `tagNames` spread and `<source>` carries an
+// unvalidated `srcSet` URL — banned at the tag level so a no-scheme /
+// relative `srcset` (which the DANGEROUS_SCHEMES check below would NOT
+// flag) still fails the fuzz if the allowlist ever re-admits the tag.
 const BANNED_TAGS = [
   'script', 'iframe', 'object', 'embed', 'form', 'style', 'noscript', 'template',
+  'picture', 'source',
 ]
-const URL_ATTRS = ['href', 'src', 'cite', 'xlink:href']
+// URL-bearing attribute names the allowlist could plausibly carry. Codex
+// P2 showed the inherited `attributes.source = ['srcSet']` was a silent
+// gap the old scan (`href`/`src`/`cite`/`xlink:href` only) missed entirely.
+// `srcset`/`poster`/`longdesc`/`data`/`formaction`/`background` are every
+// other URL-bearing attribute reachable via `...defaultSchema` spread.
+// parse5 lower-cases attribute names, so `srcSet` arrives as `srcset`.
+const URL_ATTRS = [
+  'href', 'src', 'cite', 'xlink:href',
+  'srcset', 'poster', 'longdesc', 'data', 'formaction', 'background',
+]
 const DANGEROUS_SCHEMES = ['javascript:', 'vbscript:', 'data:']
 
 describe('renderAnalystNoteMarkdown fuzz', () => {

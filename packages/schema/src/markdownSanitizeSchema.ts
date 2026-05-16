@@ -54,12 +54,36 @@ const headingIdAttributes: SchemaAttributes = Object.fromEntries(
   HEADING_TAGS.map((tag) => [tag, ['id']]),
 )
 
+// `defaultSchema.tagNames` inherits `picture` + `source`, and
+// `defaultSchema.attributes.source = ['srcSet']`. §4.4 allows only
+// `<img>` (src/alt/title/width/height/loading) — `<picture>`/`<source>`
+// and `srcset`/`srcSet` are NOT in the intended allowlist. The explicit
+// `protocols` map below does NOT define `srcSet`, and `hast-util-sanitize`
+// treats an attribute with no protocol entry as unrestricted, so an
+// inherited `<source srcset="javascript:…">` (or a `data:` candidate)
+// would survive unvalidated (Codex P2). Strip both tags from the inherited
+// `tagNames` AND null the inherited `attributes.source` grant below —
+// defense-in-depth: the tag is gone, and even a residue `<source>` from a
+// future plugin carries no URL-bearing attribute.
+const INHERITED_IMG_FALLBACK_TAGS: ReadonlySet<string> = new Set([
+  'picture',
+  'source',
+])
+const tagNamesWithoutImgFallback = baseTagNames.filter(
+  (tag) => !INHERITED_IMG_FALLBACK_TAGS.has(tag),
+)
+
 // Typed explicitly so the regex-validated tuples (`['className', /…/]`)
 // and the value-restricted `input` carve-out infer as `PropertyDefinition`
 // tuples rather than widening to `(string | RegExp)[]`.
 const attributes: SchemaAttributes = {
   ...baseAttributes,
   '*': universalAttributes,
+  // Override the inherited `attributes.source = ['srcSet']` (Codex P2).
+  // `srcSet` carries a URL but has no `protocols` entry, so it would be
+  // waved through unvalidated. `<source>` is also dropped from `tagNames`
+  // above; this empty grant is the defense-in-depth second layer.
+  source: [],
   ...headingIdAttributes,
   figure: ['id'],
   a: ['href', 'title', 'rel', 'target'],
@@ -99,11 +123,13 @@ export const analystNoteSanitizeSchema: Schema = Object.freeze({
     'script', 'style', 'noscript', 'template',
     'iframe', 'object', 'embed', 'form',
   ],
-  // ADD tags (spec §4.4). `input` is already on defaultSchema's allowlist
-  // (GFM task-list carve-out); the post-sanitize `rehypeStripStrayInputs`
-  // pass enforces the exact `type="checkbox"` + `disabled` shape.
+  // ADD tags (spec §4.4) on top of the inherited base list, MINUS
+  // `picture`/`source` (Codex P2 — filtered via INHERITED_IMG_FALLBACK_TAGS
+  // above; spec §4.4 allows only `<img>`). `input` is still inherited (GFM
+  // task-list carve-out); the post-sanitize `rehypeStripStrayInputs` pass
+  // enforces the exact `type="checkbox"` + `disabled` shape.
   tagNames: [
-    ...baseTagNames,
+    ...tagNamesWithoutImgFallback,
     'details', 'summary', 'kbd', 'sub', 'sup', 'mark',
     'figure', 'figcaption', 'abbr', 'dfn', 'cite', 'q',
     'time', 'div', 'span',
