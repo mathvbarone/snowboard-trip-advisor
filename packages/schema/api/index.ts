@@ -7,3 +7,8 @@ export { ResortUpsertBody } from './resortUpsert'
 export { PublishBody, PublishResponse, PublishSlugParam } from './publish'
 export { ListPublishesQuery, ListPublishesResponse, PublishMetadata } from './listPublishes'
 export { HealthQuery, HealthResponse } from './health'
+export {
+  AnalystNotesGetResponse,
+  AnalystNoteUpsertBody,
+  AnalystNoteUpsertResponse,
+} from './analystNotes'
