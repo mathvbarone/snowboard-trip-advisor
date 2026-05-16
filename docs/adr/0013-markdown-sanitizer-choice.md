@@ -1,0 +1,96 @@
+# ADR-0013: Markdown sanitizer choice for analyst notes
+
+- **Status:** Accepted
+- **Date:** 2026-05-16
+- **Deciders:** @mathvbarone
+- **Related spec:** [`docs/superpowers/specs/2026-05-12-analyst-notes-followup-design.md`](../superpowers/specs/2026-05-12-analyst-notes-followup-design.md) §4 (Sanitizer architecture — §4.1 library, §4.3 plugin-order invariant, §4.4 allowlist Schema, §4.5 render function, §4.6 test corpus, §4.7 maintenance discipline, §4.8 this ADR's outline)
+- **Related plan:** [`docs/superpowers/plans/2026-05-13-analyst-notes-implementation.md`](../superpowers/plans/2026-05-13-analyst-notes-implementation.md) §4 (PR N.b1)
+- **Related ADRs:** [ADR-0012](./0012-defer-analyst-notes-to-post-epic-4-followup.md) — deferred analyst notes (incl. this sanitizer choice) from Epic 4 to the post-Epic-4 follow-up; §35.3 of that ADR explicitly scopes "the sanitizer dependency + ADR-0013 for the sanitizer choice" to the follow-up PR stack. This ADR closes that open decision. [ADR-0008](./0008-dependency-security-ci-gate.md) — the dependency-security CI gate that tracks the pinned sanitizer versions.
+
+## Context
+
+Parent spec [`2026-04-22-product-pivot-design.md`](../superpowers/specs/2026-04-22-product-pivot-design.md) §3.9 requires per-resort, per-field Markdown analyst notes rendered safely. The follow-up design spec §4 specifies the render architecture: a shared `renderAnalystNoteMarkdown(markdown: string): string` in `packages/schema/src/markdown.ts`, used by both the server (authoritative render before persistence is NOT done — notes store raw Markdown; render is at read time) and the client (live preview). The function's output is consumed via `dangerouslySetInnerHTML` in the analyst-notes view — this is the single sanctioned `dangerouslySetInnerHTML` boundary in the codebase (parent spec §3.9 amended in PR N.b1 to record the sanctioned boundary; see [follow-up spec §11.1](../superpowers/specs/2026-05-12-analyst-notes-followup-design.md)).
+
+Because the rendered HTML is injected into the DOM without React's escaping, the **sanitizer configuration is the security boundary**. A misconfigured allowlist, a reordered plugin chain, or a residue element surviving sanitization is a stored-XSS vector. Phase 1 is loopback-only single-analyst (low live risk), but the architecture is the seed for any future multi-author lift, so the design is defense-in-depth from day one.
+
+## Decision
+
+### 1. Decision summary
+
+Use the **`unified` / `remark` / `rehype` ecosystem** with `rehype-sanitize` driven by a custom allowlist `Schema`:
+
+- **Library / version pin (exact, no `^` — spec §4.7):** `unified@11.0.5`, `remark-parse@11.0.0`, `remark-gfm@4.0.1`, `remark-rehype@11.1.2`, `rehype-raw@7.0.0`, `rehype-external-links@3.0.0`, `rehype-sanitize@6.0.0`, `rehype-stringify@10.0.1`, `unist-util-visit@5.1.0`. Exact pins because every link in this chain is part of the security boundary; Dependabot (per [ADR-0008](./0008-dependency-security-ci-gate.md)) surfaces upgrades for explicit review rather than silent range resolution.
+- **Allowlist scope:** `rehype-sanitize`'s `defaultSchema` (GFM-aware baseline, allowlist model) widened additively per spec §4.4 — see §3 below for the tag-by-tag justification.
+- **Render architecture:** a module-level frozen `unified()` pipeline (`processor`) built once at module load. `renderAnalystNoteMarkdown` validates input is a string (throws `TypeError` otherwise), short-circuits empty input to `''`, and otherwise runs `processor.processSync`. No factory, no injection seam (per the plan's "what we are NOT building" — `processor` is a value, not a builder; tests import it directly for the plugin-order pin).
+- **Plugin order is a load-bearing security invariant (spec §4.3):** `remarkParse → remarkGfm → remarkRehype({allowDangerousHtml:true}) → rehypeRaw → rehypeExternalLinks → rehypeSanitize → rehypeStripStrayInputs → rehypeAnchorRewrite → rehypeStringify`. Reordering breaks sanitization (e.g. sanitize before raw → raw HTML strings reach the stringifier unsanitized). `rehypeStripStrayInputs` MUST run **after** `rehype-sanitize` because its job is to clean sanitizer residue. The order is pinned by name in `markdown.test.ts`.
+- **Two custom passes (spec §4.1):**
+  - `rehypeStripStrayInputs` — removes any `<input>` whose attributes do not exactly match the GFM task-list shape (`type="checkbox"` AND `disabled` present). Closes R10.1: `rehype-sanitize`'s value-restricted attribute model strips non-matching attributes but leaves the bare `<input>` tag, which defaults to `type="text"` (a focusable, interactive text field — a phishable surface).
+  - `rehypeAnchorRewrite` — rewrites `<a href="#X">` to `<a href="#analyst-X">` so internal anchors hop to the clobber-prefixed `id`s `rehype-sanitize` produced (`clobberPrefix: 'analyst-'`). Idempotent — already-prefixed and empty fragments are left untouched.
+- **Schema hardening beyond the spec's literal text, same security intent:** `required` is cleared (the `defaultSchema` `required.input` rule would *inject* `disabled`/`type=checkbox` onto a non-conforming `<input>`, defeating `rehypeStripStrayInputs`); `strip` is extended from `['script']` to every never-render container (`style`, `noscript`, `template`, `iframe`, `object`, `embed`, `form`) so their subtree is dropped rather than flattened to leaking text/attribute nodes. Both changes make the §4.6 OWASP corpus pass at the AST level (no executable path survives a browser re-parse) and are recorded here as part of the allowlist decision.
+
+### 2. Rejected alternatives
+
+- **`marked` + `isomorphic-dompurify`** — DOMPurify is battle-tested, but extending its allowlist is config-string / hook based with no typed `Schema`; the per-tag attribute allowlist we need (regex-validated `className`, heading-only `id`, value-restricted `input type`) is awkward and untyped. `rehype-sanitize`'s `Schema` is a typed, inspectable, freezable object the test suite can assert against directly.
+- **`markdown-it` + `DOMPurify`** — extra dependency surface (two parsers), no GFM (tables / task lists / strikethrough / autolinks) by default — would require additional plugins, widening the dependency boundary the ADR is trying to keep narrow.
+- **`react-markdown`** — produces React elements, not an HTML string. The shared renderer must return a string (server-side render path + `dangerouslySetInnerHTML` client path). Does not fit.
+- **`markdown-to-jsx`** — does not support full raw-HTML pass-through; analyst notes intentionally allow a curated raw-HTML subset (`<kbd>`, `<details>`, `<abbr>`, …) per §4.4.
+
+### 3. Allowlist tag-by-tag justification
+
+Baseline: `rehype-sanitize` `defaultSchema` (GFM-aware allowlist — anything unlisted is stripped). Additive widening (spec §4.4):
+
+- **`details`, `summary`** — collapsible analyst rationale ("expand for the full reasoning"). `<details>` also gets the `open` attribute. Threat: `ontoggle` handler — blocked (no `on*` in any attribute list; verified by fuzz + the `<details ontoggle>` corpus row).
+- **`kbd`** — render keyboard shortcuts in notes (e.g. `<kbd>Cmd+K</kbd>`). Inert formatting element, no attributes granted.
+- **`sub`, `sup`** — chemistry/units/footnote markers in metric commentary (e.g. altitude footnotes). Inert, no attributes.
+- **`mark`** — highlight a phrase. Inert, no attributes.
+- **`figure`, `figcaption`** — captioned blocks. `figure` gets `id` (heading-class anchor target, clobber-prefixed). No other attributes.
+- **`abbr`, `dfn`, `cite`, `q`, `time`** — semantic inline elements for analyst prose. `abbr` gets `title`; `q` gets `cite` (http/https only); `time` gets `datetime`. `cite`/`dfn` carry no attributes. Threat for `q[cite]`: javascript: URL — blocked by the explicit `cite` protocol enumeration (`http`, `https` only).
+- **`div`, `span`** — layout/grouping in richer notes. `span` gets a regex-validated `className` (`/^[\w-]+$/` — no spaces, no `:`, no `(` — defeats CSS-injection-via-class and attribute-breakout). Neither gets `id`/`style`/`on*`.
+- **`input`** — **GFM task-list carve-out only.** Attributes restricted to value-locked `type="checkbox"` plus boolean `disabled`, `checked`. The post-sanitize `rehypeStripStrayInputs` pass then removes any `<input>` that is not exactly `type="checkbox"` + `disabled` (the shape `remark-gfm` emits for `- [x]` / `- [ ]`). Without the carve-out the task-list promise regresses; without the post-pass a bare interactive `<input type=text>` survives (phishing surface). Two-step model: sanitize admits the tag + value-restricted attrs; the pass enforces the exact shape.
+- **Attribute grants on baseline tags:** `<a>`: `href` (http/https/mailto/irc/ircs/tel — no `javascript:`/`data:`/`vbscript:`), `title`, `rel`, `target` (M2 auto-injection of `rel="nofollow noopener noreferrer"` + `target="_blank"` via `rehype-external-links` prevents tabnabbing). `<img>`: `src` (http/https only), `alt`, `title`, `width`, `height`, `loading` (no `srcset`/`crossorigin`/`referrerpolicy`). `<code>`/`<pre>`: `className` regex-validated `/^language-[\w-]+$/` (syntax-highlight hint only). `<h1>`–`<h6>`, `<figure>`: `id` only (narrowed from `defaultSchema`'s universal `id` — DOM-clobbering surface minimized; all surviving `id`/`name` get the `analyst-` clobber prefix). `<th>`/`<td>`: `colspan`, `rowspan`, `align` (table layout). `name` is dropped from the universal attribute list entirely.
+- **Protocols (explicit enumeration, NOT inherited):** `href` → http, https, mailto, irc, ircs, tel; `src` → http, https; `cite` → http, https. `data:`, `javascript:`, `vbscript:` are absent ⇒ stripped. Fragment/relative hrefs (`#section`) carry no scheme and are admitted, then anchor-rewritten to the clobber prefix.
+- **Inherited blocks (NOT overridden):** `<script>` (+ extended `strip`: `<style>`, `<noscript>`, `<template>`, `<iframe>`, `<object>`, `<embed>`, `<form>`); all `on*` event handlers; `srcset`, `crossorigin`, `referrerpolicy`; `data:`/`javascript:`/`vbscript:` URLs.
+
+### 4. Threat model
+
+- **Phase 1 (current):** trusted single analyst, loopback-only admin app (no network exposure — Epic-4 spec §10.6 "admin is dev-only"). The realistic threat is *self-XSS via pasted content* and *future-proofing*, not an active attacker. Even so, the full allowlist + plugin-order invariant + AST-verified OWASP corpus + 1000-run fast-check fuzz are in place now — the cost of defense-in-depth is paid once, at design time.
+- **Defense-in-depth for a future multi-user lift:** if analyst notes ever become multi-author or the admin app is exposed beyond loopback, the sanitizer is already the hardened boundary; the lift conditions (§6) gate the config change behind a fresh threat model.
+- **Verified invariant:** for any input string, the rendered HTML, when re-parsed by a browser/`parse5`, contains no `<script>`/`<iframe>`/`<object>`/`<embed>`/`<form>`/`<style>`/`<noscript>`/`<template>` element, no `on*` handler attribute, no `javascript:`/`vbscript:`/`data:` URL in any URL-bearing attribute, and every `<input>` is exactly the GFM disabled-checkbox shape. Pinned by `markdown.test.ts` (OWASP Filter Evasion corpus, AST-level) + `markdown.fuzz.test.ts` (fast-check, 1000 runs, AST-level). Per spec §4.6, assertions are AST-level (re-parse + walk) not raw-substring — a substring scan false-fails on safe output where the renderer legitimately emits `javascript:` as inert paragraph/code text.
+
+### 5. Out of scope
+
+- **No Content-Security-Policy.** Per Epic-4 spec §10.6 the admin app is dev-only / loopback; no CSP header infrastructure. A CSP would be part of the multi-user lift, not Phase 1.
+- **No rate limiting** on the analyst-notes endpoints (single-analyst, loopback).
+- **No content audit log / multi-author attribution.** Phase 2 (follow-up spec §9 out-of-scope; multi-author audit field deferred).
+- **No server-side pre-rendered HTML persistence.** Notes store raw Markdown + timestamps; HTML is rendered at read time by the same shared function (follow-up spec §2.5). The sanitizer is therefore exercised on every read, not frozen at write time — a sanitizer upgrade improves already-stored notes with no migration.
+
+### 6. Lift conditions
+
+Any move toward multi-author or network-exposed analyst content **REQUIRES**, before the config change ships:
+
+1. A fresh threat model (active-attacker assumptions, not trusted-single-analyst).
+2. A full sanitizer-config review (allowlist re-justification under the new threat model).
+3. A CSP evaluation (Out of scope §5 item 1 is reopened).
+4. An ADR-0013 amendment recording the new decision + the Subagent Review (mechanical trigger fires on `docs/adr/**` per AGENTS.md §60).
+
+Additionally, per spec §4.7 maintenance discipline: **any allowlist widening** (new tag/attribute/protocol) is an ADR-0013 amendment + Subagent Review, and **new XSS vectors** discovered via advisory feeds land as `markdown.test.ts` / `markdown.fuzz.test.ts` additions **before** any allowlist change.
+
+## Consequences
+
+**Positive:**
+
+- The sanitizer config is a single, typed, frozen, inspectable object the test suite asserts against directly — no opaque allowlist string.
+- Plugin order is pinned by name; an accidental reorder fails CI loudly rather than silently weakening sanitization.
+- Exact version pins + Dependabot (ADR-0008) make every sanitizer-chain upgrade an explicit, reviewable event.
+- The `./markdown` sub-export keeps the ~150–200 KB `unified` pipeline off the schema barrel; `apps/public` cannot accidentally pull it (verified by `exports-map.test.ts`).
+
+**Negative:**
+
+- Nine runtime dependencies added to `packages/schema` (the `unified` chain). Mitigated: exact-pinned, Dependabot-tracked, sub-exported (no public-app bundle impact), `React.lazy`-split on the admin editor view (follow-up spec §6.6).
+- The plugin-order invariant + allowlist are now load-bearing config a future contributor could weaken without understanding the blast radius. Mitigated: the `markdown.ts` security docblock, the order pin test, this ADR, and the AGENTS.md §60 mechanical Subagent Review on `docs/adr/**` + `packages/schema/**`.
+
+## Negative space
+
+- **Not decided here:** the per-field analyst-notes UI shape, the API contract, or the server concurrency model (follow-up spec §3 / §5; PRs N.b2 / N.b3a / N.b3b / N.c*). This ADR is scoped to the render/sanitizer boundary only.
+- **Not affected:** the published Resort doc's `field_sources[*].attribution_block` Markdown (public app, Epic 3) — a separate, already-shipped rendering path. This ADR governs only the admin-internal analyst-notes render.
+- **Not a relaxation:** the `input` carve-out is an *additive* widening of an allowlist (`<input>` is on `defaultSchema`'s `tagNames`, but the bare-input residue is the real risk), not the removal of an outright block; the `rehypeStripStrayInputs` post-pass is the compensating control.
