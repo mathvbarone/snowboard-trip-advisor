@@ -1,7 +1,7 @@
 import { mkdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import { PublishedDataset, WorkspaceFile } from '@snowboard-trip-advisor/schema'
+import { PublishedDataset, WorkspaceFile, type ResortSlug } from '@snowboard-trip-advisor/schema'
 import { atomicWriteText } from '@snowboard-trip-advisor/schema/node'
 import type { z } from 'zod'
 
@@ -134,4 +134,38 @@ export async function readPublishedDocOrNull(
   }
   const parsed = PublishedDataset.safeParse(raw)
   return parsed.success ? parsed.data : null
+}
+
+// Exported for the no-leak probe in workspace.test.ts — the cleanup
+// invariant (entry deleted on identity match after settle) is only
+// observable via the map itself. Not part of the production API surface.
+export const slugLocks = new Map<ResortSlug, Promise<unknown>>()
+
+/**
+ * Serializes write operations for a slug. INTRA-PROCESS promise mutex —
+ * distinct from `publishDataset`'s `withPublishLock`, which is an
+ * INTER-PROCESS file lock (O_EXCL).
+ *
+ * Phase 1: Vite middleware runs single-process; in-memory Map serializes.
+ * Phase 2: Hono service may run multi-instance; lift to inter-process
+ *   (Postgres `pg_advisory_lock` or equivalent).
+ *
+ * Readers do NOT acquire — atomic rename gives readers old-or-new file,
+ * never partial.
+ */
+export async function withSlugLock<T>(slug: ResortSlug, fn: () => Promise<T>): Promise<T> {
+  const prev = slugLocks.get(slug) ?? Promise.resolve()
+  const next = prev.then(fn, fn)  // run fn after prev settles (success or fail)
+  slugLocks.set(slug, next)
+  void next.catch(() => {})  // `void` satisfies AGENTS.md §"Code Rules → TypeScript" ("Do not leave promises unhandled. Await them or mark them with `void`."); the `.catch` suppresses unhandled-rejection without rebinding the lock entry
+  try {
+    return await next
+  } finally {
+    // Strict identity compare: only delete the entry we ourselves stored.
+    // The bug pattern `slugLocks.set(slug, next.catch(() => {}))` would make
+    // this never match (different Promise) and the map would leak.
+    if (slugLocks.get(slug) === next) {
+      slugLocks.delete(slug)
+    }
+  }
 }
