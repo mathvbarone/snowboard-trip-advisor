@@ -111,6 +111,10 @@ export default defineConfig({
         // round-8 P2-12 cycle-free HMR). Mirrored in apps/admin/vite.config.ts
         // for the workspace-level coverage view.
         'apps/admin/src/state/useResortDetail.hmr.ts',
+        // `apps/admin/src/state/useAnalystNotes.hmr.ts` — same HMR dead-code
+        // pattern as useResortDetail.hmr.ts. PR N.c1 (read hook). Mirrored
+        // in apps/admin/vite.config.ts for the workspace-level coverage view.
+        'apps/admin/src/state/useAnalystNotes.hmr.ts',
         // `scripts/hooks/**` are shell scripts (test-hooks.sh, deny-dangerous-git.sh).
         'scripts/hooks/**',
         // `scripts/pre-commit` is a shell script installed into the worktree

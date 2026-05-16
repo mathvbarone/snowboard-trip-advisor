@@ -38,6 +38,8 @@ export default defineConfig({
         // apps/public/vite.config.ts:143. CLAUDE.md "Coverage Rules" bans
         // inline /* v8 ignore */ comments, so the exclusion is a path.
         'src/state/useResortDetail.hmr.ts',
+        // PR N.c1: same HMR dead-code pattern for useAnalystNotes.hmr.ts.
+        'src/state/useAnalystNotes.hmr.ts',
       ],
       reporter: ['text', 'lcov'],
     },
