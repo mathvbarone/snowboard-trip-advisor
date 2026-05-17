@@ -1,5 +1,6 @@
 import { ResortSlug } from '@snowboard-trip-advisor/schema'
 import { AnalystNotesGetResponse } from '@snowboard-trip-advisor/schema/api'
+import type * as SchemaMarkdown from '@snowboard-trip-advisor/schema/markdown'
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { Suspense } from 'react'
@@ -18,6 +19,30 @@ import {
 } from '../../state/useAnalystNotes'
 
 import AnalystNoteSection from './AnalystNoteSection'
+
+// Codex round-5 P2-B fold harness. Wrap the REAL renderAnalystNoteMarkdown in
+// a spy that delegates to the actual unified/sanitize implementation: the
+// existing preview / parity tests below keep asserting on real sanitized
+// HTML, while the memoization test can assert the renderer is invoked once
+// per settled previewSource (debounce) — NOT once per keystroke render.
+// vi.mock is hoisted above imports (established repo pattern, see
+// packages/schema/src/publishDataset.lockTimeout.test.ts); vi.importActual
+// keeps client/server parity intact.
+const renderSpy = vi.fn<(markdown: string) => string>()
+vi.mock('@snowboard-trip-advisor/schema/markdown', async (): Promise<
+  typeof SchemaMarkdown
+> => {
+  const actual = await vi.importActual<typeof SchemaMarkdown>(
+    '@snowboard-trip-advisor/schema/markdown',
+  )
+  return {
+    ...actual,
+    renderAnalystNoteMarkdown: (markdown: string): string => {
+      renderSpy(markdown)
+      return actual.renderAnalystNoteMarkdown(markdown)
+    },
+  }
+})
 
 const KB = ResortSlug.parse('kotelnica-bialczanska')
 const PATH = 'slopes_km'
@@ -58,6 +83,7 @@ function renderSection(): void {
 
 beforeEach((): void => {
   vi.useFakeTimers()
+  renderSpy.mockClear()
   resetAnalystNotes()
   resetAnalystNoteDraft()
   resetFlushAll()
@@ -138,6 +164,40 @@ describe('AnalystNoteSection (spec §6.2 / §6.3)', (): void => {
       await vi.advanceTimersByTimeAsync(150)
     })
     expect(preview.innerHTML).toContain('<strong>bold</strong>')
+  })
+
+  // Codex round-5 P2-B fold — memoize the debounced preview render. The
+  // Textarea re-renders the component on EVERY keystroke (draft changes), but
+  // previewSource only changes once per debounce window (~150ms). With the
+  // renderer called inline in JSX, the expensive unified/sanitize pipeline
+  // ran on every keystroke (defeating the debounce → typing lag on long
+  // notes). useMemo keyed by previewSource makes it run only when the settled
+  // previewSource changes.
+  it('does NOT re-run renderAnalystNoteMarkdown per keystroke (memoized by previewSource)', async (): Promise<void> => {
+    seedEmpty()
+    renderSection()
+    const source = screen.getByRole('textbox', { name: /note source/i })
+
+    // Mount rendered the (empty) previewSource exactly once.
+    expect(renderSpy).toHaveBeenCalledTimes(1)
+
+    // Type several characters within ONE debounce window. Each keystroke
+    // re-renders the component (draft changes), but previewSource has NOT
+    // settled yet → the memo must NOT re-invoke the renderer.
+    fireEvent.change(source, { target: { value: 'a' } })
+    fireEvent.change(source, { target: { value: 'ab' } })
+    fireEvent.change(source, { target: { value: 'abc' } })
+    fireEvent.change(source, { target: { value: 'abcd' } })
+    expect(renderSpy).toHaveBeenCalledTimes(1)
+
+    // Advance past the debounce ONCE: previewSource settles to the final
+    // value → exactly ONE additional render-pipeline run (not one per
+    // keystroke).
+    await act(async (): Promise<void> => {
+      await vi.advanceTimersByTimeAsync(150)
+    })
+    expect(renderSpy).toHaveBeenCalledTimes(2)
+    expect(renderSpy).toHaveBeenLastCalledWith('abcd')
   })
 
   it('mod+enter forces an immediate flush (no 500ms wait)', async (): Promise<void> => {

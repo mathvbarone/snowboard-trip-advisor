@@ -956,6 +956,103 @@ describe('FieldRow analyst-note affordance (PR N.c4 §6.1 / §6.4)', (): void =>
     expect(screen.queryByText('save-failed')).toBeNull()
   })
 
+  // Codex round-5 P2-A fold — seeded-`saved` suppression. useAnalystNoteDraft
+  // seeds a pre-existing persisted note with status `'saved'` on mount (N.c2
+  // spec §5.3) even though no save just occurred. NoteSaveStatus is ALWAYS
+  // mounted, so without the render-latch gate every pre-noted row would show
+  // a persistent "saved" badge at page load — noise contrary to spec §6.2's
+  // post-edit `saving… → saved → save-failed` lifecycle.
+  describe('seeded-saved suppression (round-5 P2-A)', (): void => {
+    it('renders NO status text for a row whose path has a pre-existing persisted note (no edit this session)', (): void => {
+      // Seeded persisted note → useAnalystNoteDraft initial status is 'saved'
+      // with NO save lifecycle this session. The badge must NOT appear.
+      seedNote('hello', '<p>hello</p>')
+      render(<FieldRow path="slopes_km" state={liveState(8)} />)
+      // The affordance shows the note exists (📝 5) but there is no
+      // save-status indicator — no role="status", no "saved" text.
+      expect(
+        screen.getByRole('button', { name: 'Edit note' }),
+      ).toHaveTextContent('📝 5')
+      expect(screen.queryByRole('status')).toBeNull()
+      expect(screen.queryByText('saved')).toBeNull()
+      expect(screen.queryByText('saving…')).toBeNull()
+      expect(screen.queryByText('save-failed')).toBeNull()
+    })
+
+    it('DOES show "saved" after a local edit flushes successfully (real save lifecycle observed)', async (): Promise<void> => {
+      // Seeded note (initial status 'saved' suppressed), then a local edit +
+      // Escape flush drives dirty → saving → saved. Because `saving` was
+      // observed this session, "saved" now renders (the lifecycle is real).
+      seedNote('hello', '<p>hello</p>')
+      const spy = vi
+        .spyOn(apiClient, 'upsertAnalystNote')
+        .mockResolvedValue({
+          slug: KOTELNICA,
+          path: 'slopes_km',
+          note: {
+            schema_version: 1,
+            markdown: 'edited and saved',
+            html: '<p>edited and saved</p>',
+            created_at: OBS_AT,
+            updated_at: OBS_AT,
+          },
+        })
+
+      render(<FieldRow path="slopes_km" state={liveState(8)} />)
+      // No status badge before any edit (seeded-saved suppressed).
+      expect(screen.queryByRole('status')).toBeNull()
+
+      const aff = screen.getByRole('button', { name: 'Edit note' })
+      fireEvent.click(aff)
+      const source = await screen.findByRole('textbox', {
+        name: /note source/i,
+      })
+      fireEvent.change(source, { target: { value: 'edited and saved' } })
+      await act(async (): Promise<void> => {
+        source.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+        )
+        await Promise.resolve()
+      })
+
+      await waitFor((): void => {
+        expect(screen.getByText('saved')).toBeInTheDocument()
+      })
+      expect(spy).toHaveBeenCalled()
+    })
+
+    it('still shows "save-failed" when reached after an edit on a pre-noted row (silent-data-loss guard never gated)', async (): Promise<void> => {
+      // Round-3 reject harness on a SEEDED note: the seeded-saved is
+      // suppressed, but a failed flush after a local edit MUST surface
+      // "save-failed" (data-safety guarantee — never gated by the latch).
+      seedNote('hello', '<p>hello</p>')
+      const spy = vi
+        .spyOn(apiClient, 'upsertAnalystNote')
+        .mockRejectedValue(new Error('boom'))
+
+      render(<FieldRow path="slopes_km" state={liveState(8)} />)
+      expect(screen.queryByRole('status')).toBeNull()
+
+      const aff = screen.getByRole('button', { name: 'Edit note' })
+      fireEvent.click(aff)
+      const source = await screen.findByRole('textbox', {
+        name: /note source/i,
+      })
+      fireEvent.change(source, { target: { value: 'edited but doomed' } })
+      await act(async (): Promise<void> => {
+        source.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+        )
+        await Promise.resolve()
+      })
+
+      await waitFor((): void => {
+        expect(screen.getByText('save-failed')).toBeInTheDocument()
+      })
+      expect(spy).toHaveBeenCalled()
+    })
+  })
+
   it('is axe-clean with the affordance present (collapsed + expanded)', async (): Promise<void> => {
     seedNote('hello', '<p>hello</p>')
     const { container } = render(<FieldRow path="slopes_km" state={liveState(8)} />)

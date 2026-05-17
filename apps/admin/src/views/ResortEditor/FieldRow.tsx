@@ -410,7 +410,10 @@ export function FieldRow({ path, state }: FieldRowProps): JSX.Element {
           useAnalystNotes(slug) — no new network — and uses
           useSyncExternalStore internally (declarative subscription, no
           effect / state mirroring). idle/dirty render nothing so untouched
-          rows show no noise. */}
+          rows show no noise; and per the round-5 P2-A fold the
+          seeded-on-mount `saved` (a pre-existing persisted note with no edit
+          this session) is suppressed too — `saved` only shows once a real
+          save lifecycle (a `saving` was observed) has run for this path. */}
       <Suspense
         fallback={
           <NoteAffordanceButton
@@ -566,6 +569,24 @@ export function noteSaveStatusLabel(status: NoteDraftStatus): string | null {
 // hook here seeds per-path state from the already-cached useAnalystNotes(slug)
 // with no extra network (spec §6.2 / N.c2 design). Renders nothing while the
 // label is null (idle/dirty) so untouched rows stay quiet.
+//
+// Codex round-5 P2-A fold — seeded-`saved` suppression. useAnalystNoteDraft
+// SEEDS a path that already has a persisted note with status `'saved'` on
+// mount (N.c2 spec §5.3 initial-state) even though NO save just occurred.
+// Because this component is ALWAYS mounted, mapping that seeded `saved`
+// straight to "saved" would slap a persistent badge on EVERY pre-noted row
+// at page load / after collapse — noise, and contrary to spec §6.2's
+// lifecycle (`saving… → saved → save-failed` only AFTER a local edit/flush).
+// Fix: only surface `saved` once a real save lifecycle has been observed
+// this session for this path. `sawSavingRef` is a monotonic render-latch
+// (the accepted React "track-seen" idiom — no effect, no extra render): it
+// flips true the first render where `status === 'saving'`, which can only
+// arise after an edit/flush. `saving` and `save-failed` ALWAYS render
+// (save-failed visibility is the round-3 silent-data-loss guarantee — never
+// gate it; it too only follows an edit). NoteSaveStatus is mounted for the
+// FieldRow's whole lifetime (only AnalystNoteSection unmounts on collapse),
+// so the latch persists across expand/collapse: edit → dirty → saving (latch
+// set, "saving…") → saved ("saved") / save-failed ("save-failed").
 function NoteSaveStatus({
   slug,
   path,
@@ -574,7 +595,19 @@ function NoteSaveStatus({
   readonly path: MetricPath
 }): JSX.Element | null {
   const { status } = useAnalystNoteDraft(slug, path)
-  const label = noteSaveStatusLabel(status)
+  const sawSavingRef = useRef(false)
+  if (status === 'saving') {
+    sawSavingRef.current = true
+  }
+  // Suppress the seeded-on-mount `saved` (a pre-existing persisted note with
+  // no edit this session): if `saved` is reached without ever passing
+  // through `saving`, no real save happened — render nothing. Every other
+  // status (incl. `saving` / `save-failed`, which only arise post-edit) maps
+  // through the pure helper unchanged.
+  const label =
+    status === 'saved' && !sawSavingRef.current
+      ? null
+      : noteSaveStatusLabel(status)
   if (label === null) {
     return null
   }

@@ -3,6 +3,7 @@ import type { ResortSlug } from '@snowboard-trip-advisor/schema'
 import { renderAnalystNoteMarkdown } from '@snowboard-trip-advisor/schema/markdown'
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
   type JSX,
@@ -78,6 +79,19 @@ export default function AnalystNoteSection({
     }
   }, [draft])
 
+  // Codex round-5 P2-B fold — memoize the renderer pipeline by previewSource.
+  // <Textarea value={draft} onChange={setDraft}> re-renders this component on
+  // EVERY keystroke (draft changes). Calling renderAnalystNoteMarkdown inline
+  // in JSX ran the expensive unified/sanitize chain on every keystroke even
+  // though previewSource only changes every PREVIEW_DEBOUNCE_MS (debounce) —
+  // defeating the debounce and causing typing lag on long notes. Keyed by
+  // previewSource so the pipeline now runs only when the debounced source
+  // settles (~every 150ms), not per keystroke.
+  const previewHtml = useMemo(
+    (): string => renderAnalystNoteMarkdown(previewSource),
+    [previewSource],
+  )
+
   const sourceRef = useRef<HTMLTextAreaElement>(null)
 
   const onSourceKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>): void => {
@@ -131,7 +145,7 @@ export default function AnalystNoteSection({
         // ONLY view permitted to consume its sanitized string output via
         // dangerouslySetInnerHTML — client/server render parity.
         dangerouslySetInnerHTML={{
-          __html: renderAnalystNoteMarkdown(previewSource),
+          __html: previewHtml,
         }}
       />
     </div>
