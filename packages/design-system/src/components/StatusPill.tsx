@@ -1,3 +1,5 @@
+import './StatusPill.css'
+
 import type { JSX, ReactNode } from 'react'
 
 // Per-field status indicator (Epic 4 §5.1). Four variants map to existing
