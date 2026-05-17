@@ -385,11 +385,32 @@ export function FieldRow({ path, state }: FieldRowProps): JSX.Element {
       <span className="sta-field-row__value">{displayValue(path, state)}</span>
       {badgeSource !== null ? <SourceBadge source={badgeSource} /> : null}
       {modeToggleEl}
-      {/* The notes GET is Suspense-based — keep its throw LOCAL so a cold
-          cache shows only this row's placeholder (📝 …, disabled) instead of
-          collapsing ResortEditor's boundary into a whole-tree concurrent
-          re-render. The placeholder is itself the affordance shape so layout
-          doesn't shift when the count resolves. */}
+      {/* Both the affordance AND the adjacent save-status read the notes GET
+          via Suspense (NoteAffordance → useAnalystNotes; NoteSaveStatus →
+          useAnalystNoteDraft → useAnalystNotes). Keep BOTH inside this ONE
+          LOCAL <Suspense> so a cold cache shows only this row's placeholder
+          (📝 …, disabled) instead of bubbling the throw to ResortEditor's
+          route boundary and collapsing the WHOLE editor into "Loading…".
+          The placeholder is itself the affordance shape so layout doesn't
+          shift when the count resolves; on a cold cache there is no
+          save-status to show yet (status is idle → renders nothing), so the
+          fallback needs no status placeholder.
+
+          Spec §6.2 — the save-status indicator stays NEXT TO THE AFFORDANCE
+          (DOM-adjacent, inside the same boundary) and, once the cache is
+          warm, is ALWAYS mounted at FieldRow level. It subscribes to
+          useAnalystNoteDraft's module-level write-hook state, so a
+          saving→saved→save-failed transition stays visible whether the
+          collapsible AnalystNoteSection is expanded OR collapsed (Escape /
+          second affordance click / dropping below md all unmount the
+          section). Without this, a flush that fails AFTER the analyst
+          collapses the row would be silent (data loss). It renders
+          regardless of isAboveMd so a failure stays visible in the
+          read-only layout too. The hook reads from the already-cached
+          useAnalystNotes(slug) — no new network — and uses
+          useSyncExternalStore internally (declarative subscription, no
+          effect / state mirroring). idle/dirty render nothing so untouched
+          rows show no noise. */}
       <Suspense
         fallback={
           <NoteAffordanceButton
@@ -411,22 +432,8 @@ export function FieldRow({ path, state }: FieldRowProps): JSX.Element {
           isAboveMd={isAboveMd}
           onToggle={onToggleNotes}
         />
+        <NoteSaveStatus slug={slug} path={path} />
       </Suspense>
-      {/* Spec §6.2 — save-status indicator NEXT TO THE AFFORDANCE, at
-          FieldRow level (always mounted). It subscribes to
-          useAnalystNoteDraft's module-level write-hook state, so a
-          saving→saved→save-failed transition stays visible whether the
-          collapsible AnalystNoteSection is expanded OR collapsed (Escape /
-          second affordance click / dropping below md all unmount the
-          section). Without this, a flush that fails AFTER the analyst
-          collapses the row would be silent (data loss). It renders
-          regardless of isAboveMd so a failure stays visible in the
-          read-only layout too. The hook reads from the already-cached
-          useAnalystNotes(slug) — no new network — and uses
-          useSyncExternalStore internally (declarative subscription, no
-          effect / state mirroring). idle/dirty render nothing so untouched
-          rows show no noise. */}
-      <NoteSaveStatus slug={slug} path={path} />
       {inputElement}
       {isAboveMd && notesExpanded ? (
         <div id={sectionId}>

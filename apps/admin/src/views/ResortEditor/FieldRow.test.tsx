@@ -33,6 +33,7 @@ import {
   __resetForTests as resetWorkspaceState,
   setFieldValue as workspaceSetFieldValue,
 } from '../../state/useWorkspaceState'
+import { ResortEditor } from '../ResortEditor'
 
 import {
   editorSlug,
@@ -1012,5 +1013,54 @@ describe('FieldRow analyst-note affordance (PR N.c4 §6.1 / §6.4)', (): void =>
     expect(
       screen.getByRole('button', { name: /delete note/i }),
     ).toBeInTheDocument()
+  })
+
+  // Codex P2 fold (spec §6.2 / §6.6): NoteSaveStatus also reads
+  // useAnalystNoteDraft → useAnalystNotes(slug), a Suspense read that THROWS
+  // the notes GET promise on a cold cache (first editor render, before any
+  // prepopulate). It MUST sit inside the SAME per-row local <Suspense> that
+  // wraps <NoteAffordance> so a cold-cache throw shows only this row's
+  // "📝 …" placeholder — never bubbling to ResortEditor's route-level
+  // boundary and replacing the WHOLE editor with "Loading…". Mounting the
+  // real <ResortEditor> (which owns that route boundary) with the
+  // resort-detail cache seeded but the analyst-notes cache DELIBERATELY left
+  // cold (getAnalystNotes stubbed to a never-resolving promise so
+  // useAnalystNotes genuinely suspends) is the only tree that exercises this:
+  // the per-row affordance describe-block above all prepopulate an empty
+  // notes cache in beforeEach, masking the cold path.
+  it('contains a cold analyst-notes suspend to the per-row placeholder (route-level Loading… not triggered)', (): void => {
+    // Resort-detail seeded → ResortEditorBody resolves synchronously, so the
+    // ONLY thing that can suspend is the cold analyst-notes read.
+    prepopulateResortDetail(KOTELNICA, syntheticResponse())
+    // Cold analyst-notes cache: undo beforeEach's empty-notes seed and stub
+    // the GET to a promise that never settles, so useAnalystNotes() suspends
+    // on the very first render (genuine cold-cache path).
+    resetAnalystNotes()
+    const getSpy = vi
+      .spyOn(apiClient, 'getAnalystNotes')
+      .mockReturnValue(new Promise<never>((): void => { /* never resolves */ }))
+
+    render(<ResortEditor slug={KOTELNICA} />)
+
+    // The notes GET WAS attempted (proves we are on the cold path, not the
+    // cachedFulfilled fast path).
+    expect(getSpy).toHaveBeenCalled()
+
+    // Containment: the route-level <Suspense fallback> (a single
+    // role="status" "Loading…" that replaces the WHOLE editor body) must NOT
+    // be showing — the cold-cache throw stayed inside the per-row boundary.
+    expect(screen.queryByText('Loading…')).toBeNull()
+    expect(
+      screen.getByRole('tablist', { name: 'Editor sections' }),
+    ).toBeInTheDocument()
+
+    // The per-row fallback IS showing for the durable rows: the
+    // NoteAffordanceButton placeholder ("📝 …", disabled-shape "Add note").
+    const durablePanel = screen.getByRole('tabpanel')
+    const slopesRow = within(durablePanel).getByLabelText('Slopes (km)')
+    const placeholder = within(slopesRow).getByRole('button', {
+      name: 'Add note',
+    })
+    expect(placeholder).toHaveTextContent('📝 …')
   })
 })
