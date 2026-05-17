@@ -1,3 +1,5 @@
+import './Shell.css'
+
 import type { JSX, MouseEvent, ReactNode } from 'react'
 
 // Outer layout chrome for the public app. Hosts the skip-link + the
