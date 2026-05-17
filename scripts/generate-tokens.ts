@@ -42,10 +42,10 @@ export function renderTokensCss(t: typeof Tokens): string {
     lines.push(`  --color-${k}: ${v};`)
   }
   lines.push('}')
-  lines.push('', '[data-theme="dark"] {')
+  lines.push('', '@media (prefers-color-scheme: dark) {', '  :root {')
   for (const [k, v] of Object.entries(t.color.dark)) {
-    lines.push(`  --color-${k}: ${v};`)
+    lines.push(`    --color-${k}: ${v};`)
   }
-  lines.push('}', '')
+  lines.push('  }', '}', '')
   return lines.join('\n')
 }
