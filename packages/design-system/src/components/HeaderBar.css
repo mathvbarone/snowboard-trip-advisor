@@ -22,7 +22,13 @@
   outline: 2px solid var(--color-accent, #0066cc);
   outline-offset: 2px;
 }
-.sta-header-bar [data-region="view-toggle"] {
+/* Push the right-side region group away from the brand. viewToggleSlot
+ * is optional, so the brand-adjacent sibling — not the view-toggle
+ * specifically — must carry the auto margin. When the toggle is
+ * present it is that element; when it is absent the shortlist region
+ * sits directly after the brand and is right-aligned instead. Covers
+ * both real DOM orders (brand+toggle+shortlist, brand+shortlist). */
+.sta-header-bar__brand + [data-region] {
   margin-left: auto;
 }
 .sta-header-bar [data-region="shortlist"] {
