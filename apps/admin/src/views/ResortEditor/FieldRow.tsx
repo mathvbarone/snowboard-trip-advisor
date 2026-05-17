@@ -1,4 +1,5 @@
 import {
+  Button,
   Input,
   SourceBadge,
   StatusPill,
@@ -7,16 +8,71 @@ import type {
   FieldState,
   MetricPath,
   Money,
+  ResortSlug,
   SourceKey,
 } from '@snowboard-trip-advisor/schema'
 import type { JSX } from 'react'
-import { useRef, useState } from 'react'
+import { lazy, Suspense, useId, useRef, useState } from 'react'
 
+import type { RouteState } from '../../lib/urlState'
 import { useResponsiveTabOrder } from '../../lib/useResponsiveTabOrder'
+import {
+  useAnalystNoteDraft,
+  type NoteDraftStatus,
+} from '../../state/useAnalystNoteDraft'
+import { useAnalystNotes } from '../../state/useAnalystNotes'
 import { useModeToggle } from '../../state/useModeToggle'
+import { useURLState } from '../../state/useURLState'
 import { useWorkspaceState } from '../../state/useWorkspaceState'
 
 import { ModeToggle } from './ModeToggle'
+
+// PR N.c4 §6.6 — LOAD-BEARING lazy boundary. AnalystNoteSection statically
+// imports `@snowboard-trip-advisor/schema/markdown` (the ~150 KB `unified`
+// renderer chain). It is reachable from FieldRow ONLY through this
+// `lazy(() => import())` so the renderer chunk is fetched on the first
+// "Notes" expand and never pulled by Dashboard / ResortsTable /
+// PublishDialog / PublishHistory. NEVER add a static `import` of
+// './AnalystNoteSection' (or the renderer) anywhere in this module — that
+// would collapse the code split (spec §6.6 / §10.4). The Suspense fallback
+// is `null` and the section is mounted ONLY when `notesExpanded` is true.
+// `lazy` infers the component type from the dynamic-import module shape;
+// no `import()` type annotation is needed (and it is lint-forbidden). The
+// import specifier is the ONLY reference to this module in FieldRow — keeping
+// it inside `lazy(() => import(...))` is exactly what preserves the split.
+const AnalystNoteSection = lazy(() => import('./AnalystNoteSection'))
+
+// Spec §6.1 — N is the rendered-HTML *text* character count (markup
+// excluded), 0 when there is no note. Parsing the server-sanitized html
+// string into a detached element and reading textContent keeps the count in
+// lockstep with what the preview pane will actually display. The string is
+// already sanitized by renderAnalystNoteMarkdown server-side; this never
+// attaches to the live document.
+function noteTextContent(html: string | undefined): string {
+  if (html === undefined || html === '') {
+    return ''
+  }
+  const el = document.createElement('div')
+  el.innerHTML = html
+  // `HTMLDivElement.textContent` is non-null (TS narrows it for an Element
+  // with content); the empty-html / undefined cases are handled above.
+  return el.textContent
+}
+
+// FieldRow only ever renders on the editor route (MetricPanel → ResortEditor).
+// useWorkspaceState() higher in the body already throws the analogous error
+// on a non-editor route, so the non-editor branch here is a defensive
+// invariant — exported + unit-tested directly so both branches are covered
+// without an inline coverage suppression (CLAUDE.md Coverage Rules).
+// eslint-disable-next-line react-refresh/only-export-components -- pure helper co-located inside FieldRow.tsx; same rationale as `formatMetricValue` / `labelForPath`. Honors the PR §11.1 8-file budget (no extra module).
+export function editorSlug(route: RouteState): ResortSlug {
+  if (route.route !== 'editor') {
+    throw new Error('FieldRow rendered outside the editor route')
+  }
+  return route.slug
+}
+
+const TOOLTIP_MAX = 80
 
 // PR 4.4b §D2 formatters. Exhaustive switch on MetricPath; never throws;
 // shape-mismatch / null / undefined inputs render as '—'. Money values use
@@ -204,6 +260,20 @@ export function FieldRow({ path, state }: FieldRowProps): JSX.Element {
   const { readOnly } = useResponsiveTabOrder()
   const isAboveMd = !readOnly
 
+  // Analyst-note affordance (spec §6.1 / §6.4 / §6.6). FieldRow only renders
+  // on the editor route — useWorkspaceState() above already enforced that
+  // invariant (it throws on a non-editor route first), so route.slug is
+  // statically present (editorSlug's non-editor branch is a defensive,
+  // separately-unit-tested guard). The `useAnalystNotes` read is Suspense-
+  // based; it is isolated inside <NoteAffordance> behind a LOCAL <Suspense>
+  // below so a cold notes cache only shows the "📝 …" placeholder for this
+  // one row instead of bubbling the throw up to ResortEditor's boundary and
+  // forcing a whole-tree concurrent re-render.
+  const route = useURLState()
+  const slug = editorSlug(route)
+  const [notesExpanded, setNotesExpanded] = useState(false)
+  const sectionId = useId()
+
   // Resolve the displayed/edited value. Draft overrides canonical for paths
   // the user has edited in-session; otherwise fall back to the canonical
   // FieldState value (or undefined for failed states).
@@ -304,6 +374,10 @@ export function FieldRow({ path, state }: FieldRowProps): JSX.Element {
     onLocalChange,
   })
 
+  const onToggleNotes = (): void => {
+    setNotesExpanded((open): boolean => !open)
+  }
+
   return (
     <div data-path={path} aria-label={label} className="sta-field-row">
       <span className="sta-field-row__label">{label}</span>
@@ -311,8 +385,247 @@ export function FieldRow({ path, state }: FieldRowProps): JSX.Element {
       <span className="sta-field-row__value">{displayValue(path, state)}</span>
       {badgeSource !== null ? <SourceBadge source={badgeSource} /> : null}
       {modeToggleEl}
+      {/* Both the affordance AND the adjacent save-status read the notes GET
+          via Suspense (NoteAffordance → useAnalystNotes; NoteSaveStatus →
+          useAnalystNoteDraft → useAnalystNotes). Keep BOTH inside this ONE
+          LOCAL <Suspense> so a cold cache shows only this row's placeholder
+          (📝 …, disabled) instead of bubbling the throw to ResortEditor's
+          route boundary and collapsing the WHOLE editor into "Loading…".
+          The placeholder is itself the affordance shape so layout doesn't
+          shift when the count resolves; on a cold cache there is no
+          save-status to show yet (status is idle → renders nothing), so the
+          fallback needs no status placeholder.
+
+          Spec §6.2 — the save-status indicator stays NEXT TO THE AFFORDANCE
+          (DOM-adjacent, inside the same boundary) and, once the cache is
+          warm, is ALWAYS mounted at FieldRow level. It subscribes to
+          useAnalystNoteDraft's module-level write-hook state, so a
+          saving→saved→save-failed transition stays visible whether the
+          collapsible AnalystNoteSection is expanded OR collapsed (Escape /
+          second affordance click / dropping below md all unmount the
+          section). Without this, a flush that fails AFTER the analyst
+          collapses the row would be silent (data loss). It renders
+          regardless of isAboveMd so a failure stays visible in the
+          read-only layout too. The hook reads from the already-cached
+          useAnalystNotes(slug) — no new network — and uses
+          useSyncExternalStore internally (declarative subscription, no
+          effect / state mirroring). idle/dirty render nothing so untouched
+          rows show no noise; and per the round-5 P2-A fold the
+          seeded-on-mount `saved` (a pre-existing persisted note with no edit
+          this session) is suppressed too — `saved` only shows once a real
+          save lifecycle (a `saving` was observed) has run for this path. */}
+      <Suspense
+        fallback={
+          <NoteAffordanceButton
+            charCount={null}
+            hasNote={false}
+            tooltip="Add note"
+            expanded={notesExpanded}
+            sectionId={sectionId}
+            isAboveMd={isAboveMd}
+            onToggle={onToggleNotes}
+          />
+        }
+      >
+        <NoteAffordance
+          slug={slug}
+          path={path}
+          expanded={notesExpanded}
+          sectionId={sectionId}
+          isAboveMd={isAboveMd}
+          onToggle={onToggleNotes}
+        />
+        <NoteSaveStatus slug={slug} path={path} />
+      </Suspense>
       {inputElement}
+      {isAboveMd && notesExpanded ? (
+        <div id={sectionId}>
+          {/* Spec §6.6: the renderer chunk loads ONLY here, on first expand.
+              fallback={null} per spec (no flash of a spinner for a ~150ms
+              chunk fetch). The `isAboveMd &&` gate enforces the §6.5
+              read-only-below-md rule — the editable Textarea + Delete button
+              are ABSENT from the DOM below md (consistent with `modeToggleEl`
+              / the MANUAL input), not merely disabled. `notesExpanded` state
+              is preserved so the section re-appears declaratively when the
+              viewport returns above md (no imperative collapse needed). */}
+          <Suspense fallback={null}>
+            <AnalystNoteSection
+              slug={slug}
+              path={path}
+              onCollapse={(): void => {
+                setNotesExpanded(false)
+              }}
+            />
+          </Suspense>
+        </div>
+      ) : null}
     </div>
+  )
+}
+
+// Presentational affordance button (spec §6.1). `charCount === null` is the
+// Suspense-fallback (cache cold) state — render "📝 …" so the row's layout is
+// stable and the control is still focusable-but-shows-nothing-changed.
+// filled / "Edit note" / tooltip key off note EXISTENCE (`hasNote`), NOT the
+// count: `charCount` is purely informational and may legitimately be 0 for an
+// existing image-only / `<hr>` / other-non-text note. Spec §6.1's "N===0 →
+// outlined / 'Add note'" wording conflated "no note" with "note that renders
+// to zero text"; the affordance's job is has-note vs no-note, so existence
+// wins (Codex P2 fold — NOT a spec violation, it's the §6.1 reconciliation).
+// Disabled below md per the PR 4.6a responsive rule (native `disabled`).
+//
+// Spec §6.1 specifies `<Button size="sm">`; the DS Button (PR 3.1c/3.2) has
+// no `size` prop, so mirror the sibling ModeToggle's `variant="ghost"`-only
+// usage. PR N.c4 adds the additive `aria-expanded`/`aria-controls`/`title`
+// disclosure props to Button (spec §6.5 — see Button.tsx).
+function NoteAffordanceButton({
+  charCount,
+  hasNote,
+  tooltip,
+  expanded,
+  sectionId,
+  isAboveMd,
+  onToggle,
+}: {
+  readonly charCount: number | null
+  readonly hasNote: boolean
+  readonly tooltip: string
+  readonly expanded: boolean
+  readonly sectionId: string
+  readonly isAboveMd: boolean
+  readonly onToggle: () => void
+}): JSX.Element {
+  return (
+    <Button
+      variant="ghost"
+      data-note-filled={hasNote ? 'true' : 'false'}
+      aria-label={hasNote ? 'Edit note' : 'Add note'}
+      aria-expanded={expanded}
+      aria-controls={sectionId}
+      disabled={!isAboveMd}
+      title={tooltip}
+      onClick={onToggle}
+    >
+      {`📝 ${charCount === null ? '…' : String(charCount)}`}
+    </Button>
+  )
+}
+
+// Reads the slug's notes (Suspense) and renders the affordance for `path`.
+// Isolated so the suspend stays inside FieldRow's LOCAL <Suspense> boundary.
+function NoteAffordance({
+  slug,
+  path,
+  expanded,
+  sectionId,
+  isAboveMd,
+  onToggle,
+}: {
+  readonly slug: ResortSlug
+  readonly path: MetricPath
+  readonly expanded: boolean
+  readonly sectionId: string
+  readonly isAboveMd: boolean
+  readonly onToggle: () => void
+}): JSX.Element {
+  const notes = useAnalystNotes(slug)
+  // Codex P2 / spec §6.1 reconciliation: filled/"Edit note"/tooltip key off
+  // note EXISTENCE, not the text-char count. An image-only / `<hr>` /
+  // other-non-text note is persisted (`notes.notes[path]` defined) yet
+  // reduces to 0 rendered text chars — keying off the count would hide it
+  // from the analyst (outlined "Add note" → can't find/edit/delete → dupes).
+  const note = notes.notes[path]
+  const hasNote = note !== undefined
+  const noteText = noteTextContent(note?.html)
+  const noteCharCount = noteText.length
+  return (
+    <NoteAffordanceButton
+      charCount={noteCharCount}
+      hasNote={hasNote}
+      tooltip={hasNote ? noteText.slice(0, TOOLTIP_MAX) || 'Edit note' : 'Add note'}
+      expanded={expanded}
+      sectionId={sectionId}
+      isAboveMd={isAboveMd}
+      onToggle={onToggle}
+    />
+  )
+}
+
+// Spec §6.2 status→label mapping. Kept verbatim-equivalent to the mapping
+// AnalystNoteSection previously owned (it now consumes THIS as the single
+// source of truth) so the indicator text/aria is identical wherever it
+// renders. idle/dirty → null (render nothing): an untouched or
+// mid-keystroke row shows no noise; only the post-edit
+// saving/saved/save-failed lifecycle is surfaced.
+// eslint-disable-next-line react-refresh/only-export-components -- pure helper co-located inside FieldRow.tsx; same rationale as `formatMetricValue` / `labelForPath`. Exported so its status→label branches are unit-tested directly without contrived component renders (CLAUDE.md Coverage Rules). Honors the PR §11.1 file budget (no extra module).
+export function noteSaveStatusLabel(status: NoteDraftStatus): string | null {
+  switch (status) {
+    case 'saving':
+      return 'saving…'
+    case 'saved':
+      return 'saved'
+    case 'save-failed':
+      return 'save-failed'
+    case 'idle':
+    case 'dirty':
+      return null
+  }
+}
+
+// FieldRow-level save-status indicator (spec §6.2), rendered adjacent to the
+// 📝 affordance and ALWAYS mounted (unlike AnalystNoteSection). Subscribes
+// declaratively to the per-path module-level write-hook state via
+// useAnalystNoteDraft — the same handle AnalystNoteSection uses — so the
+// status survives the section unmounting (collapse / below-md). Reading the
+// hook here seeds per-path state from the already-cached useAnalystNotes(slug)
+// with no extra network (spec §6.2 / N.c2 design). Renders nothing while the
+// label is null (idle/dirty) so untouched rows stay quiet.
+//
+// Codex round-5 P2-A fold — seeded-`saved` suppression. useAnalystNoteDraft
+// SEEDS a path that already has a persisted note with status `'saved'` on
+// mount (N.c2 spec §5.3 initial-state) even though NO save just occurred.
+// Because this component is ALWAYS mounted, mapping that seeded `saved`
+// straight to "saved" would slap a persistent badge on EVERY pre-noted row
+// at page load / after collapse — noise, and contrary to spec §6.2's
+// lifecycle (`saving… → saved → save-failed` only AFTER a local edit/flush).
+// Fix: only surface `saved` once a real save lifecycle has been observed
+// this session for this path. `sawSavingRef` is a monotonic render-latch
+// (the accepted React "track-seen" idiom — no effect, no extra render): it
+// flips true the first render where `status === 'saving'`, which can only
+// arise after an edit/flush. `saving` and `save-failed` ALWAYS render
+// (save-failed visibility is the round-3 silent-data-loss guarantee — never
+// gate it; it too only follows an edit). NoteSaveStatus is mounted for the
+// FieldRow's whole lifetime (only AnalystNoteSection unmounts on collapse),
+// so the latch persists across expand/collapse: edit → dirty → saving (latch
+// set, "saving…") → saved ("saved") / save-failed ("save-failed").
+function NoteSaveStatus({
+  slug,
+  path,
+}: {
+  readonly slug: ResortSlug
+  readonly path: MetricPath
+}): JSX.Element | null {
+  const { status } = useAnalystNoteDraft(slug, path)
+  const sawSavingRef = useRef(false)
+  if (status === 'saving') {
+    sawSavingRef.current = true
+  }
+  // Suppress the seeded-on-mount `saved` (a pre-existing persisted note with
+  // no edit this session): if `saved` is reached without ever passing
+  // through `saving`, no real save happened — render nothing. Every other
+  // status (incl. `saving` / `save-failed`, which only arise post-edit) maps
+  // through the pure helper unchanged.
+  const label =
+    status === 'saved' && !sawSavingRef.current
+      ? null
+      : noteSaveStatusLabel(status)
+  if (label === null) {
+    return null
+  }
+  return (
+    <span role="status" className="sta-analyst-note__status">
+      {label}
+    </span>
   )
 }
 

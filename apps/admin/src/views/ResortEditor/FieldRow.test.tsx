@@ -4,12 +4,26 @@ import {
   UpstreamHash,
   type FieldStateFor,
 } from '@snowboard-trip-advisor/schema'
-import { ResortDetailResponse, type ResortUpsertBody } from '@snowboard-trip-advisor/schema/api'
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import {
+  AnalystNotesGetResponse,
+  ResortDetailResponse,
+  type ResortUpsertBody,
+} from '@snowboard-trip-advisor/schema/api'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { axe } from 'jest-axe'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { apiClient } from '../../lib/apiClient'
+import {
+  __resetForTests as resetFlushAll,
+} from '../../state/flushAll'
+import {
+  __resetForTests as resetAnalystNoteDraft,
+} from '../../state/useAnalystNoteDraft'
+import {
+  __resetForTests as resetAnalystNotes,
+  prepopulateAnalystNotes,
+} from '../../state/useAnalystNotes'
 import {
   __resetForTests as resetResortDetail,
   prepopulateResortDetail,
@@ -19,8 +33,15 @@ import {
   __resetForTests as resetWorkspaceState,
   setFieldValue as workspaceSetFieldValue,
 } from '../../state/useWorkspaceState'
+import { ResortEditor } from '../ResortEditor'
 
-import { FieldRow, formatMetricValue, labelForPath } from './FieldRow'
+import {
+  editorSlug,
+  FieldRow,
+  formatMetricValue,
+  labelForPath,
+  noteSaveStatusLabel,
+} from './FieldRow'
 
 const OBS_AT = ISODateTimeString.parse('2026-04-29T08:00:00Z')
 const KOTELNICA = ResortSlug.parse('kotelnica-bialczanska')
@@ -142,8 +163,19 @@ beforeEach((): void => {
   resetURLState()
   resetWorkspaceState()
   resetResortDetail()
+  resetAnalystNotes()
+  resetAnalystNoteDraft()
+  resetFlushAll()
   window.history.replaceState({}, '', '/?route=editor&slug=kotelnica-bialczanska')
   prepopulateResortDetail(KOTELNICA, syntheticResponse())
+  // Seed an empty analyst-notes cache so the affordance's useAnalystNotes
+  // read returns synchronously (cachedFulfilled fast path) and the row never
+  // suspends in the bare-<FieldRow> render tests above. Per-test overrides
+  // re-seed with notes via prepopulateAnalystNotes.
+  prepopulateAnalystNotes(
+    KOTELNICA,
+    AnalystNotesGetResponse.parse({ slug: KOTELNICA, notes: {} }),
+  )
   stubMatchMedia(true)
 })
 
@@ -154,6 +186,9 @@ afterEach((): void => {
   resetWorkspaceState()
   resetResortDetail()
   resetURLState()
+  resetAnalystNotes()
+  resetAnalystNoteDraft()
+  resetFlushAll()
 })
 
 describe('formatMetricValue (PR 4.4b §D2)', (): void => {
@@ -556,7 +591,10 @@ describe('FieldRow below-md responsive gate (Decision D11)', (): void => {
     // No MANUAL Input present below md.
     expect(screen.queryByRole('textbox')).toBeNull()
     // No interactive DS Button ModeToggle either — the span fallback is not a button.
-    expect(screen.queryByRole('button')).toBeNull()
+    expect(screen.queryByRole('button', { name: /Mode for/ })).toBeNull()
+    // PR N.c4 §6.5: the analyst-note affordance still RENDERS below md (so
+    // the read-only note count stays visible) but is natively `disabled`.
+    expect(screen.getByRole('button', { name: 'Add note' })).toBeDisabled()
     // The render-only span IS still there.
     const fallback = screen.getByRole('switch')
     expect(fallback.tagName).toBe('SPAN')
@@ -647,5 +685,510 @@ describe('FieldRow MANUAL clear scenarios (Codex rounds 20/21/24)', (): void => 
       const body = call[1]
       expect(body.resort?.season).toBeUndefined()
     }
+  })
+})
+
+// PR N.c4 — analyst-note affordance + lazy-load (spec §6.1 / §6.4 / §6.6).
+const OBS_NOTE = '2026-04-26T08:00:00Z'
+
+function seedNote(markdown: string, html: string, path = 'slopes_km'): void {
+  prepopulateAnalystNotes(
+    KOTELNICA,
+    AnalystNotesGetResponse.parse({
+      slug: KOTELNICA,
+      notes: {
+        [path]: {
+          schema_version: 1,
+          markdown,
+          html,
+          created_at: OBS_NOTE,
+          updated_at: OBS_NOTE,
+        },
+      },
+    }),
+  )
+}
+
+describe('noteSaveStatusLabel (Codex P2 fold — spec §6.2 status mapping)', (): void => {
+  it('maps saving → "saving…"', (): void => {
+    expect(noteSaveStatusLabel('saving')).toBe('saving…')
+  })
+  it('maps saved → "saved"', (): void => {
+    expect(noteSaveStatusLabel('saved')).toBe('saved')
+  })
+  it('maps save-failed → "save-failed"', (): void => {
+    expect(noteSaveStatusLabel('save-failed')).toBe('save-failed')
+  })
+  it('maps idle → null (no noise on untouched rows)', (): void => {
+    expect(noteSaveStatusLabel('idle')).toBeNull()
+  })
+  it('maps dirty → null (no noise mid-keystroke)', (): void => {
+    expect(noteSaveStatusLabel('dirty')).toBeNull()
+  })
+})
+
+describe('editorSlug (PR N.c4 invariant helper)', (): void => {
+  it('returns the slug on the editor route', (): void => {
+    expect(editorSlug({ route: 'editor', slug: KOTELNICA })).toBe(KOTELNICA)
+  })
+
+  it('throws on a non-editor route (defensive invariant — useWorkspaceState throws first in practice)', (): void => {
+    expect((): void => {
+      editorSlug({ route: 'dashboard' })
+    }).toThrow('FieldRow rendered outside the editor route')
+  })
+})
+
+describe('FieldRow analyst-note affordance (PR N.c4 §6.1 / §6.4)', (): void => {
+  it('renders 📝 0 (outlined, "Add note") when the path has no note', (): void => {
+    render(<FieldRow path="slopes_km" state={liveState(8)} />)
+    const aff = screen.getByRole('button', { name: 'Add note' })
+    expect(aff).toHaveTextContent('📝 0')
+    expect(aff).toHaveAttribute('data-note-filled', 'false')
+  })
+
+  it('renders 📝 N (filled, "Edit note") where N = rendered-HTML text-char count', (): void => {
+    // html "<p>hello</p>" → textContent "hello" → 5 chars.
+    seedNote('hello', '<p>hello</p>')
+    render(<FieldRow path="slopes_km" state={liveState(8)} />)
+    const aff = screen.getByRole('button', { name: 'Edit note' })
+    expect(aff).toHaveTextContent('📝 5')
+    expect(aff).toHaveAttribute('data-note-filled', 'true')
+  })
+
+  it('counts only text characters, not HTML markup', (): void => {
+    // Heavy markup, no inter-element whitespace: textContent is "Hithere"
+    // (7 chars) — tags / attributes are excluded from N.
+    seedNote('# Hi\n\nthere', '<h1 id="x"><strong>Hi</strong></h1><p>there</p>')
+    render(<FieldRow path="slopes_km" state={liveState(8)} />)
+    expect(screen.getByRole('button', { name: 'Edit note' })).toHaveTextContent(
+      '📝 7',
+    )
+  })
+
+  it('the affordance is scoped per path (only its own note counts)', (): void => {
+    seedNote('hello', '<p>hello</p>', 'lift_count')
+    render(<FieldRow path="slopes_km" state={liveState(8)} />)
+    // slopes_km has no note even though lift_count does.
+    expect(screen.getByRole('button', { name: 'Add note' })).toHaveTextContent(
+      '📝 0',
+    )
+  })
+
+  it('exposes aria-expanded=false + aria-controls before expand', (): void => {
+    render(<FieldRow path="slopes_km" state={liveState(8)} />)
+    const aff = screen.getByRole('button', { name: 'Add note' })
+    expect(aff).toHaveAttribute('aria-expanded', 'false')
+    expect(aff).toHaveAttribute('aria-controls')
+  })
+
+  it('the note tooltip is the first ~80 chars of text when N>0, "Add note" when 0', (): void => {
+    const long = 'x'.repeat(200)
+    seedNote(long, `<p>${long}</p>`)
+    const { rerender } = render(<FieldRow path="slopes_km" state={liveState(8)} />)
+    const filled = screen.getByRole('button', { name: 'Edit note' })
+    expect(filled.getAttribute('title')?.length).toBeLessThanOrEqual(80)
+    expect(filled.getAttribute('title')).toMatch(/^x+$/)
+
+    prepopulateAnalystNotes(
+      KOTELNICA,
+      AnalystNotesGetResponse.parse({ slug: KOTELNICA, notes: {} }),
+    )
+    rerender(<FieldRow path="slopes_km" state={liveState(8)} />)
+    expect(screen.getByRole('button', { name: 'Add note' })).toHaveAttribute(
+      'title',
+      'Add note',
+    )
+  })
+
+  it('treats a persisted zero-text note (e.g. "<hr>") as EXISTING — filled, "Edit note", non-empty title, 📝 0 (Codex P2: existence ≠ text-char count, spec §6.1 reconciliation)', (): void => {
+    // `<hr>` has no text node, so noteTextContent('<hr>') === '' (length 0).
+    // The note IS persisted (notes.notes[path] defined), so the affordance
+    // must surface it as existing: filled / "Edit note" / a meaningful
+    // tooltip — NOT outlined "Add note" (which would hide the note from the
+    // analyst and invite a duplicate).
+    seedNote('---', '<hr>')
+    render(<FieldRow path="slopes_km" state={liveState(8)} />)
+    const aff = screen.getByRole('button', { name: 'Edit note' })
+    expect(aff).toHaveTextContent('📝 0')
+    expect(aff).toHaveAttribute('data-note-filled', 'true')
+    expect(aff.getAttribute('title')).toBe('Edit note')
+  })
+
+  it('a normal text note still renders filled, "Edit note", 📝 N, text-preview tooltip (regression guard)', (): void => {
+    seedNote('hello', '<p>hello</p>')
+    render(<FieldRow path="slopes_km" state={liveState(8)} />)
+    const aff = screen.getByRole('button', { name: 'Edit note' })
+    expect(aff).toHaveTextContent('📝 5')
+    expect(aff).toHaveAttribute('data-note-filled', 'true')
+    expect(aff.getAttribute('title')).toBe('hello')
+  })
+
+  it('no note for the path renders outlined, "Add note", 📝 0 (regression guard)', (): void => {
+    render(<FieldRow path="slopes_km" state={liveState(8)} />)
+    const aff = screen.getByRole('button', { name: 'Add note' })
+    expect(aff).toHaveTextContent('📝 0')
+    expect(aff).toHaveAttribute('data-note-filled', 'false')
+    expect(aff.getAttribute('title')).toBe('Add note')
+  })
+
+  it('the affordance is disabled below the md breakpoint (PR 4.6a rule)', (): void => {
+    stubMatchMedia(false)
+    render(<FieldRow path="slopes_km" state={liveState(8)} />)
+    expect(screen.getByRole('button', { name: 'Add note' })).toBeDisabled()
+  })
+
+  it('does NOT load AnalystNoteSection before the first expand (no source pane / no chunk)', (): void => {
+    render(<FieldRow path="slopes_km" state={liveState(8)} />)
+    expect(
+      screen.queryByRole('textbox', { name: /note source/i }),
+    ).toBeNull()
+  })
+
+  it('lazy-loads AnalystNoteSection on the first affordance click', async (): Promise<void> => {
+    seedNote('hello', '<p>hello</p>')
+    render(<FieldRow path="slopes_km" state={liveState(8)} />)
+    const aff = screen.getByRole('button', { name: 'Edit note' })
+    expect(
+      screen.queryByRole('textbox', { name: /note source/i }),
+    ).toBeNull()
+    fireEvent.click(aff)
+    // React.lazy resolves the dynamic import asynchronously.
+    const source = await screen.findByRole('textbox', { name: /note source/i })
+    expect(source).toHaveValue('hello')
+    expect(aff).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  it('collapses (unmounts the section) on a second affordance click', async (): Promise<void> => {
+    render(<FieldRow path="slopes_km" state={liveState(8)} />)
+    const aff = screen.getByRole('button', { name: 'Add note' })
+    fireEvent.click(aff)
+    await screen.findByRole('textbox', { name: /note source/i })
+    fireEvent.click(aff)
+    await waitFor((): void => {
+      expect(
+        screen.queryByRole('textbox', { name: /note source/i }),
+      ).toBeNull()
+    })
+    expect(aff).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('collapses when AnalystNoteSection requests it via onCollapse (Escape inside the source pane)', async (): Promise<void> => {
+    seedNote('hello', '<p>hello</p>')
+    render(<FieldRow path="slopes_km" state={liveState(8)} />)
+    const aff = screen.getByRole('button', { name: 'Edit note' })
+    fireEvent.click(aff)
+    const source = await screen.findByRole('textbox', { name: /note source/i })
+    expect(aff).toHaveAttribute('aria-expanded', 'true')
+    // Escape inside the source pane → AnalystNoteSection.onCollapse →
+    // FieldRow.setNotesExpanded(false) → the section unmounts.
+    await act(async (): Promise<void> => {
+      source.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+      )
+      await Promise.resolve()
+    })
+    await waitFor((): void => {
+      expect(
+        screen.queryByRole('textbox', { name: /note source/i }),
+      ).toBeNull()
+    })
+    expect(
+      screen.getByRole('button', { name: 'Edit note' }),
+    ).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  // Codex P2 fold (spec §6.2): the save-status indicator belongs next to the
+  // affordance button at FieldRow level (always mounted), NOT inside the
+  // collapsible AnalystNoteSection. If the analyst edits a note then collapses
+  // the row while the debounced flush is still pending and that flush FAILS,
+  // the failure must remain visible — otherwise the analyst leaves believing
+  // the note saved (silent data loss).
+  it('keeps the save-failed status visible at the affordance after the section collapses (silent-failure guard)', async (): Promise<void> => {
+    seedNote('hello', '<p>hello</p>')
+    const spy = vi
+      .spyOn(apiClient, 'upsertAnalystNote')
+      .mockRejectedValue(new Error('boom'))
+
+    render(<FieldRow path="slopes_km" state={liveState(8)} />)
+    const aff = screen.getByRole('button', { name: 'Edit note' })
+    fireEvent.click(aff)
+    const source = await screen.findByRole('textbox', { name: /note source/i })
+
+    // Dirty the draft, then collapse the row (Escape) BEFORE the failing
+    // flush settles. Escape flushNow()s immediately (no 500ms wait) + asks
+    // FieldRow to collapse, so AnalystNoteSection unmounts while the
+    // rejecting PUT is in flight.
+    fireEvent.change(source, { target: { value: 'edited but doomed' } })
+    await act(async (): Promise<void> => {
+      source.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+      )
+      await Promise.resolve()
+    })
+
+    // The collapsible section is gone…
+    await waitFor((): void => {
+      expect(
+        screen.queryByRole('textbox', { name: /note source/i }),
+      ).toBeNull()
+    })
+    // …but the affordance-adjacent status still surfaces the failure.
+    await waitFor((): void => {
+      expect(screen.getByText('save-failed')).toBeInTheDocument()
+    })
+    expect(spy).toHaveBeenCalled()
+  })
+
+  it('keeps the saved status visible at the affordance after a successful flush while collapsed (happy path)', async (): Promise<void> => {
+    seedNote('hello', '<p>hello</p>')
+    const spy = vi
+      .spyOn(apiClient, 'upsertAnalystNote')
+      .mockResolvedValue({
+        slug: KOTELNICA,
+        path: 'slopes_km',
+        note: {
+          schema_version: 1,
+          markdown: 'edited and saved',
+          html: '<p>edited and saved</p>',
+          created_at: OBS_AT,
+          updated_at: OBS_AT,
+        },
+      })
+
+    render(<FieldRow path="slopes_km" state={liveState(8)} />)
+    const aff = screen.getByRole('button', { name: 'Edit note' })
+    fireEvent.click(aff)
+    const source = await screen.findByRole('textbox', { name: /note source/i })
+
+    fireEvent.change(source, { target: { value: 'edited and saved' } })
+    await act(async (): Promise<void> => {
+      source.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+      )
+      await Promise.resolve()
+    })
+
+    await waitFor((): void => {
+      expect(
+        screen.queryByRole('textbox', { name: /note source/i }),
+      ).toBeNull()
+    })
+    await waitFor((): void => {
+      expect(screen.getByText('saved')).toBeInTheDocument()
+    })
+    expect(spy).toHaveBeenCalled()
+  })
+
+  it('shows no save-status indicator for an untouched row (idle state)', (): void => {
+    render(<FieldRow path="slopes_km" state={liveState(8)} />)
+    expect(screen.queryByText('saving…')).toBeNull()
+    expect(screen.queryByText('saved')).toBeNull()
+    expect(screen.queryByText('save-failed')).toBeNull()
+  })
+
+  // Codex round-5 P2-A fold — seeded-`saved` suppression. useAnalystNoteDraft
+  // seeds a pre-existing persisted note with status `'saved'` on mount (N.c2
+  // spec §5.3) even though no save just occurred. NoteSaveStatus is ALWAYS
+  // mounted, so without the render-latch gate every pre-noted row would show
+  // a persistent "saved" badge at page load — noise contrary to spec §6.2's
+  // post-edit `saving… → saved → save-failed` lifecycle.
+  describe('seeded-saved suppression (round-5 P2-A)', (): void => {
+    it('renders NO status text for a row whose path has a pre-existing persisted note (no edit this session)', (): void => {
+      // Seeded persisted note → useAnalystNoteDraft initial status is 'saved'
+      // with NO save lifecycle this session. The badge must NOT appear.
+      seedNote('hello', '<p>hello</p>')
+      render(<FieldRow path="slopes_km" state={liveState(8)} />)
+      // The affordance shows the note exists (📝 5) but there is no
+      // save-status indicator — no role="status", no "saved" text.
+      expect(
+        screen.getByRole('button', { name: 'Edit note' }),
+      ).toHaveTextContent('📝 5')
+      expect(screen.queryByRole('status')).toBeNull()
+      expect(screen.queryByText('saved')).toBeNull()
+      expect(screen.queryByText('saving…')).toBeNull()
+      expect(screen.queryByText('save-failed')).toBeNull()
+    })
+
+    it('DOES show "saved" after a local edit flushes successfully (real save lifecycle observed)', async (): Promise<void> => {
+      // Seeded note (initial status 'saved' suppressed), then a local edit +
+      // Escape flush drives dirty → saving → saved. Because `saving` was
+      // observed this session, "saved" now renders (the lifecycle is real).
+      seedNote('hello', '<p>hello</p>')
+      const spy = vi
+        .spyOn(apiClient, 'upsertAnalystNote')
+        .mockResolvedValue({
+          slug: KOTELNICA,
+          path: 'slopes_km',
+          note: {
+            schema_version: 1,
+            markdown: 'edited and saved',
+            html: '<p>edited and saved</p>',
+            created_at: OBS_AT,
+            updated_at: OBS_AT,
+          },
+        })
+
+      render(<FieldRow path="slopes_km" state={liveState(8)} />)
+      // No status badge before any edit (seeded-saved suppressed).
+      expect(screen.queryByRole('status')).toBeNull()
+
+      const aff = screen.getByRole('button', { name: 'Edit note' })
+      fireEvent.click(aff)
+      const source = await screen.findByRole('textbox', {
+        name: /note source/i,
+      })
+      fireEvent.change(source, { target: { value: 'edited and saved' } })
+      await act(async (): Promise<void> => {
+        source.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+        )
+        await Promise.resolve()
+      })
+
+      await waitFor((): void => {
+        expect(screen.getByText('saved')).toBeInTheDocument()
+      })
+      expect(spy).toHaveBeenCalled()
+    })
+
+    it('still shows "save-failed" when reached after an edit on a pre-noted row (silent-data-loss guard never gated)', async (): Promise<void> => {
+      // Round-3 reject harness on a SEEDED note: the seeded-saved is
+      // suppressed, but a failed flush after a local edit MUST surface
+      // "save-failed" (data-safety guarantee — never gated by the latch).
+      seedNote('hello', '<p>hello</p>')
+      const spy = vi
+        .spyOn(apiClient, 'upsertAnalystNote')
+        .mockRejectedValue(new Error('boom'))
+
+      render(<FieldRow path="slopes_km" state={liveState(8)} />)
+      expect(screen.queryByRole('status')).toBeNull()
+
+      const aff = screen.getByRole('button', { name: 'Edit note' })
+      fireEvent.click(aff)
+      const source = await screen.findByRole('textbox', {
+        name: /note source/i,
+      })
+      fireEvent.change(source, { target: { value: 'edited but doomed' } })
+      await act(async (): Promise<void> => {
+        source.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+        )
+        await Promise.resolve()
+      })
+
+      await waitFor((): void => {
+        expect(screen.getByText('save-failed')).toBeInTheDocument()
+      })
+      expect(spy).toHaveBeenCalled()
+    })
+  })
+
+  it('is axe-clean with the affordance present (collapsed + expanded)', async (): Promise<void> => {
+    seedNote('hello', '<p>hello</p>')
+    const { container } = render(<FieldRow path="slopes_km" state={liveState(8)} />)
+    expect(await axe(container)).toHaveNoViolations()
+    fireEvent.click(screen.getByRole('button', { name: 'Edit note' }))
+    await screen.findByRole('textbox', { name: /note source/i })
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  // Codex P2 fold (spec §6.5): the expanded analyst-notes section is gated on
+  // `isAboveMd && notesExpanded`, mirroring `modeToggleEl` / the MANUAL input.
+  // Expanding above md then crossing below md must UNMOUNT the editable
+  // Textarea + Delete button (read-only-below-md guard cannot be bypassed by
+  // resizing after opening). `notesExpanded` is preserved so returning above
+  // md re-mounts the section with no imperative collapse.
+  it('unmounts the expanded section below md (isAboveMd gate) and re-mounts it when back above md', async (): Promise<void> => {
+    seedNote('hello', '<p>hello</p>')
+    const { rerender } = render(<FieldRow path="slopes_km" state={liveState(8)} />)
+
+    // Above md (beforeEach stubs matchMedia=true): expand the section.
+    const aff = screen.getByRole('button', { name: 'Edit note' })
+    fireEvent.click(aff)
+    await screen.findByRole('textbox', { name: /note source/i })
+    expect(
+      screen.getByRole('button', { name: /delete note/i }),
+    ).toBeInTheDocument()
+
+    // Viewport crosses below md AFTER expanding. useResponsiveTabOrder reads
+    // the fresh matchMedia snapshot on the next render (useSyncExternalStore).
+    stubMatchMedia(false)
+    rerender(<FieldRow path="slopes_km" state={liveState(8)} />)
+
+    await waitFor((): void => {
+      expect(
+        screen.queryByRole('textbox', { name: /note source/i }),
+      ).toBeNull()
+    })
+    // The editable Textarea AND the Delete button are gone — not merely
+    // disabled — exactly like the mode toggle / value input below md.
+    expect(
+      screen.queryByRole('textbox', { name: /note source/i }),
+    ).toBeNull()
+    expect(
+      screen.queryByRole('button', { name: /delete note/i }),
+    ).toBeNull()
+    // The affordance button itself still renders, natively disabled.
+    expect(screen.getByRole('button', { name: 'Edit note' })).toBeDisabled()
+
+    // Viewport returns above md: notesExpanded was preserved (no imperative
+    // collapse), so the section re-mounts declaratively.
+    stubMatchMedia(true)
+    rerender(<FieldRow path="slopes_km" state={liveState(8)} />)
+    const source = await screen.findByRole('textbox', { name: /note source/i })
+    expect(source).toHaveValue('hello')
+    expect(
+      screen.getByRole('button', { name: /delete note/i }),
+    ).toBeInTheDocument()
+  })
+
+  // Codex P2 fold (spec §6.2 / §6.6): NoteSaveStatus also reads
+  // useAnalystNoteDraft → useAnalystNotes(slug), a Suspense read that THROWS
+  // the notes GET promise on a cold cache (first editor render, before any
+  // prepopulate). It MUST sit inside the SAME per-row local <Suspense> that
+  // wraps <NoteAffordance> so a cold-cache throw shows only this row's
+  // "📝 …" placeholder — never bubbling to ResortEditor's route-level
+  // boundary and replacing the WHOLE editor with "Loading…". Mounting the
+  // real <ResortEditor> (which owns that route boundary) with the
+  // resort-detail cache seeded but the analyst-notes cache DELIBERATELY left
+  // cold (getAnalystNotes stubbed to a never-resolving promise so
+  // useAnalystNotes genuinely suspends) is the only tree that exercises this:
+  // the per-row affordance describe-block above all prepopulate an empty
+  // notes cache in beforeEach, masking the cold path.
+  it('contains a cold analyst-notes suspend to the per-row placeholder (route-level Loading… not triggered)', (): void => {
+    // Resort-detail seeded → ResortEditorBody resolves synchronously, so the
+    // ONLY thing that can suspend is the cold analyst-notes read.
+    prepopulateResortDetail(KOTELNICA, syntheticResponse())
+    // Cold analyst-notes cache: undo beforeEach's empty-notes seed and stub
+    // the GET to a promise that never settles, so useAnalystNotes() suspends
+    // on the very first render (genuine cold-cache path).
+    resetAnalystNotes()
+    const getSpy = vi
+      .spyOn(apiClient, 'getAnalystNotes')
+      .mockReturnValue(new Promise<never>((): void => { /* never resolves */ }))
+
+    render(<ResortEditor slug={KOTELNICA} />)
+
+    // The notes GET WAS attempted (proves we are on the cold path, not the
+    // cachedFulfilled fast path).
+    expect(getSpy).toHaveBeenCalled()
+
+    // Containment: the route-level <Suspense fallback> (a single
+    // role="status" "Loading…" that replaces the WHOLE editor body) must NOT
+    // be showing — the cold-cache throw stayed inside the per-row boundary.
+    expect(screen.queryByText('Loading…')).toBeNull()
+    expect(
+      screen.getByRole('tablist', { name: 'Editor sections' }),
+    ).toBeInTheDocument()
+
+    // The per-row fallback IS showing for the durable rows: the
+    // NoteAffordanceButton placeholder ("📝 …", disabled-shape "Add note").
+    const durablePanel = screen.getByRole('tabpanel')
+    const slopesRow = within(durablePanel).getByLabelText('Slopes (km)')
+    const placeholder = within(slopesRow).getByRole('button', {
+      name: 'Add note',
+    })
+    expect(placeholder).toHaveTextContent('📝 …')
   })
 })

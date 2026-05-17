@@ -111,6 +111,57 @@ describe('Button', (): void => {
     )
   })
 
+  it('forwards aria-expanded + aria-controls for the disclosure pattern (PR N.c4 §6.5 analyst-note affordance)', (): void => {
+    // PR N.c4 extension: the FieldRow analyst-note affordance is a disclosure
+    // toggle (expands an inline note section). It needs the standard
+    // disclosure-pattern ARIA so screen readers announce expanded/collapsed.
+    const { rerender } = render(
+      <Button
+        onClick={(): void => undefined}
+        aria-expanded={false}
+        aria-controls="note-section-1"
+      >
+        📝 0
+      </Button>,
+    )
+    const btn = screen.getByRole('button', { name: '📝 0' })
+    expect(btn).toHaveAttribute('aria-expanded', 'false')
+    expect(btn).toHaveAttribute('aria-controls', 'note-section-1')
+    rerender(
+      <Button
+        onClick={(): void => undefined}
+        aria-expanded
+        aria-controls="note-section-1"
+      >
+        📝 0
+      </Button>,
+    )
+    expect(screen.getByRole('button', { name: '📝 0' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    )
+  })
+
+  it('forwards the title tooltip (PR N.c4 §6.1 note-preview tooltip)', (): void => {
+    render(
+      <Button onClick={(): void => undefined} title="first 80 chars of the note">
+        📝 5
+      </Button>,
+    )
+    expect(screen.getByRole('button', { name: '📝 5' })).toHaveAttribute(
+      'title',
+      'first 80 chars of the note',
+    )
+  })
+
+  it('omits aria-expanded / aria-controls / title when not provided (additive, backward-compatible)', (): void => {
+    render(<Button onClick={(): void => undefined}>Plain</Button>)
+    const btn = screen.getByRole('button', { name: 'Plain' })
+    expect(btn).not.toHaveAttribute('aria-expanded')
+    expect(btn).not.toHaveAttribute('aria-controls')
+    expect(btn).not.toHaveAttribute('title')
+  })
+
   it('passes through data-* attributes (e.g. data-detail-trigger per spec §5.5)', (): void => {
     // Mirrors IconButton's data-* pass-through. apps/public's ResortCard
     // attaches `data-detail-trigger=<slug>` to its "View details" Button so

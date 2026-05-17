@@ -1,0 +1,160 @@
+import {
+  forwardRef,
+  useCallback,
+  useLayoutEffect,
+  useRef,
+  type ChangeEvent,
+  type FocusEvent,
+  type ForwardedRef,
+  type JSX,
+  type KeyboardEvent,
+} from 'react'
+
+// Native <textarea> wrapper — the multi-line sibling of Input.tsx.
+//
+// Input.tsx is deliberately single-line (spec §6.2 — the public app form
+// controls never need a multi-line surface). The analyst-note source pane
+// (admin, spec §6.2) is the first multi-line call site, so the primitive
+// lands here rather than widening Input's prop surface with a `multiline`
+// branch. Same token-driven className contract as Input: the component emits
+// `sta-textarea*` class hooks; visual styling is owned by the design-system
+// stylesheet, never inline color/size literals.
+//
+// `aria-label` (not a wrapping <label>) is the association mechanism: the
+// note source/preview panes sit inside an already-labelled Collapsible and a
+// visible <label> would double-announce. `forwardRef` exposes the underlying
+// element so callers can manage selection/caret (the Tab-indent feature
+// re-reads selectionStart/End below; the note view also focuses it on
+// expand).
+//
+// Tab interception: a bare <textarea> moves focus on Tab, which makes it
+// impossible to indent markdown. When the field is editable we
+// `preventDefault()` and instead splice two spaces in at the caret (or over
+// the current selection), surfacing the new value through `onChange` so the
+// controlled-value contract is preserved; focus deliberately stays on the
+// textarea. Because the value is controlled, the parent re-renders with a new
+// `value` and the browser collapses the caret to end-of-text; a
+// `useLayoutEffect` (pre-paint, no visible caret flit) restores it to a
+// collapsed selection immediately after the inserted indent
+// (`start + TAB_INDENT.length`), gated by a ref that only the Tab branch sets
+// so ordinary typing re-renders never reposition the caret. The internal
+// element ref needed for that restore is composed with the forwarded ref via
+// a stable callback ref, so consumers (the note view focuses the element on
+// expand) keep their ref. The splice is gated on the field being editable: a
+// `readOnly` or `disabled` Textarea must never mutate state and must stay
+// tabbable-through, so Tab falls through to native focus-move (no
+// preventDefault) even when an `onChange` is still wired (the standard
+// controlled read-only pattern).
+
+const TAB_INDENT = '  '
+
+export interface TextareaProps {
+  'aria-label': string
+  value: string
+  onChange?: (value: string) => void
+  rows?: number
+  disabled?: boolean
+  readOnly?: boolean
+  onFocus?: (event: FocusEvent<HTMLTextAreaElement>) => void
+  onBlur?: (event: FocusEvent<HTMLTextAreaElement>) => void
+  // Composed AFTER the built-in Tab-indent handler. The built-in calls
+  // preventDefault for Tab only when the field is editable; consumers should
+  // branch on `e.key` and ignore Tab (it is either spliced as indent or
+  // intentionally left to native focus-move when readOnly/disabled) — the
+  // analyst-note view binds mod+enter / mod+backspace / Escape here.
+  onKeyDown?: (event: KeyboardEvent<HTMLTextAreaElement>) => void
+}
+
+function TextareaImpl(
+  {
+    'aria-label': ariaLabel,
+    value,
+    onChange,
+    rows = 6,
+    disabled,
+    readOnly,
+    onFocus,
+    onBlur,
+    onKeyDown,
+  }: TextareaProps,
+  ref: ForwardedRef<HTMLTextAreaElement>,
+): JSX.Element {
+  const internalRef = useRef<HTMLTextAreaElement | null>(null)
+  // Compose the internal ref (needed to restore the caret post-re-render)
+  // with the forwarded ref so consumers still receive the element. Handles
+  // both function-ref and object-ref forms.
+  const setRef = useCallback(
+    (node: HTMLTextAreaElement | null): void => {
+      internalRef.current = node
+      if (typeof ref === 'function') {
+        ref(node)
+      } else if (ref !== null) {
+        ref.current = node
+      }
+    },
+    [ref],
+  )
+
+  // Set only on a Tab-indent: the target collapsed caret offset to restore
+  // after the controlled re-render. Null for every other re-render.
+  const pendingCaretRef = useRef<number | null>(null)
+
+  useLayoutEffect((): void => {
+    const pos = pendingCaretRef.current
+    if (pos !== null && internalRef.current !== null) {
+      internalRef.current.setSelectionRange(pos, pos)
+      pendingCaretRef.current = null
+    }
+  }, [value])
+
+  const handleChange =
+    onChange === undefined
+      ? undefined
+      : (e: ChangeEvent<HTMLTextAreaElement>): void => {
+          onChange(e.target.value)
+        }
+
+  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (
+      e.key === 'Tab' &&
+      onChange !== undefined &&
+      readOnly !== true &&
+      disabled !== true
+    ) {
+      // Indent instead of moving focus. Splice TAB_INDENT over the current
+      // selection (a collapsed selection = plain caret insert).
+      e.preventDefault()
+      const el = e.currentTarget
+      const start = el.selectionStart
+      const end = el.selectionEnd
+      // The controlled re-render collapses the caret to end-of-text; queue a
+      // restore to just after the inserted indent (correct for both a plain
+      // caret insert and a replaced range) for the post-commit layout effect.
+      pendingCaretRef.current = start + TAB_INDENT.length
+      onChange(value.slice(0, start) + TAB_INDENT + value.slice(end))
+      return
+    }
+    // Tab is fully handled above (focus stays put); any other key falls
+    // through to the consumer's handler (analyst-note mod+enter / Escape).
+    onKeyDown?.(e)
+  }
+
+  return (
+    <textarea
+      ref={setRef}
+      className="sta-textarea__control"
+      aria-label={ariaLabel}
+      value={value}
+      rows={rows}
+      disabled={disabled}
+      readOnly={readOnly}
+      onChange={handleChange}
+      onKeyDown={handleKeyDown}
+      onFocus={onFocus}
+      onBlur={onBlur}
+    />
+  )
+}
+
+export const Textarea = forwardRef(TextareaImpl)
+Textarea.displayName = 'Textarea'

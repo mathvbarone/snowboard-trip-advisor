@@ -27,6 +27,7 @@ export {
   type SelectOption,
 } from './components/Select'
 export { Input, type InputProps, type InputType } from './components/Input'
+export { Textarea, type TextareaProps } from './components/Textarea'
 export type { IconComponent, IconProps } from './icons/types'
 export {
   SOURCE_GLYPHS,
