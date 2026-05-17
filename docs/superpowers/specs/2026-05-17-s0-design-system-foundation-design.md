@@ -31,7 +31,7 @@ same mechanism that already loads `utilities.css`).
 |---|----------|-----------|
 | 1 | **Theme policy: honor OS `prefers-color-scheme`; keep ADR-0005 unchanged.** Both apps ship full light + dark token sets; the OS picks. | User decision. The references (public dark `01–03`, admin light `04–06`) are the dark / light *renderings*, not fixed per-app identities. ADR-0005 already specifies this; the generator simply diverged and is corrected here. |
 | 2 | **Generator emits `:root` (light) + `@media (prefers-color-scheme: dark) { :root { …dark… } }`.** The current `[data-theme="dark"]` block is **removed**. | ADR-0005 §Decision-1/2 mandates the media-query form; §Decision-3 frames a manual toggle as a *future, purely additive* `[data-theme=…]` layer. The present `[data-theme="dark"]` block is dead (never applied at runtime) — YAGNI: re-add additively when a toggle UI actually ships. |
-| 3 | **Foundational CSS loads via the design-system barrel** (`src/index.ts` imports `./tokens.css` then `./base.css`, before the existing `./utilities.css`). | Single source of truth; matches the existing `utilities.css` precedent; impossible to forget in a new app/test harness. No app source edited. |
+| 3 | **Foundational CSS loads via the design-system barrel** (`src/index.ts` imports `../tokens.css` then `./base.css`, before the existing `./utilities.css`; note `tokens.css` is at the package root, `index.ts` in `src/`). | Single source of truth; matches the existing `utilities.css` precedent; impossible to forget in a new app/test harness. No app source edited. |
 | 4 | **New `base.css` is hand-written, minimal, token-driven** (box-sizing reset, body reset, body font/color/bg from tokens, `:focus-visible` baseline). No dependency, no normalize library. | ADR-0006 (hand-built, no framework). Component- and element-specific resets are owned by later fidelity slices, not S0 (YAGNI). |
 | 5 | **No ADR is created or amended.** ADR-0005 is upheld; the generator change is a *compliance fix*, documented as a compliance note here. | The decision record already exists and is correct; only the implementation diverged. |
 
@@ -141,7 +141,7 @@ implementation. Deliverable order:
 2. **`tokens.css` drift:** regenerate via `npm run tokens:generate`, commit the
    artifact; the existing `tokens:check` qa gate enforces committed == generated.
    (No new test — the gate is the assertion.)
-3. **Barrel import test (red first):** assert `src/index.ts` imports `./tokens.css`
+3. **Barrel import test (red first):** assert `src/index.ts` imports `../tokens.css`
    and `./base.css`, both before `./utilities.css`. Then add the imports.
 4. **`base.css` content test (red first):** CSS-text assertion that the file
    declares the `box-sizing: border-box` universal reset and the body
