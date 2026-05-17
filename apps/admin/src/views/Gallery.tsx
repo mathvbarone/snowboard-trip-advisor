@@ -20,10 +20,15 @@
 
 import {
   Button,
+  Card,
   Drawer,
+  EmptyStateLayout,
+  HeaderBar,
   IconButton,
   Input,
   Select,
+  Shell,
+  Sidebar,
   Table,
   Textarea,
   ToggleButtonGroup,
@@ -210,6 +215,90 @@ function FormControlsFamily(): JSX.Element {
   )
 }
 
+// S1b surfaces/layout family. Each component is rendered once per route
+// (one-exemplar-per-component invariant from gallery-smoke.md) inside its
+// own `data-gallery-component` anchor, exercising every contract state the
+// smoke needs: Card in BOTH elevated AND flat variants with all three
+// regions; Sidebar with an aria-current="page" active item; HeaderBar with
+// brand + view-toggle + shortlist; EmptyStateLayout with icon + cta +
+// details; Shell's skip-link.
+//
+// Shell COMPROMISE (see PR report): the design-system <Shell> is not a
+// slot-based primitive — it always renders `<a class="sta-skip-link">`
+// PLUS `<main id="main" tabIndex={-1}>` as a coupled unit (it is the
+// app's outer chrome). Mounting it inside the admin app's own <main>
+// nests a second <main>/`id="main"`. We render the real component
+// unmodified (faking the markup the component doesn't emit is barred by
+// the plan) with minimal children; the `.sta-skip-link` element is
+// present and queryable in the DOM, off-screen until :focus per its
+// own contract (NOT forced permanently visible). The smoke targets
+// `[data-gallery-component="Shell"] .sta-skip-link`.
+const SIDEBAR_ITEMS = [
+  { href: '#overview', label: 'Overview' },
+  { href: '#resorts', label: 'Resorts' },
+] as const
+
+function SurfacesFamily(): JSX.Element {
+  return (
+    <>
+      <section data-gallery-component="Card">
+        <h2>Card</h2>
+        <Card
+          variant="elevated"
+          header="Elevated card header"
+          footer="Elevated card footer"
+        >
+          Elevated card body — header / body / footer regions.
+        </Card>
+        <Card
+          variant="flat"
+          header="Flat card header"
+          footer="Flat card footer"
+        >
+          Flat card body — borderless inline variant.
+        </Card>
+      </section>
+
+      <section data-gallery-component="Sidebar">
+        <h2>Sidebar</h2>
+        <Sidebar items={SIDEBAR_ITEMS} activeHref="#resorts" />
+      </section>
+
+      <section data-gallery-component="HeaderBar">
+        <h2>HeaderBar</h2>
+        <HeaderBar
+          brandLabel="Snowboard Trip Advisor"
+          brandHref="#home"
+          viewToggleSlot={<span>View toggle slot</span>}
+          shortlistSlot={<span>Shortlist slot</span>}
+        />
+      </section>
+
+      <section data-gallery-component="EmptyStateLayout">
+        <h2>EmptyStateLayout</h2>
+        <EmptyStateLayout
+          icon={<span aria-hidden="true">❄</span>}
+          heading="No resorts yet"
+          body="Token-styled empty-state shell with icon, cta and details regions."
+          cta={<Button variant="primary">Refresh</Button>}
+          details={<span>Diagnostic detail text.</span>}
+        />
+      </section>
+
+      <section data-gallery-component="Shell">
+        <h2>Shell</h2>
+        <Shell>
+          <p>
+            Shell renders its <code>.sta-skip-link</code> (off-screen until
+            keyboard focus) plus a coupled <code>&lt;main&gt;</code>; see the
+            SurfacesFamily comment for the nested-main compromise.
+          </p>
+        </Shell>
+      </section>
+    </>
+  )
+}
+
 export function Gallery(): JSX.Element {
   // Drawer is a controlled primitive; seed it open so the smoke can inspect
   // its portalled panel. It mounts non-modal (clicks behind still work).
@@ -269,7 +358,7 @@ export function Gallery(): JSX.Element {
         <FormControlsFamily />
       </section>
       <section data-gallery-family="S1b-surfaces">
-        {/* TODO: filled by later S1 PR */}
+        <SurfacesFamily />
       </section>
       <section data-gallery-family="S1c-feedback-status">
         {/* TODO: filled by later S1 PR */}
