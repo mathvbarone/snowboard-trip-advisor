@@ -106,6 +106,21 @@ function makeFullDetail(slug: string, country: 'PL' | 'CZ'): ResortDetailRespons
   })
 }
 
+// PR N.c4: FieldRow now reads GET /api/analyst-notes/:slug for its note
+// affordance count. The shared public mocks server has no admin handlers
+// (each test stubs its own via server.use), and the harness runs MSW with
+// onUnhandledRequest:'error' — so every editor-rendering case must stub the
+// notes endpoint or the unhandled GET aborts the editor. Empty notes map =
+// every affordance renders "📝 0" (the read-only default state).
+const emptyAnalystNotes = http.get(
+  '/api/analyst-notes/:slug',
+  ({ params }): Response =>
+    HttpResponse.json({
+      slug: typeof params.slug === 'string' ? params.slug : 'unknown',
+      notes: {},
+    }),
+)
+
 async function renderAsync(node: ReactNode): Promise<ReturnType<typeof render>> {
   let view!: ReturnType<typeof render>
   await act(async (): Promise<void> => {
@@ -142,6 +157,7 @@ describe('Resort editor read integration (PR 4.4b Task 10)', (): void => {
           const responseSlug = typeof params.slug === 'string' ? params.slug : slug
           return HttpResponse.json(makeFullDetail(responseSlug, country))
         }),
+        emptyAnalystNotes,
       )
       window.history.replaceState({}, '', `/?route=editor&slug=${slug}`)
       await renderAsync(<App />)
@@ -191,6 +207,7 @@ describe('Resort editor read integration (PR 4.4b Task 10)', (): void => {
       http.get('/api/resorts/:slug', (): Response =>
         HttpResponse.json(makeFullDetail('kotelnica-bialczanska', 'PL')),
       ),
+      emptyAnalystNotes,
     )
     window.history.replaceState({}, '', `/?route=editor&slug=${KOTELNICA}`)
     const { container } = await renderAsync(<App />)

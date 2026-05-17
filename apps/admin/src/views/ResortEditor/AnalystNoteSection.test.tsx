@@ -1,0 +1,312 @@
+import { ResortSlug } from '@snowboard-trip-advisor/schema'
+import { AnalystNotesGetResponse } from '@snowboard-trip-advisor/schema/api'
+import { act, fireEvent, render, screen } from '@testing-library/react'
+import { http, HttpResponse } from 'msw'
+import { Suspense } from 'react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { server } from '../../mocks/server'
+import {
+  __resetForTests as resetFlushAll,
+} from '../../state/flushAll'
+import {
+  __resetForTests as resetAnalystNoteDraft,
+} from '../../state/useAnalystNoteDraft'
+import {
+  __resetForTests as resetAnalystNotes,
+  prepopulateAnalystNotes,
+} from '../../state/useAnalystNotes'
+
+import AnalystNoteSection from './AnalystNoteSection'
+
+const KB = ResortSlug.parse('kotelnica-bialczanska')
+const PATH = 'slopes_km'
+const OBS = '2026-04-26T08:00:00Z'
+
+function seedWith(markdown: string): void {
+  prepopulateAnalystNotes(
+    KB,
+    AnalystNotesGetResponse.parse({
+      slug: KB,
+      notes: {
+        [PATH]: {
+          schema_version: 1,
+          markdown,
+          html: `<p>${markdown}</p>`,
+          created_at: OBS,
+          updated_at: OBS,
+        },
+      },
+    }),
+  )
+}
+
+function seedEmpty(): void {
+  prepopulateAnalystNotes(
+    KB,
+    AnalystNotesGetResponse.parse({ slug: KB, notes: {} }),
+  )
+}
+
+function renderSection(): void {
+  render(
+    <Suspense fallback={<p>loading</p>}>
+      <AnalystNoteSection slug={KB} path={PATH} />
+    </Suspense>,
+  )
+}
+
+beforeEach((): void => {
+  vi.useFakeTimers()
+  resetAnalystNotes()
+  resetAnalystNoteDraft()
+  resetFlushAll()
+})
+
+afterEach((): void => {
+  vi.useRealTimers()
+  vi.restoreAllMocks()
+  resetAnalystNotes()
+  resetAnalystNoteDraft()
+  resetFlushAll()
+  server.resetHandlers()
+})
+
+describe('AnalystNoteSection (spec §6.2 / §6.3)', (): void => {
+  it('reads the existing note and shows it in the source pane', (): void => {
+    seedWith('# Heading\n\nbody text')
+    renderSection()
+    const source = screen.getByRole('textbox', { name: /note source/i })
+    expect(source).toHaveValue('# Heading\n\nbody text')
+  })
+
+  it('typing in the source pane debounces 500ms then flushes a PUT', async (): Promise<void> => {
+    seedEmpty()
+    const seen: Array<{ path: string; markdown: string | null }> = []
+    server.use(
+      http.put(
+        '/api/analyst-notes/:slug',
+        async ({ params, request }): Promise<Response> => {
+          const slug = params.slug as string
+          const body = (await request.json()) as {
+            path: string
+            markdown: string | null
+          }
+          seen.push(body)
+          return HttpResponse.json({
+            slug,
+            path: body.path,
+            note:
+              body.markdown === null
+                ? null
+                : {
+                    schema_version: 1 as const,
+                    markdown: body.markdown,
+                    html: `<p>${body.markdown}</p>`,
+                    created_at: OBS,
+                    updated_at: OBS,
+                  },
+          })
+        },
+      ),
+    )
+    renderSection()
+    const source = screen.getByRole('textbox', { name: /note source/i })
+    fireEvent.change(source, { target: { value: 'hello world' } })
+    expect(seen).toHaveLength(0)
+    await act(async (): Promise<void> => {
+      await vi.advanceTimersByTimeAsync(499)
+    })
+    expect(seen).toHaveLength(0)
+    await act(async (): Promise<void> => {
+      await vi.advanceTimersByTimeAsync(1)
+    })
+    expect(seen).toEqual([{ path: PATH, markdown: 'hello world' }])
+  })
+
+  it('renders the client-side preview ~150ms after a keystroke', async (): Promise<void> => {
+    seedEmpty()
+    renderSection()
+    const source = screen.getByRole('textbox', { name: /note source/i })
+    fireEvent.change(source, { target: { value: '**bold**' } })
+    const preview = screen.getByLabelText(
+      'sanitized preview of the note above',
+    )
+    // Preview is debounced ~150ms — not yet updated.
+    expect(preview.innerHTML).not.toContain('<strong>')
+    await act(async (): Promise<void> => {
+      await vi.advanceTimersByTimeAsync(150)
+    })
+    expect(preview.innerHTML).toContain('<strong>bold</strong>')
+  })
+
+  it('mod+enter forces an immediate flush (no 500ms wait)', async (): Promise<void> => {
+    seedEmpty()
+    const seen: Array<{ path: string; markdown: string | null }> = []
+    server.use(
+      http.put(
+        '/api/analyst-notes/:slug',
+        async ({ params, request }): Promise<Response> => {
+          const slug = params.slug as string
+          const body = (await request.json()) as {
+            path: string
+            markdown: string | null
+          }
+          seen.push(body)
+          return HttpResponse.json({
+            slug,
+            path: body.path,
+            note: {
+              schema_version: 1 as const,
+              markdown: body.markdown as string,
+              html: `<p>${String(body.markdown)}</p>`,
+              created_at: OBS,
+              updated_at: OBS,
+            },
+          })
+        },
+      ),
+    )
+    renderSection()
+    const source = screen.getByRole('textbox', { name: /note source/i })
+    fireEvent.change(source, { target: { value: 'urgent' } })
+    await act(async (): Promise<void> => {
+      source.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Enter',
+          metaKey: true,
+          bubbles: true,
+        }),
+      )
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(seen).toEqual([{ path: PATH, markdown: 'urgent' }])
+  })
+
+  it('Escape collapses the row without an explicit discard', async (): Promise<void> => {
+    seedWith('keep me')
+    const onCollapse = vi.fn()
+    render(
+      <Suspense fallback={<p>loading</p>}>
+        <AnalystNoteSection slug={KB} path={PATH} onCollapse={onCollapse} />
+      </Suspense>,
+    )
+    const source = screen.getByRole('textbox', { name: /note source/i })
+    await act(async (): Promise<void> => {
+      source.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+      )
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(onCollapse).toHaveBeenCalledTimes(1)
+  })
+
+  it('Delete button sends PUT { markdown: null }', async (): Promise<void> => {
+    seedWith('to be deleted')
+    const seen: Array<{ path: string; markdown: string | null }> = []
+    server.use(
+      http.put(
+        '/api/analyst-notes/:slug',
+        async ({ params, request }): Promise<Response> => {
+          const slug = params.slug as string
+          const body = (await request.json()) as {
+            path: string
+            markdown: string | null
+          }
+          seen.push(body)
+          return HttpResponse.json({ slug, path: body.path, note: null })
+        },
+      ),
+    )
+    renderSection()
+    const del = screen.getByRole('button', { name: 'Delete note' })
+    await act(async (): Promise<void> => {
+      del.click()
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(seen).toEqual([{ path: PATH, markdown: null }])
+  })
+
+  it('mod+backspace also triggers delete', async (): Promise<void> => {
+    seedWith('zap')
+    const seen: Array<{ path: string; markdown: string | null }> = []
+    server.use(
+      http.put(
+        '/api/analyst-notes/:slug',
+        async ({ params, request }): Promise<Response> => {
+          const slug = params.slug as string
+          const body = (await request.json()) as {
+            path: string
+            markdown: string | null
+          }
+          seen.push(body)
+          return HttpResponse.json({ slug, path: body.path, note: null })
+        },
+      ),
+    )
+    renderSection()
+    const source = screen.getByRole('textbox', { name: /note source/i })
+    await act(async (): Promise<void> => {
+      source.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Backspace',
+          metaKey: true,
+          bubbles: true,
+        }),
+      )
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(seen).toEqual([{ path: PATH, markdown: null }])
+  })
+
+  it('labels the sanitized preview region for screen readers', (): void => {
+    seedWith('hello')
+    renderSection()
+    expect(
+      screen.getByLabelText('sanitized preview of the note above'),
+    ).toBeInTheDocument()
+  })
+
+  it('shows saving then saved status while a flush is in flight', async (): Promise<void> => {
+    seedEmpty()
+    renderSection()
+    const source = screen.getByRole('textbox', { name: /note source/i })
+    fireEvent.change(source, { target: { value: 'status check' } })
+    await act(async (): Promise<void> => {
+      await vi.advanceTimersByTimeAsync(500)
+    })
+    // After the round-trip settles the status reads "saved".
+    expect(screen.getByText(/saved/i)).toBeInTheDocument()
+  })
+
+  it('surfaces the save-failed status when the autosave PUT fails', async (): Promise<void> => {
+    seedEmpty()
+    server.use(
+      http.put(
+        '/api/analyst-notes/:slug',
+        (): Response =>
+          HttpResponse.json(
+            { error: { code: 'internal', message: 'boom' } },
+            { status: 500 },
+          ),
+      ),
+    )
+    renderSection()
+    const source = screen.getByRole('textbox', { name: /note source/i })
+    fireEvent.change(source, { target: { value: 'will fail' } })
+    await act(async (): Promise<void> => {
+      await vi.advanceTimersByTimeAsync(500)
+    })
+    expect(screen.getByText(/save-failed/i)).toBeInTheDocument()
+  })
+
+  it('renders the markdown preview with the SAME renderer as the server (parity)', (): void => {
+    seedWith('[x](javascript:alert(1))')
+    renderSection()
+    const preview = screen.getByLabelText(
+      'sanitized preview of the note above',
+    )
+    // The shared sanitizer strips the javascript: protocol — client/server parity.
+    expect(preview.innerHTML).not.toContain('javascript:')
+  })
+})

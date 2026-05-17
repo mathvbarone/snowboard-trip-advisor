@@ -39,6 +39,15 @@ export interface ButtonProps {
   // already conveys disabled state to AT, and PublishDialog passes
   // `disabled={blocker !== null}` directly.
   'aria-describedby'?: string
+  // PR N.c4 extension: the analyst-note affordance (spec §6.1/§6.5) is a
+  // disclosure toggle — it expands/collapses an inline section, so it needs
+  // the `aria-expanded` + `aria-controls` disclosure-pattern attributes and
+  // a native `title` tooltip (first ~80 chars of the note, or "Add note").
+  // Additive + optional: every existing call site keeps its exact prior
+  // typing/behavior (the attributes are simply absent when not passed).
+  'aria-expanded'?: boolean
+  'aria-controls'?: string
+  title?: string
   // Pass-through for data-detail-trigger (§5.5) and any future data-* hooks.
   // Mirrors IconButton's catch-all signature so apps/public can mark the
   // "View details" Button as the drawer-open trigger without inflating the
@@ -55,6 +64,9 @@ export function Button({
   'aria-label': ariaLabel,
   'aria-pressed': ariaPressed,
   'aria-describedby': ariaDescribedBy,
+  'aria-expanded': ariaExpanded,
+  'aria-controls': ariaControls,
+  title,
   ...rest
 }: ButtonProps): JSX.Element {
   // The raw-<button> ban fires in apps/**, not in packages/design-system —
@@ -67,6 +79,9 @@ export function Button({
       aria-label={ariaLabel}
       aria-pressed={ariaPressed}
       aria-describedby={ariaDescribedBy}
+      aria-expanded={ariaExpanded}
+      aria-controls={ariaControls}
+      title={title}
       data-variant={variant}
       className="sta-button"
       {...rest}

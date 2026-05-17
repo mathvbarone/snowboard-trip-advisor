@@ -1,4 +1,5 @@
 import {
+  Button,
   Input,
   SourceBadge,
   StatusPill,
@@ -7,16 +8,67 @@ import type {
   FieldState,
   MetricPath,
   Money,
+  ResortSlug,
   SourceKey,
 } from '@snowboard-trip-advisor/schema'
 import type { JSX } from 'react'
-import { useRef, useState } from 'react'
+import { lazy, Suspense, useId, useRef, useState } from 'react'
 
+import type { RouteState } from '../../lib/urlState'
 import { useResponsiveTabOrder } from '../../lib/useResponsiveTabOrder'
+import { useAnalystNotes } from '../../state/useAnalystNotes'
 import { useModeToggle } from '../../state/useModeToggle'
+import { useURLState } from '../../state/useURLState'
 import { useWorkspaceState } from '../../state/useWorkspaceState'
 
 import { ModeToggle } from './ModeToggle'
+
+// PR N.c4 §6.6 — LOAD-BEARING lazy boundary. AnalystNoteSection statically
+// imports `@snowboard-trip-advisor/schema/markdown` (the ~150 KB `unified`
+// renderer chain). It is reachable from FieldRow ONLY through this
+// `lazy(() => import())` so the renderer chunk is fetched on the first
+// "Notes" expand and never pulled by Dashboard / ResortsTable /
+// PublishDialog / PublishHistory. NEVER add a static `import` of
+// './AnalystNoteSection' (or the renderer) anywhere in this module — that
+// would collapse the code split (spec §6.6 / §10.4). The Suspense fallback
+// is `null` and the section is mounted ONLY when `notesExpanded` is true.
+// `lazy` infers the component type from the dynamic-import module shape;
+// no `import()` type annotation is needed (and it is lint-forbidden). The
+// import specifier is the ONLY reference to this module in FieldRow — keeping
+// it inside `lazy(() => import(...))` is exactly what preserves the split.
+const AnalystNoteSection = lazy(() => import('./AnalystNoteSection'))
+
+// Spec §6.1 — N is the rendered-HTML *text* character count (markup
+// excluded), 0 when there is no note. Parsing the server-sanitized html
+// string into a detached element and reading textContent keeps the count in
+// lockstep with what the preview pane will actually display. The string is
+// already sanitized by renderAnalystNoteMarkdown server-side; this never
+// attaches to the live document.
+function noteTextContent(html: string | undefined): string {
+  if (html === undefined || html === '') {
+    return ''
+  }
+  const el = document.createElement('div')
+  el.innerHTML = html
+  // `HTMLDivElement.textContent` is non-null (TS narrows it for an Element
+  // with content); the empty-html / undefined cases are handled above.
+  return el.textContent
+}
+
+// FieldRow only ever renders on the editor route (MetricPanel → ResortEditor).
+// useWorkspaceState() higher in the body already throws the analogous error
+// on a non-editor route, so the non-editor branch here is a defensive
+// invariant — exported + unit-tested directly so both branches are covered
+// without an inline coverage suppression (CLAUDE.md Coverage Rules).
+// eslint-disable-next-line react-refresh/only-export-components -- pure helper co-located inside FieldRow.tsx; same rationale as `formatMetricValue` / `labelForPath`. Honors the PR §11.1 8-file budget (no extra module).
+export function editorSlug(route: RouteState): ResortSlug {
+  if (route.route !== 'editor') {
+    throw new Error('FieldRow rendered outside the editor route')
+  }
+  return route.slug
+}
+
+const TOOLTIP_MAX = 80
 
 // PR 4.4b §D2 formatters. Exhaustive switch on MetricPath; never throws;
 // shape-mismatch / null / undefined inputs render as '—'. Money values use
@@ -204,6 +256,20 @@ export function FieldRow({ path, state }: FieldRowProps): JSX.Element {
   const { readOnly } = useResponsiveTabOrder()
   const isAboveMd = !readOnly
 
+  // Analyst-note affordance (spec §6.1 / §6.4 / §6.6). FieldRow only renders
+  // on the editor route — useWorkspaceState() above already enforced that
+  // invariant (it throws on a non-editor route first), so route.slug is
+  // statically present (editorSlug's non-editor branch is a defensive,
+  // separately-unit-tested guard). The `useAnalystNotes` read is Suspense-
+  // based; it is isolated inside <NoteAffordance> behind a LOCAL <Suspense>
+  // below so a cold notes cache only shows the "📝 …" placeholder for this
+  // one row instead of bubbling the throw up to ResortEditor's boundary and
+  // forcing a whole-tree concurrent re-render.
+  const route = useURLState()
+  const slug = editorSlug(route)
+  const [notesExpanded, setNotesExpanded] = useState(false)
+  const sectionId = useId()
+
   // Resolve the displayed/edited value. Draft overrides canonical for paths
   // the user has edited in-session; otherwise fall back to the canonical
   // FieldState value (or undefined for failed states).
@@ -304,6 +370,10 @@ export function FieldRow({ path, state }: FieldRowProps): JSX.Element {
     onLocalChange,
   })
 
+  const onToggleNotes = (): void => {
+    setNotesExpanded((open): boolean => !open)
+  }
+
   return (
     <div data-path={path} aria-label={label} className="sta-field-row">
       <span className="sta-field-row__label">{label}</span>
@@ -311,8 +381,128 @@ export function FieldRow({ path, state }: FieldRowProps): JSX.Element {
       <span className="sta-field-row__value">{displayValue(path, state)}</span>
       {badgeSource !== null ? <SourceBadge source={badgeSource} /> : null}
       {modeToggleEl}
+      {/* The notes GET is Suspense-based — keep its throw LOCAL so a cold
+          cache shows only this row's placeholder (📝 …, disabled) instead of
+          collapsing ResortEditor's boundary into a whole-tree concurrent
+          re-render. The placeholder is itself the affordance shape so layout
+          doesn't shift when the count resolves. */}
+      <Suspense
+        fallback={
+          <NoteAffordanceButton
+            charCount={null}
+            hasNote={false}
+            tooltip="Add note"
+            expanded={notesExpanded}
+            sectionId={sectionId}
+            isAboveMd={isAboveMd}
+            onToggle={onToggleNotes}
+          />
+        }
+      >
+        <NoteAffordance
+          slug={slug}
+          path={path}
+          expanded={notesExpanded}
+          sectionId={sectionId}
+          isAboveMd={isAboveMd}
+          onToggle={onToggleNotes}
+        />
+      </Suspense>
       {inputElement}
+      {notesExpanded ? (
+        <div id={sectionId}>
+          {/* Spec §6.6: the renderer chunk loads ONLY here, on first expand.
+              fallback={null} per spec (no flash of a spinner for a ~150ms
+              chunk fetch). */}
+          <Suspense fallback={null}>
+            <AnalystNoteSection
+              slug={slug}
+              path={path}
+              onCollapse={(): void => {
+                setNotesExpanded(false)
+              }}
+            />
+          </Suspense>
+        </div>
+      ) : null}
     </div>
+  )
+}
+
+// Presentational affordance button (spec §6.1). `charCount === null` is the
+// Suspense-fallback (cache cold) state — render "📝 …" so the row's layout is
+// stable and the control is still focusable-but-shows-nothing-changed. With a
+// resolved count: N===0 → outlined + "Add note"; N>0 → filled + "Edit note".
+// Disabled below md per the PR 4.6a responsive rule (native `disabled`).
+//
+// Spec §6.1 specifies `<Button size="sm">`; the DS Button (PR 3.1c/3.2) has
+// no `size` prop, so mirror the sibling ModeToggle's `variant="ghost"`-only
+// usage. PR N.c4 adds the additive `aria-expanded`/`aria-controls`/`title`
+// disclosure props to Button (spec §6.5 — see Button.tsx).
+function NoteAffordanceButton({
+  charCount,
+  hasNote,
+  tooltip,
+  expanded,
+  sectionId,
+  isAboveMd,
+  onToggle,
+}: {
+  readonly charCount: number | null
+  readonly hasNote: boolean
+  readonly tooltip: string
+  readonly expanded: boolean
+  readonly sectionId: string
+  readonly isAboveMd: boolean
+  readonly onToggle: () => void
+}): JSX.Element {
+  return (
+    <Button
+      variant="ghost"
+      data-note-filled={hasNote ? 'true' : 'false'}
+      aria-label={hasNote ? 'Edit note' : 'Add note'}
+      aria-expanded={expanded}
+      aria-controls={sectionId}
+      disabled={!isAboveMd}
+      title={tooltip}
+      onClick={onToggle}
+    >
+      {`📝 ${charCount === null ? '…' : String(charCount)}`}
+    </Button>
+  )
+}
+
+// Reads the slug's notes (Suspense) and renders the affordance for `path`.
+// Isolated so the suspend stays inside FieldRow's LOCAL <Suspense> boundary.
+function NoteAffordance({
+  slug,
+  path,
+  expanded,
+  sectionId,
+  isAboveMd,
+  onToggle,
+}: {
+  readonly slug: ResortSlug
+  readonly path: MetricPath
+  readonly expanded: boolean
+  readonly sectionId: string
+  readonly isAboveMd: boolean
+  readonly onToggle: () => void
+}): JSX.Element {
+  const notes = useAnalystNotes(slug)
+  const noteText = noteTextContent(notes.notes[path]?.html)
+  const noteCharCount = noteText.length
+  const hasNote = noteCharCount > 0
+  return (
+    <NoteAffordanceButton
+      charCount={noteCharCount}
+      hasNote={hasNote}
+      tooltip={hasNote ? noteText.slice(0, TOOLTIP_MAX) : 'Add note'}
+      expanded={expanded}
+      sectionId={sectionId}
+      isAboveMd={isAboveMd}
+      onToggle={onToggle}
+    />
   )
 }
 
