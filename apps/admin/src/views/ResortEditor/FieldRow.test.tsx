@@ -34,7 +34,13 @@ import {
   setFieldValue as workspaceSetFieldValue,
 } from '../../state/useWorkspaceState'
 
-import { editorSlug, FieldRow, formatMetricValue, labelForPath } from './FieldRow'
+import {
+  editorSlug,
+  FieldRow,
+  formatMetricValue,
+  labelForPath,
+  noteSaveStatusLabel,
+} from './FieldRow'
 
 const OBS_AT = ISODateTimeString.parse('2026-04-29T08:00:00Z')
 const KOTELNICA = ResortSlug.parse('kotelnica-bialczanska')
@@ -702,6 +708,24 @@ function seedNote(markdown: string, html: string, path = 'slopes_km'): void {
   )
 }
 
+describe('noteSaveStatusLabel (Codex P2 fold — spec §6.2 status mapping)', (): void => {
+  it('maps saving → "saving…"', (): void => {
+    expect(noteSaveStatusLabel('saving')).toBe('saving…')
+  })
+  it('maps saved → "saved"', (): void => {
+    expect(noteSaveStatusLabel('saved')).toBe('saved')
+  })
+  it('maps save-failed → "save-failed"', (): void => {
+    expect(noteSaveStatusLabel('save-failed')).toBe('save-failed')
+  })
+  it('maps idle → null (no noise on untouched rows)', (): void => {
+    expect(noteSaveStatusLabel('idle')).toBeNull()
+  })
+  it('maps dirty → null (no noise mid-keystroke)', (): void => {
+    expect(noteSaveStatusLabel('dirty')).toBeNull()
+  })
+})
+
 describe('editorSlug (PR N.c4 invariant helper)', (): void => {
   it('returns the slug on the editor route', (): void => {
     expect(editorSlug({ route: 'editor', slug: KOTELNICA })).toBe(KOTELNICA)
@@ -840,6 +864,95 @@ describe('FieldRow analyst-note affordance (PR N.c4 §6.1 / §6.4)', (): void =>
     expect(
       screen.getByRole('button', { name: 'Edit note' }),
     ).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  // Codex P2 fold (spec §6.2): the save-status indicator belongs next to the
+  // affordance button at FieldRow level (always mounted), NOT inside the
+  // collapsible AnalystNoteSection. If the analyst edits a note then collapses
+  // the row while the debounced flush is still pending and that flush FAILS,
+  // the failure must remain visible — otherwise the analyst leaves believing
+  // the note saved (silent data loss).
+  it('keeps the save-failed status visible at the affordance after the section collapses (silent-failure guard)', async (): Promise<void> => {
+    seedNote('hello', '<p>hello</p>')
+    const spy = vi
+      .spyOn(apiClient, 'upsertAnalystNote')
+      .mockRejectedValue(new Error('boom'))
+
+    render(<FieldRow path="slopes_km" state={liveState(8)} />)
+    const aff = screen.getByRole('button', { name: 'Edit note' })
+    fireEvent.click(aff)
+    const source = await screen.findByRole('textbox', { name: /note source/i })
+
+    // Dirty the draft, then collapse the row (Escape) BEFORE the failing
+    // flush settles. Escape flushNow()s immediately (no 500ms wait) + asks
+    // FieldRow to collapse, so AnalystNoteSection unmounts while the
+    // rejecting PUT is in flight.
+    fireEvent.change(source, { target: { value: 'edited but doomed' } })
+    await act(async (): Promise<void> => {
+      source.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+      )
+      await Promise.resolve()
+    })
+
+    // The collapsible section is gone…
+    await waitFor((): void => {
+      expect(
+        screen.queryByRole('textbox', { name: /note source/i }),
+      ).toBeNull()
+    })
+    // …but the affordance-adjacent status still surfaces the failure.
+    await waitFor((): void => {
+      expect(screen.getByText('save-failed')).toBeInTheDocument()
+    })
+    expect(spy).toHaveBeenCalled()
+  })
+
+  it('keeps the saved status visible at the affordance after a successful flush while collapsed (happy path)', async (): Promise<void> => {
+    seedNote('hello', '<p>hello</p>')
+    const spy = vi
+      .spyOn(apiClient, 'upsertAnalystNote')
+      .mockResolvedValue({
+        slug: KOTELNICA,
+        path: 'slopes_km',
+        note: {
+          schema_version: 1,
+          markdown: 'edited and saved',
+          html: '<p>edited and saved</p>',
+          created_at: OBS_AT,
+          updated_at: OBS_AT,
+        },
+      })
+
+    render(<FieldRow path="slopes_km" state={liveState(8)} />)
+    const aff = screen.getByRole('button', { name: 'Edit note' })
+    fireEvent.click(aff)
+    const source = await screen.findByRole('textbox', { name: /note source/i })
+
+    fireEvent.change(source, { target: { value: 'edited and saved' } })
+    await act(async (): Promise<void> => {
+      source.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+      )
+      await Promise.resolve()
+    })
+
+    await waitFor((): void => {
+      expect(
+        screen.queryByRole('textbox', { name: /note source/i }),
+      ).toBeNull()
+    })
+    await waitFor((): void => {
+      expect(screen.getByText('saved')).toBeInTheDocument()
+    })
+    expect(spy).toHaveBeenCalled()
+  })
+
+  it('shows no save-status indicator for an untouched row (idle state)', (): void => {
+    render(<FieldRow path="slopes_km" state={liveState(8)} />)
+    expect(screen.queryByText('saving…')).toBeNull()
+    expect(screen.queryByText('saved')).toBeNull()
+    expect(screen.queryByText('save-failed')).toBeNull()
   })
 
   it('is axe-clean with the affordance present (collapsed + expanded)', async (): Promise<void> => {

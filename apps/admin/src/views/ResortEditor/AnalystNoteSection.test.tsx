@@ -267,38 +267,13 @@ describe('AnalystNoteSection (spec §6.2 / §6.3)', (): void => {
     ).toBeInTheDocument()
   })
 
-  it('shows saving then saved status while a flush is in flight', async (): Promise<void> => {
-    seedEmpty()
-    renderSection()
-    const source = screen.getByRole('textbox', { name: /note source/i })
-    fireEvent.change(source, { target: { value: 'status check' } })
-    await act(async (): Promise<void> => {
-      await vi.advanceTimersByTimeAsync(500)
-    })
-    // After the round-trip settles the status reads "saved".
-    expect(screen.getByText(/saved/i)).toBeInTheDocument()
-  })
-
-  it('surfaces the save-failed status when the autosave PUT fails', async (): Promise<void> => {
-    seedEmpty()
-    server.use(
-      http.put(
-        '/api/analyst-notes/:slug',
-        (): Response =>
-          HttpResponse.json(
-            { error: { code: 'internal', message: 'boom' } },
-            { status: 500 },
-          ),
-      ),
-    )
-    renderSection()
-    const source = screen.getByRole('textbox', { name: /note source/i })
-    fireEvent.change(source, { target: { value: 'will fail' } })
-    await act(async (): Promise<void> => {
-      await vi.advanceTimersByTimeAsync(500)
-    })
-    expect(screen.getByText(/save-failed/i)).toBeInTheDocument()
-  })
+  // Codex P2 fold (spec §6.2): the save-status indicator moved OUT of
+  // AnalystNoteSection to FieldRow level (next to the 📝 affordance, always
+  // mounted) so a flush that fails after this collapsible section unmounts
+  // stays visible. The saving/saved/save-failed assertions that used to live
+  // here now live in FieldRow.test.tsx (single source of truth, spec §6.2).
+  // The PUT flush behaviour itself is still covered by the debounce / mod+
+  // enter / delete tests above.
 
   it('renders the markdown preview with the SAME renderer as the server (parity)', (): void => {
     seedWith('[x](javascript:alert(1))')

@@ -50,28 +50,17 @@ export interface AnalystNoteSectionProps {
   readonly onCollapse?: () => void
 }
 
-function statusLabel(
-  status: 'idle' | 'dirty' | 'saving' | 'saved' | 'save-failed',
-): string | null {
-  switch (status) {
-    case 'saving':
-      return 'saving…'
-    case 'saved':
-      return 'saved'
-    case 'save-failed':
-      return 'save-failed'
-    case 'idle':
-    case 'dirty':
-      return null
-  }
-}
-
 export default function AnalystNoteSection({
   slug,
   path,
   onCollapse,
 }: AnalystNoteSectionProps): JSX.Element {
-  const { draft, status, setDraft, flushNow, deleteNote } = useAnalystNoteDraft(
+  // Codex P2 fold (spec §6.2): the save-status indicator now lives at
+  // FieldRow level, adjacent to the 📝 affordance (always mounted), so a
+  // flush that fails AFTER this collapsible section unmounts is still
+  // visible. It is NOT rendered here anymore — a single indicator (one
+  // source of truth) per spec §6.2. `status` is intentionally not read.
+  const { draft, setDraft, flushNow, deleteNote } = useAnalystNoteDraft(
     slug,
     path,
   )
@@ -113,16 +102,9 @@ export default function AnalystNoteSection({
     }
   }
 
-  const label = statusLabel(status)
-
   return (
     <div className="sta-analyst-note">
       <div className="sta-analyst-note__toolbar">
-        {label !== null ? (
-          <span role="status" className="sta-analyst-note__status">
-            {label}
-          </span>
-        ) : null}
         <Button
           variant="ghost"
           aria-label="Delete note"

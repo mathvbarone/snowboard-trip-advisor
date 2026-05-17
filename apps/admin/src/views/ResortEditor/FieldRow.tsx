@@ -16,6 +16,10 @@ import { lazy, Suspense, useId, useRef, useState } from 'react'
 
 import type { RouteState } from '../../lib/urlState'
 import { useResponsiveTabOrder } from '../../lib/useResponsiveTabOrder'
+import {
+  useAnalystNoteDraft,
+  type NoteDraftStatus,
+} from '../../state/useAnalystNoteDraft'
 import { useAnalystNotes } from '../../state/useAnalystNotes'
 import { useModeToggle } from '../../state/useModeToggle'
 import { useURLState } from '../../state/useURLState'
@@ -408,6 +412,21 @@ export function FieldRow({ path, state }: FieldRowProps): JSX.Element {
           onToggle={onToggleNotes}
         />
       </Suspense>
+      {/* Spec §6.2 — save-status indicator NEXT TO THE AFFORDANCE, at
+          FieldRow level (always mounted). It subscribes to
+          useAnalystNoteDraft's module-level write-hook state, so a
+          saving→saved→save-failed transition stays visible whether the
+          collapsible AnalystNoteSection is expanded OR collapsed (Escape /
+          second affordance click / dropping below md all unmount the
+          section). Without this, a flush that fails AFTER the analyst
+          collapses the row would be silent (data loss). It renders
+          regardless of isAboveMd so a failure stays visible in the
+          read-only layout too. The hook reads from the already-cached
+          useAnalystNotes(slug) — no new network — and uses
+          useSyncExternalStore internally (declarative subscription, no
+          effect / state mirroring). idle/dirty render nothing so untouched
+          rows show no noise. */}
+      <NoteSaveStatus slug={slug} path={path} />
       {inputElement}
       {isAboveMd && notesExpanded ? (
         <div id={sectionId}>
@@ -508,6 +527,54 @@ function NoteAffordance({
       isAboveMd={isAboveMd}
       onToggle={onToggle}
     />
+  )
+}
+
+// Spec §6.2 status→label mapping. Kept verbatim-equivalent to the mapping
+// AnalystNoteSection previously owned (it now consumes THIS as the single
+// source of truth) so the indicator text/aria is identical wherever it
+// renders. idle/dirty → null (render nothing): an untouched or
+// mid-keystroke row shows no noise; only the post-edit
+// saving/saved/save-failed lifecycle is surfaced.
+// eslint-disable-next-line react-refresh/only-export-components -- pure helper co-located inside FieldRow.tsx; same rationale as `formatMetricValue` / `labelForPath`. Exported so its status→label branches are unit-tested directly without contrived component renders (CLAUDE.md Coverage Rules). Honors the PR §11.1 file budget (no extra module).
+export function noteSaveStatusLabel(status: NoteDraftStatus): string | null {
+  switch (status) {
+    case 'saving':
+      return 'saving…'
+    case 'saved':
+      return 'saved'
+    case 'save-failed':
+      return 'save-failed'
+    case 'idle':
+    case 'dirty':
+      return null
+  }
+}
+
+// FieldRow-level save-status indicator (spec §6.2), rendered adjacent to the
+// 📝 affordance and ALWAYS mounted (unlike AnalystNoteSection). Subscribes
+// declaratively to the per-path module-level write-hook state via
+// useAnalystNoteDraft — the same handle AnalystNoteSection uses — so the
+// status survives the section unmounting (collapse / below-md). Reading the
+// hook here seeds per-path state from the already-cached useAnalystNotes(slug)
+// with no extra network (spec §6.2 / N.c2 design). Renders nothing while the
+// label is null (idle/dirty) so untouched rows stay quiet.
+function NoteSaveStatus({
+  slug,
+  path,
+}: {
+  readonly slug: ResortSlug
+  readonly path: MetricPath
+}): JSX.Element | null {
+  const { status } = useAnalystNoteDraft(slug, path)
+  const label = noteSaveStatusLabel(status)
+  if (label === null) {
+    return null
+  }
+  return (
+    <span role="status" className="sta-analyst-note__status">
+      {label}
+    </span>
   )
 }
 
