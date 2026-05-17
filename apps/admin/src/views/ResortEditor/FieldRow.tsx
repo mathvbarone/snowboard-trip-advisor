@@ -465,8 +465,13 @@ export function FieldRow({ path, state }: FieldRowProps): JSX.Element {
 
 // Presentational affordance button (spec §6.1). `charCount === null` is the
 // Suspense-fallback (cache cold) state — render "📝 …" so the row's layout is
-// stable and the control is still focusable-but-shows-nothing-changed. With a
-// resolved count: N===0 → outlined + "Add note"; N>0 → filled + "Edit note".
+// stable and the control is still focusable-but-shows-nothing-changed.
+// filled / "Edit note" / tooltip key off note EXISTENCE (`hasNote`), NOT the
+// count: `charCount` is purely informational and may legitimately be 0 for an
+// existing image-only / `<hr>` / other-non-text note. Spec §6.1's "N===0 →
+// outlined / 'Add note'" wording conflated "no note" with "note that renders
+// to zero text"; the affordance's job is has-note vs no-note, so existence
+// wins (Codex P2 fold — NOT a spec violation, it's the §6.1 reconciliation).
 // Disabled below md per the PR 4.6a responsive rule (native `disabled`).
 //
 // Spec §6.1 specifies `<Button size="sm">`; the DS Button (PR 3.1c/3.2) has
@@ -524,14 +529,20 @@ function NoteAffordance({
   readonly onToggle: () => void
 }): JSX.Element {
   const notes = useAnalystNotes(slug)
-  const noteText = noteTextContent(notes.notes[path]?.html)
+  // Codex P2 / spec §6.1 reconciliation: filled/"Edit note"/tooltip key off
+  // note EXISTENCE, not the text-char count. An image-only / `<hr>` /
+  // other-non-text note is persisted (`notes.notes[path]` defined) yet
+  // reduces to 0 rendered text chars — keying off the count would hide it
+  // from the analyst (outlined "Add note" → can't find/edit/delete → dupes).
+  const note = notes.notes[path]
+  const hasNote = note !== undefined
+  const noteText = noteTextContent(note?.html)
   const noteCharCount = noteText.length
-  const hasNote = noteCharCount > 0
   return (
     <NoteAffordanceButton
       charCount={noteCharCount}
       hasNote={hasNote}
-      tooltip={hasNote ? noteText.slice(0, TOOLTIP_MAX) : 'Add note'}
+      tooltip={hasNote ? noteText.slice(0, TOOLTIP_MAX) || 'Edit note' : 'Add note'}
       expanded={expanded}
       sectionId={sectionId}
       isAboveMd={isAboveMd}

@@ -801,6 +801,37 @@ describe('FieldRow analyst-note affordance (PR N.c4 §6.1 / §6.4)', (): void =>
     )
   })
 
+  it('treats a persisted zero-text note (e.g. "<hr>") as EXISTING — filled, "Edit note", non-empty title, 📝 0 (Codex P2: existence ≠ text-char count, spec §6.1 reconciliation)', (): void => {
+    // `<hr>` has no text node, so noteTextContent('<hr>') === '' (length 0).
+    // The note IS persisted (notes.notes[path] defined), so the affordance
+    // must surface it as existing: filled / "Edit note" / a meaningful
+    // tooltip — NOT outlined "Add note" (which would hide the note from the
+    // analyst and invite a duplicate).
+    seedNote('---', '<hr>')
+    render(<FieldRow path="slopes_km" state={liveState(8)} />)
+    const aff = screen.getByRole('button', { name: 'Edit note' })
+    expect(aff).toHaveTextContent('📝 0')
+    expect(aff).toHaveAttribute('data-note-filled', 'true')
+    expect(aff.getAttribute('title')).toBe('Edit note')
+  })
+
+  it('a normal text note still renders filled, "Edit note", 📝 N, text-preview tooltip (regression guard)', (): void => {
+    seedNote('hello', '<p>hello</p>')
+    render(<FieldRow path="slopes_km" state={liveState(8)} />)
+    const aff = screen.getByRole('button', { name: 'Edit note' })
+    expect(aff).toHaveTextContent('📝 5')
+    expect(aff).toHaveAttribute('data-note-filled', 'true')
+    expect(aff.getAttribute('title')).toBe('hello')
+  })
+
+  it('no note for the path renders outlined, "Add note", 📝 0 (regression guard)', (): void => {
+    render(<FieldRow path="slopes_km" state={liveState(8)} />)
+    const aff = screen.getByRole('button', { name: 'Add note' })
+    expect(aff).toHaveTextContent('📝 0')
+    expect(aff).toHaveAttribute('data-note-filled', 'false')
+    expect(aff.getAttribute('title')).toBe('Add note')
+  })
+
   it('the affordance is disabled below the md breakpoint (PR 4.6a rule)', (): void => {
     stubMatchMedia(false)
     render(<FieldRow path="slopes_km" state={liveState(8)} />)
