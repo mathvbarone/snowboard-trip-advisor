@@ -850,4 +850,54 @@ describe('FieldRow analyst-note affordance (PR N.c4 §6.1 / §6.4)', (): void =>
     await screen.findByRole('textbox', { name: /note source/i })
     expect(await axe(container)).toHaveNoViolations()
   })
+
+  // Codex P2 fold (spec §6.5): the expanded analyst-notes section is gated on
+  // `isAboveMd && notesExpanded`, mirroring `modeToggleEl` / the MANUAL input.
+  // Expanding above md then crossing below md must UNMOUNT the editable
+  // Textarea + Delete button (read-only-below-md guard cannot be bypassed by
+  // resizing after opening). `notesExpanded` is preserved so returning above
+  // md re-mounts the section with no imperative collapse.
+  it('unmounts the expanded section below md (isAboveMd gate) and re-mounts it when back above md', async (): Promise<void> => {
+    seedNote('hello', '<p>hello</p>')
+    const { rerender } = render(<FieldRow path="slopes_km" state={liveState(8)} />)
+
+    // Above md (beforeEach stubs matchMedia=true): expand the section.
+    const aff = screen.getByRole('button', { name: 'Edit note' })
+    fireEvent.click(aff)
+    await screen.findByRole('textbox', { name: /note source/i })
+    expect(
+      screen.getByRole('button', { name: /delete note/i }),
+    ).toBeInTheDocument()
+
+    // Viewport crosses below md AFTER expanding. useResponsiveTabOrder reads
+    // the fresh matchMedia snapshot on the next render (useSyncExternalStore).
+    stubMatchMedia(false)
+    rerender(<FieldRow path="slopes_km" state={liveState(8)} />)
+
+    await waitFor((): void => {
+      expect(
+        screen.queryByRole('textbox', { name: /note source/i }),
+      ).toBeNull()
+    })
+    // The editable Textarea AND the Delete button are gone — not merely
+    // disabled — exactly like the mode toggle / value input below md.
+    expect(
+      screen.queryByRole('textbox', { name: /note source/i }),
+    ).toBeNull()
+    expect(
+      screen.queryByRole('button', { name: /delete note/i }),
+    ).toBeNull()
+    // The affordance button itself still renders, natively disabled.
+    expect(screen.getByRole('button', { name: 'Edit note' })).toBeDisabled()
+
+    // Viewport returns above md: notesExpanded was preserved (no imperative
+    // collapse), so the section re-mounts declaratively.
+    stubMatchMedia(true)
+    rerender(<FieldRow path="slopes_km" state={liveState(8)} />)
+    const source = await screen.findByRole('textbox', { name: /note source/i })
+    expect(source).toHaveValue('hello')
+    expect(
+      screen.getByRole('button', { name: /delete note/i }),
+    ).toBeInTheDocument()
+  })
 })

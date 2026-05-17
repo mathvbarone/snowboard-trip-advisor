@@ -409,11 +409,16 @@ export function FieldRow({ path, state }: FieldRowProps): JSX.Element {
         />
       </Suspense>
       {inputElement}
-      {notesExpanded ? (
+      {isAboveMd && notesExpanded ? (
         <div id={sectionId}>
           {/* Spec §6.6: the renderer chunk loads ONLY here, on first expand.
               fallback={null} per spec (no flash of a spinner for a ~150ms
-              chunk fetch). */}
+              chunk fetch). The `isAboveMd &&` gate enforces the §6.5
+              read-only-below-md rule — the editable Textarea + Delete button
+              are ABSENT from the DOM below md (consistent with `modeToggleEl`
+              / the MANUAL input), not merely disabled. `notesExpanded` state
+              is preserved so the section re-appears declaratively when the
+              viewport returns above md (no imperative collapse needed). */}
           <Suspense fallback={null}>
             <AnalystNoteSection
               slug={slug}
