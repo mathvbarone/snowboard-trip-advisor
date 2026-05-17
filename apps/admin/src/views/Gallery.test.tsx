@@ -9,7 +9,7 @@
 // sibling view-test conventions: @testing-library render, vitest describe/it.
 
 import { ToastProvider } from '@snowboard-trip-advisor/design-system'
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { Gallery } from './Gallery'
@@ -67,6 +67,36 @@ describe('Gallery (S1.0 — dev-only component gallery surface)', (): void => {
     expect(
       container.querySelector('[data-gallery-component="Drawer"]'),
     ).not.toBeNull()
+  })
+
+  // Defect 1 (S1.0 Codex P2) regression pin: the Toast exemplar must stay
+  // mounted long enough for the smoke to read its computed styles. The
+  // gallery passes an effectively-non-expiring `dismissAfterMs`; with fake
+  // timers we advance well past Toast's 5000ms success default and assert
+  // the `.sta-toast` styled node is STILL in the DOM. A regression to the
+  // default duration (auto-dismiss) makes this fail.
+  it('keeps the Toast exemplar mounted past the default auto-dismiss', (): void => {
+    vi.useFakeTimers()
+    try {
+      const { container } = render(
+        <ToastProvider>
+          <Gallery />
+        </ToastProvider>,
+      )
+      // Flush the on-mount show() effect + provider's deferred microtask.
+      act((): void => {
+        vi.advanceTimersByTime(0)
+      })
+      expect(container.querySelector('.sta-toast')).not.toBeNull()
+      // Advance far past every per-variant default (success = 5000ms,
+      // error = 8000ms). A non-expiring exemplar survives this.
+      act((): void => {
+        vi.advanceTimersByTime(60_000)
+      })
+      expect(container.querySelector('.sta-toast')).not.toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('renders empty family placeholders for the later S1 PRs', (): void => {

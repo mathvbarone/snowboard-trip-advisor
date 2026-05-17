@@ -36,15 +36,35 @@ const TABLE_ROWS = [
 // Toast renders through the Shell-level <ToastProvider> (App wraps every
 // route in Shell). A passive auto-show on mount surfaces the styled toast
 // for the smoke without a manual click.
+//
+// Toast has no `persist`/`Infinity` option — `ToastInput` exposes only
+// `variant`, `message`, and `dismissAfterMs`, and <Toast> unconditionally
+// schedules `setTimeout(onDismiss, dismissAfterMs)`. With the per-variant
+// default (success → 5000ms) the exemplar auto-dismisses out of the DOM
+// before a manual or Playwright smoke can read its computed styles. We
+// therefore pass an explicit, effectively-non-expiring duration so the
+// `.sta-toast` node stays mounted for the cascade check. The value is kept
+// well under the 32-bit `setTimeout` ceiling (2^31-1 ms ≈ 24.8 days): a
+// delay above that overflows and fires immediately, which would silently
+// reintroduce this exact defect. 24h is far longer than any smoke run yet
+// safely inside the safe range.
+const SMOKE_STABLE_TOAST_MS = 86_400_000 // 24h — see comment above.
+
 function ToastExemplar(): JSX.Element {
   const { show } = useToast()
   useEffect((): void => {
-    show({ variant: 'success', message: 'Token-styled toast exemplar' })
+    show({
+      variant: 'success',
+      message: 'Token-styled toast exemplar',
+      dismissAfterMs: SMOKE_STABLE_TOAST_MS,
+    })
   }, [show])
   return (
     <p>
-      A success Toast is shown on mount via <code>useToast().show</code>; it
-      renders fixed top-right through the Shell-level provider.
+      A success Toast is shown on mount via <code>useToast().show</code> with
+      an effectively-non-expiring <code>dismissAfterMs</code> so it stays
+      mounted for the smoke; it renders fixed top-right through the
+      Shell-level provider, OUTSIDE this section (see gallery-smoke.md).
     </p>
   )
 }
@@ -65,6 +85,18 @@ export function Gallery(): JSX.Element {
         unlinked from the sidebar.
       </p>
 
+      {/*
+        `data-gallery-component` markers are SECTION ANCHORS / LABELS only —
+        they are NOT the styled node the smoke measures. None of the S1
+        design-system components forward arbitrary `data-*` onto their own
+        `.sta-*` root (Table/Drawer have closed typed props; Toast renders
+        via <ToastProvider>), and the portalled ones (Drawer, Toast) render
+        their `.sta-*` node OUTSIDE this wrapper via a Radix/provider portal.
+        The smoke therefore targets each component's own design-system root
+        selector (`.sta-table` / `.sta-toast` / `.sta-drawer`), using these
+        sections only to scope inline components and as human labels. Every
+        later S1 PR follows the same rule — see gallery-smoke.md.
+      */}
       <section data-gallery-component="Table">
         <h2>Table</h2>
         <Table
