@@ -9,9 +9,8 @@ import { useCallback, useRef, useSyncExternalStore } from 'react'
 import { apiClient } from '../lib/apiClient'
 
 import { registerSlugFlusher } from './flushAll'
+import { registerHmrDisposer } from './useAnalystNoteDraft.hmr'
 import { prepopulateAnalystNotes, useAnalystNotes } from './useAnalystNotes'
-
-import './useAnalystNoteDraft.hmr'
 
 // RenderedAnalystNote is not re-exported from `@snowboard-trip-advisor/
 // schema/api` (it is internal to packages/schema/api/analystNotes.ts, an
@@ -64,6 +63,16 @@ interface SlugNotesStore {
 
 const slugStores = new Map<ResortSlug, SlugNotesStore>()
 
+// Every dispose handle returned by registerSlugFlusher for THIS module
+// generation. flushAll.ts has no HMR handling, so on a hot-reload its
+// registry survives while this module's slugStores is re-initialized to a
+// fresh empty Map — the old generation's flushers would leak and double-flush
+// (spec §5.4). __disposeRegisteredFlushersForHmr() (invoked by the sibling
+// .hmr.ts latch when the next generation evaluates) removes exactly this
+// generation's registrations. Never invoked on component unmount — spec §5.4
+// mandates deregistration ONLY from the .hmr.ts cleanup.
+const registeredFlusherDisposers = new Set<() => void>()
+
 // Per-slug ref to the latest useAnalystNotes() response so module-level flush
 // handlers can build the merged full response for prepopulate. Mirrors
 // useWorkspaceState.ts:686 threading useResortDetail(slug) into the store.
@@ -77,13 +86,17 @@ function getOrCreateStore(slug: ResortSlug): SlugNotesStore {
     // Spec §5.4: registration sits on the SlugStore, registered lazily on
     // first read for that slug. The flusher iterates every per-path state
     // and flushes the dirty / save-failed ones. Deregistration only from
-    // the sibling .hmr.ts — never on component unmount (the dispose handle
-    // is intentionally discarded here). The closure captures `store` and
-    // `slug` directly (not a slugStores re-lookup) so there is no
-    // "store missing" case to defend — the flusher's store is the one it
-    // was registered for, for that flusher's whole lifetime.
+    // the sibling .hmr.ts cleanup on hot-reload — never on component unmount.
+    // The dispose handle is collected (NOT discarded) so the .hmr.ts latch
+    // can remove this generation's registrations when the next generation
+    // evaluates; flushAll.ts has no HMR handling of its own. The closure
+    // captures `store` and `slug` directly (not a slugStores re-lookup) so
+    // there is no "store missing" case to defend — the flusher's store is
+    // the one it was registered for, for that flusher's whole lifetime.
     const flushStore = store
-    registerSlugFlusher(slug, (): Promise<void> => flushAllPaths(slug, flushStore))
+    registeredFlusherDisposers.add(
+      registerSlugFlusher(slug, (): Promise<void> => flushAllPaths(slug, flushStore)),
+    )
   }
   return store
 }
@@ -490,6 +503,27 @@ export function useAnalystNoteDraft(slug: ResortSlug, path: NotePath): AnalystNo
     deleteNote: (): Promise<void> => deleteNote(slug, path),
   }
 }
+
+// Dispose every flushAll.ts registration this module generation made and
+// clear the collection. Invoked by the sibling useAnalystNoteDraft.hmr.ts
+// latch when the NEXT module generation evaluates on a Vite hot-reload (spec
+// §5.4 — deregistration only from the .hmr.ts cleanup). Plain, exported,
+// unit-tested code: the only irreducible `import.meta.hot.*` wiring lives in
+// the coverage-excluded .hmr.ts. Named `*ForHmr` (not `*ForTests`) because it
+// is real production cleanup, not a test affordance.
+export function __disposeRegisteredFlushersForHmr(): void {
+  for (const dispose of registeredFlusherDisposers) { dispose() }
+  registeredFlusherDisposers.clear()
+}
+
+// Latch this generation's disposer with the sibling .hmr.ts. On every Vite
+// hot-reload of this file the new module body re-runs this call; the .hmr.ts
+// latch invokes the PREVIOUS generation's disposer first (clearing the old,
+// now-stale flushAll.ts registrations) then latches this generation's. The
+// .hmr.ts module does not re-evaluate on reload, so its latch state persists
+// across generations. Import direction is .ts → .hmr only (no Codex
+// round-8 P2-12 cycle).
+registerHmrDisposer(__disposeRegisteredFlushersForHmr)
 
 /** Test-only: clear all module-level state between tests. */
 export function __resetForTests(): void {

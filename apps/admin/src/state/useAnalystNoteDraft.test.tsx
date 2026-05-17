@@ -16,12 +16,14 @@ import {
   flushAllForSlug,
 } from './flushAll'
 import {
+  __disposeRegisteredFlushersForHmr,
   __resetForTests as resetAnalystNoteDraft,
   deleteNote as moduleDeleteNote,
   flushNow as moduleFlushNow,
   setDraft as moduleSetDraft,
   useAnalystNoteDraft,
 } from './useAnalystNoteDraft'
+import { registerHmrDisposer } from './useAnalystNoteDraft.hmr'
 import {
   __resetForTests as resetAnalystNotes,
   prepopulateAnalystNotes,
@@ -806,6 +808,95 @@ describe('useAnalystNoteDraft — coverage completeness', (): void => {
       await vi.advanceTimersByTimeAsync(0)
     })
     expect(true).toBe(true)   // settleError's liveOrAbandon undefined arm — no throw
+  })
+
+  it('HMR generation swap: disposing the old generation deregisters its stale flushAll flusher (Codex P2)', async (): Promise<void> => {
+    // Regression for the leaked flushAll registration. getOrCreateStore()
+    // registers a slug flusher into the GLOBAL flushAll.ts registry but
+    // discards the dispose handle. flushAll.ts has no HMR handling, so on a
+    // hot-reload of useAnalystNoteDraft.ts the OLD module's flusher stays in
+    // the registry while the NEW module lazily registers its own — and a
+    // stale old store's flusher can overwrite the newer note. Spec §5.4
+    // mandates deregistration via the sibling .hmr.ts on reload. The seam
+    // testable without real Vite: the OLD generation's disposer (the thing
+    // the .hmr.ts latch invokes on reload) must remove that generation's
+    // flushers from the registry so flushAllForSlug no longer drives them.
+    seedEmpty()
+    const spy = vi
+      .spyOn(apiClient, 'upsertAnalystNote')
+      .mockResolvedValue(upsertResponse('stale'))
+
+    // Old generation: a dirty path with an armed debounce timer registers a
+    // flusher into the global registry via getOrCreateStore().
+    const { result, unmount } = renderHook(() => useAnalystNoteDraft(KB, SLOPES))
+    act((): void => { result.current.setDraft('stale') })
+    unmount()
+
+    // Sanity: before the HMR swap the registry drives the flusher.
+    await act(async (): Promise<void> => { await flushAllForSlug(KB) })
+    expect(spy).toHaveBeenCalledTimes(1)
+
+    // Simulate the Vite HMR generation swap: the .hmr.ts latch invokes the
+    // OLD generation's disposer when the NEW module evaluates. After that,
+    // the stale flusher must be gone from the registry — flushAllForSlug
+    // must NOT re-drive the now-unmounted old store.
+    // Simulate the new module generation's fresh empty slugStores (in real
+    // HMR the re-evaluated module body re-initializes it), keeping the stale
+    // OLD-generation flusher still in the global flushAll.ts registry.
+    spy.mockClear()
+    resetAnalystNoteDraft()
+    seedEmpty()
+    const { result: r2 } = renderHook(() => useAnalystNoteDraft(KB, SLOPES))
+    act((): void => { r2.current.setDraft('stale') })
+
+    // The .hmr.ts latch invokes the OLD generation's disposer when the new
+    // module evaluates. After that the stale flusher must be gone from the
+    // registry — flushAllForSlug must NOT re-drive the now-unmounted old
+    // store. (r2's own registration also went through the same collection;
+    // disposing it models a clean cutover where only post-swap registrations
+    // survive.)
+    __disposeRegisteredFlushersForHmr()
+    await act(async (): Promise<void> => { await flushAllForSlug(KB) })
+    expect(spy).not.toHaveBeenCalled()
+
+    // A freshly-created store for the same slug AFTER the swap still flushes
+    // normally — the new generation re-registers lazily on first read.
+    resetAnalystNoteDraft()
+    seedEmpty()
+    const { result: r3 } = renderHook(() => useAnalystNoteDraft(KB, SLOPES))
+    act((): void => { r3.current.setDraft('fresh') })
+    await act(async (): Promise<void> => { await flushAllForSlug(KB) })
+    expect(spy).toHaveBeenCalledTimes(1)
+    expect(spy.mock.calls[0]?.[1]).toStrictEqual({ path: SLOPES, markdown: 'fresh' } satisfies AnalystNoteUpsertBody)
+  })
+
+  it('.hmr.ts registerHmrDisposer latch invokes the previous generation disposer then latches the new one', (): void => {
+    // The cross-generation latch lives in the coverage-excluded .hmr.ts so
+    // the irreducible import.meta.hot wiring is whole-file-excluded, but the
+    // plain latch logic is still unit-tested here (exclusion ≠ untestable).
+    const calls: string[] = []
+    const genA = (): void => { calls.push('A') }
+    const genB = (): void => { calls.push('B') }
+    const genC = (): void => { calls.push('C') }
+
+    // The module-load registration already latched the real production
+    // disposer; latch gen A over it (the real disposer fires harmlessly,
+    // pushing nothing to `calls`).
+    registerHmrDisposer(genA)
+    expect(calls).toStrictEqual([])
+
+    // Next generation evaluates (HMR reload) → dispose gen A, latch gen B.
+    registerHmrDisposer(genB)
+    expect(calls).toStrictEqual(['A'])
+
+    // Next generation evaluates → dispose gen B, latch gen C.
+    registerHmrDisposer(genC)
+    expect(calls).toStrictEqual(['A', 'B'])
+
+    // Restore the production disposer as the latched generation so the
+    // module-shared latch is not left pointing at a test stub.
+    registerHmrDisposer(__disposeRegisteredFlushersForHmr)
+    expect(calls).toStrictEqual(['A', 'B', 'C'])
   })
 
   it('non-abort failure with rev moved mid-flight does NOT set save-failed (settleError rev false-arm)', async (): Promise<void> => {
