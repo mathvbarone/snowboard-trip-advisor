@@ -180,4 +180,38 @@ describe('Shell — composition smoke (mounts ToastProvider + useShortcuts)', ()
     flushAllSpy.mockRestore()
     resetURLState()
   })
+
+  it('mod+enter on the editor route surfaces a Toast (and no unhandled rejection) when flushAllForSlug rejects (Codex P2 fold)', async (): Promise<void> => {
+    // flushAll.ts propagates rejections by contract (spec §5.4); Shell.tsx
+    // MUST handle them — not swallow (would mask silent save failures) and
+    // not leave them unhandled (AGENTS.md no-floating-promises). The fix
+    // routes the rejection to the SAME existing toast surface as `g i`.
+    const unhandled = vi.fn()
+    process.on('unhandledRejection', unhandled)
+    const flushAllSpy = vi
+      .spyOn(flushAllModule, 'flushAllForSlug')
+      .mockRejectedValue(new Error('boom'))
+    const user = userEvent.setup()
+    render(<Shell><div /></Shell>)
+
+    const slug = ResortSlug.parse('kotelnica-bialczanska')
+    act((): void => { setRoute({ route: 'editor', slug }) })
+
+    await user.keyboard('{Meta>}{Enter}{/Meta}')
+    expect(flushAllSpy).toHaveBeenCalledWith(slug)
+
+    // The rejection is surfaced via the existing toast (rendered in the
+    // visible UI + the sr-only live region — match both via getAllByText).
+    await waitFor((): void => {
+      expect(screen.getAllByText("Save failed — your changes may not be saved. Try again.").length).toBeGreaterThan(0)
+    })
+    // Flush the microtask/macrotask queue so a (regression) unhandled
+    // rejection would have surfaced before we assert it did not.
+    await new Promise((resolve): void => { setTimeout(resolve, 0) })
+    expect(unhandled).not.toHaveBeenCalled()
+
+    process.off('unhandledRejection', unhandled)
+    flushAllSpy.mockRestore()
+    resetURLState()
+  })
 })

@@ -86,17 +86,27 @@ function ShellInterior({ children }: { readonly children: ReactNode }): JSX.Elem
     // useWorkspaceState's flushNow directly (PR 4.6c Decision K1's original
     // wiring). Off-route stays a no-op (no slug to flush against). React 19
     // auto-batches the resulting prepopulates within one tick — single
-    // re-render even if N flushers complete in the same tick. `void` because
-    // flushAllForSlug returns a Promise we intentionally don't await here
-    // (the keyboard shortcut kicks off the PUTs; it does not block on them);
-    // rejection-propagation is flushAll.ts's contract — a future error-toast
-    // surface wraps this caller. The useShortcuts handlers-ref pattern
-    // (Decision F5 at lib/shortcuts.ts:66) pins the closure on every render,
-    // so the latest `route` is always visible — same Shell mount handles
-    // transitions correctly.
+    // re-render even if N flushers complete in the same tick. We don't await
+    // flushAllForSlug here (the keyboard shortcut kicks off the PUTs; it does
+    // not block on them), but its rejection IS handled: flushAll.ts
+    // propagates rejections by contract (spec §5.4) and explicitly forbids
+    // swallowing them (that would mask silent save failures), so the
+    // rejection is caught here and surfaced via the SAME existing toast used
+    // by `g i` above. Per-field 'save-failed' status indicators remain the
+    // granular surface; this toast is the shortcut-level fallback so a real
+    // failure is neither unhandled (AGENTS.md no-floating-promises) nor
+    // silent. The useShortcuts handlers-ref pattern (Decision F5 at
+    // lib/shortcuts.ts:66) pins the closure on every render, so the latest
+    // `route` is always visible — same Shell mount handles transitions
+    // correctly.
     onModEnter: (): void => {
       if (route.route === 'editor') {
-        void flushAllForSlug(route.slug)
+        flushAllForSlug(route.slug).catch((): void => {
+          toast.show({
+            variant: 'error',
+            message: 'Save failed — your changes may not be saved. Try again.',
+          })
+        })
       }
     },
     // Phase 1 no-op per Tier 5 plan Decision G1: Radix Dialog handles modal
