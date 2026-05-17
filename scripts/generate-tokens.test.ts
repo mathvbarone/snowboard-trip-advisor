@@ -20,10 +20,18 @@ describe('renderTokensCss', (): void => {
     expect(css).toContain('--space-4xl: 64px;')
   })
 
-  it('emits a [data-theme="dark"] scope for dark colors', (): void => {
+  it('emits dark colors inside a prefers-color-scheme:dark media query, not a [data-theme] scope', (): void => {
     const css = renderTokensCss(tokens)
-    expect(css).toContain('[data-theme="dark"]')
+    expect(css).toContain('@media (prefers-color-scheme: dark) {')
+    // dark overrides live in a :root nested inside the media query
+    const mediaIdx = css.indexOf('@media (prefers-color-scheme: dark) {')
+    const darkRootIdx = css.indexOf(':root {', mediaIdx)
+    expect(mediaIdx).toBeGreaterThan(-1)
+    expect(darkRootIdx).toBeGreaterThan(mediaIdx)
     expect(css).toContain('--color-background: #0b0d10;')
+    // the dead manual-toggle scope must be gone (ADR-0005 §Decision-3:
+    // re-added additively only when a toggle UI ships)
+    expect(css).not.toContain('[data-theme')
   })
 
   it('emits breakpoint, radius, zIndex, duration, fontWeight, fontSize, fontFamily custom properties', (): void => {
