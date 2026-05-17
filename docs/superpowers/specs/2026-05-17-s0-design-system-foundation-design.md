@@ -107,10 +107,14 @@ legible (correct font, fg/bg, predictable box model, visible focus).
 Current line 1: `import './utilities.css'`.
 
 Target (order matters — tokens define the custom properties `base.css`
-consumes; both precede `utilities.css` for cascade predictability):
+consumes; both precede `utilities.css` for cascade predictability). Note the
+path asymmetry: `tokens.css` is generated to the package **root**
+(`packages/design-system/tokens.css`) while `index.ts` lives in `src/`, so it
+is imported as `'../tokens.css'`; `base.css` and `utilities.css` are siblings
+in `src/`:
 
 ```ts
-import './tokens.css'
+import '../tokens.css'
 import './base.css'
 import './utilities.css'
 ```

@@ -236,7 +236,7 @@ Append to the `describe('package barrel (index.ts)', …)` block in `packages/de
       resolve(import.meta.dirname, 'index.ts'),
       'utf8',
     )
-    const tokensIdx = src.indexOf("import './tokens.css'")
+    const tokensIdx = src.indexOf("import '../tokens.css'")
     const baseIdx = src.indexOf("import './base.css'")
     const utilIdx = src.indexOf("import './utilities.css'")
     expect(tokensIdx).toBeGreaterThan(-1)
@@ -259,10 +259,10 @@ Expected: FAIL — `index.ts` currently has only `import './utilities.css'`; `to
 
 - [ ] **Step 3: Add the imports**
 
-In `packages/design-system/src/index.ts`, replace line 1 (`import './utilities.css'`) with:
+In `packages/design-system/src/index.ts`, replace line 1 (`import './utilities.css'`) with (note `tokens.css` is at the package root, `index.ts` is in `src/`, so it is `'../tokens.css'`; `base.css`/`utilities.css` are siblings in `src/`):
 
 ```ts
-import './tokens.css'
+import '../tokens.css'
 import './base.css'
 import './utilities.css'
 ```
