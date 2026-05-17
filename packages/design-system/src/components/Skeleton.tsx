@@ -1,3 +1,5 @@
+import './Skeleton.css'
+
 import type { JSX } from 'react'
 
 export type SkeletonVariant = 'line' | 'block' | 'card'
