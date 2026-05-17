@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { axe } from 'jest-axe'
-import { createRef } from 'react'
+import { createRef, useState, type JSX } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { Textarea } from './Textarea'
@@ -119,6 +119,75 @@ describe('Textarea', (): void => {
     expect(onChange).toHaveBeenCalledWith('a  d')
   })
 
+  // A controlled <textarea> collapses the caret to end-of-text after a
+  // programmatic value replacement. These cases assert the caret is restored
+  // to just after the inserted indent across the controlled re-render — using
+  // a stateful wrapper so onChange actually re-renders with the new value.
+  function ControlledTextarea({
+    initial,
+  }: {
+    initial: string
+  }): JSX.Element {
+    const [v, setV] = useState(initial)
+    return (
+      <Textarea
+        aria-label="note source"
+        value={v}
+        onChange={setV}
+      />
+    )
+  }
+
+  it('Tab in the middle of text keeps the caret right after the inserted indent', async (): Promise<void> => {
+    const user = userEvent.setup()
+    render(<ControlledTextarea initial="abcd" />)
+    const el = screen.getByLabelText<HTMLTextAreaElement>('note source')
+    el.focus()
+    el.setSelectionRange(2, 2)
+    await user.keyboard('{Tab}')
+    expect(el).toHaveValue('ab  cd')
+    // Caret restored to a collapsed selection immediately after the two
+    // inserted spaces (offset 2 + 2), NOT collapsed to end-of-text (offset 6).
+    expect(el.selectionStart).toBe(4)
+    expect(el.selectionEnd).toBe(4)
+  })
+
+  it('Tab over a mid-text selection collapses the caret after the replacement indent', async (): Promise<void> => {
+    const user = userEvent.setup()
+    render(<ControlledTextarea initial="abXYcd" />)
+    const el = screen.getByLabelText<HTMLTextAreaElement>('note source')
+    el.focus()
+    el.setSelectionRange(2, 4)
+    await user.keyboard('{Tab}')
+    expect(el).toHaveValue('ab  cd')
+    expect(el.selectionStart).toBe(4)
+    expect(el.selectionEnd).toBe(4)
+  })
+
+  it('Tab at end-of-text keeps the caret after the inserted indent (regression guard)', async (): Promise<void> => {
+    const user = userEvent.setup()
+    render(<ControlledTextarea initial="ab" />)
+    const el = screen.getByLabelText<HTMLTextAreaElement>('note source')
+    el.focus()
+    el.setSelectionRange(2, 2)
+    await user.keyboard('{Tab}')
+    expect(el).toHaveValue('ab  ')
+    expect(el.selectionStart).toBe(4)
+    expect(el.selectionEnd).toBe(4)
+  })
+
+  it('normal typing re-renders do not reposition the caret (effect early-returns)', async (): Promise<void> => {
+    const user = userEvent.setup()
+    render(<ControlledTextarea initial="" />)
+    const el = screen.getByLabelText<HTMLTextAreaElement>('note source')
+    await user.type(el, 'hello')
+    expect(el).toHaveValue('hello')
+    // No Tab-indent occurred, so the layout effect must not have called
+    // setSelectionRange — the browser's natural end-of-input caret stands.
+    expect(el.selectionStart).toBe(5)
+    expect(el.selectionEnd).toBe(5)
+  })
+
   it('readOnly Textarea + onChange: Tab does NOT mutate value and moves focus natively', async (): Promise<void> => {
     const onChange = vi.fn()
     const user = userEvent.setup()
@@ -196,6 +265,21 @@ describe('Textarea', (): void => {
       />,
     )
     expect(ref.current).toBeInstanceOf(HTMLTextAreaElement)
+  })
+
+  it('forwards a function ref to the underlying textarea element', (): void => {
+    let received: HTMLTextAreaElement | null = null
+    render(
+      <Textarea
+        ref={(node): void => {
+          received = node
+        }}
+        aria-label="note source"
+        value=""
+        onChange={(): void => undefined}
+      />,
+    )
+    expect(received).toBeInstanceOf(HTMLTextAreaElement)
   })
 
   it('respects the disabled prop and ignores user typing', async (): Promise<void> => {

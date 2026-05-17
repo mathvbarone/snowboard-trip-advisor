@@ -1,5 +1,8 @@
 import {
   forwardRef,
+  useCallback,
+  useLayoutEffect,
+  useRef,
   type ChangeEvent,
   type FocusEvent,
   type ForwardedRef,
@@ -29,10 +32,19 @@ import {
 // `preventDefault()` and instead splice two spaces in at the caret (or over
 // the current selection), surfacing the new value through `onChange` so the
 // controlled-value contract is preserved; focus deliberately stays on the
-// textarea. The splice is gated on the field being editable: a `readOnly` or
-// `disabled` Textarea must never mutate state and must stay tabbable-through,
-// so Tab falls through to native focus-move (no preventDefault) even when an
-// `onChange` is still wired (the standard controlled read-only pattern).
+// textarea. Because the value is controlled, the parent re-renders with a new
+// `value` and the browser collapses the caret to end-of-text; a
+// `useLayoutEffect` (pre-paint, no visible caret flit) restores it to a
+// collapsed selection immediately after the inserted indent
+// (`start + TAB_INDENT.length`), gated by a ref that only the Tab branch sets
+// so ordinary typing re-renders never reposition the caret. The internal
+// element ref needed for that restore is composed with the forwarded ref via
+// a stable callback ref, so consumers (the note view focuses the element on
+// expand) keep their ref. The splice is gated on the field being editable: a
+// `readOnly` or `disabled` Textarea must never mutate state and must stay
+// tabbable-through, so Tab falls through to native focus-move (no
+// preventDefault) even when an `onChange` is still wired (the standard
+// controlled read-only pattern).
 
 const TAB_INDENT = '  '
 
@@ -67,6 +79,34 @@ function TextareaImpl(
   }: TextareaProps,
   ref: ForwardedRef<HTMLTextAreaElement>,
 ): JSX.Element {
+  const internalRef = useRef<HTMLTextAreaElement | null>(null)
+  // Compose the internal ref (needed to restore the caret post-re-render)
+  // with the forwarded ref so consumers still receive the element. Handles
+  // both function-ref and object-ref forms.
+  const setRef = useCallback(
+    (node: HTMLTextAreaElement | null): void => {
+      internalRef.current = node
+      if (typeof ref === 'function') {
+        ref(node)
+      } else if (ref !== null) {
+        ref.current = node
+      }
+    },
+    [ref],
+  )
+
+  // Set only on a Tab-indent: the target collapsed caret offset to restore
+  // after the controlled re-render. Null for every other re-render.
+  const pendingCaretRef = useRef<number | null>(null)
+
+  useLayoutEffect((): void => {
+    const pos = pendingCaretRef.current
+    if (pos !== null && internalRef.current !== null) {
+      internalRef.current.setSelectionRange(pos, pos)
+      pendingCaretRef.current = null
+    }
+  }, [value])
+
   const handleChange =
     onChange === undefined
       ? undefined
@@ -87,6 +127,10 @@ function TextareaImpl(
       const el = e.currentTarget
       const start = el.selectionStart
       const end = el.selectionEnd
+      // The controlled re-render collapses the caret to end-of-text; queue a
+      // restore to just after the inserted indent (correct for both a plain
+      // caret insert and a replaced range) for the post-commit layout effect.
+      pendingCaretRef.current = start + TAB_INDENT.length
       onChange(value.slice(0, start) + TAB_INDENT + value.slice(end))
       return
     }
@@ -97,7 +141,7 @@ function TextareaImpl(
 
   return (
     <textarea
-      ref={ref}
+      ref={setRef}
       className="sta-textarea__control"
       aria-label={ariaLabel}
       value={value}
