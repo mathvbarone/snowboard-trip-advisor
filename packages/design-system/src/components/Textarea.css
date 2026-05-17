@@ -1,0 +1,29 @@
+/* Textarea visual CSS. Token-driven; light/dark via the S0 :root cascade
+ * (ADR-0005) — no theme code here. The Textarea root IS the control: the
+ * component emits a bare <textarea class="sta-textarea__control"> (no
+ * block/label wrapper — it is aria-label associated), so the base selector
+ * is .sta-textarea__control itself; states key off the native :disabled
+ * and :focus-visible the control already emits (no className branching). */
+.sta-textarea__control {
+  display: block;
+  width: 100%;
+  padding: var(--space-sm, 8px) var(--space-md, 12px);
+  font-family: var(--font-family-body, sans-serif);
+  font-size: var(--font-size-md, 16px);
+  line-height: 1.5;
+  color: var(--color-foreground, #0b0d10);
+  background: var(--color-background, #fff);
+  border: 1px solid var(--color-border, #d6d9dd);
+  border-radius: var(--radius-md, 8px);
+  resize: vertical;
+  transition: border-color var(--duration-fast, 120ms);
+}
+.sta-textarea__control:focus-visible {
+  outline: 2px solid var(--color-accent, #0066cc);
+  outline-offset: 2px;
+}
+.sta-textarea__control:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: var(--color-surface, #f4f5f7);
+}
