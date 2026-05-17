@@ -1,0 +1,53 @@
+/* Modal visual CSS — what it styles: the Radix Dialog wrapper's three
+ * authored nodes — `.sta-modal__overlay` (full-viewport scrim), `.sta-modal`
+ * (the centered Content panel, which also carries `data-modal="true"`) and
+ * `.sta-modal__title` (the required accessible-name heading). Token-driven,
+ * light/dark via the S0 :root cascade (ADR-0005); no theme code here. The
+ * overlay scrim + panel box-shadow use a raw rgba (tokens.ts ships no
+ * --shadow-*/--scrim-* token — Toast.css/Card.css precedent: an
+ * intentionally theme-neutral non-hex value, not a colour fill). z-index
+ * comes from the existing --z-modal token (=60). */
+.sta-modal__overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: var(--z-modal, 60);
+}
+.sta-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md, 12px);
+  width: min(560px, calc(100vw - var(--space-xl, 24px)));
+  max-height: calc(100vh - var(--space-xl, 24px));
+  overflow-y: auto;
+  padding: var(--space-xl, 24px);
+  background: var(--color-background, #ffffff);
+  color: var(--color-foreground, #0b0d10);
+  border: 1px solid var(--color-border, #d6d9dd);
+  border-radius: var(--radius-md, 8px);
+  font-family: var(--font-family-body, sans-serif);
+  font-size: var(--font-size-md, 16px);
+}
+.sta-modal[data-modal="true"] {
+  /* The wrapper sets data-modal="true" on the Content node so the elevation
+   * stack attaches by attribute selector (Modal.tsx header). z-index sits
+   * one above the scrim so the panel renders over its own overlay. */
+  z-index: var(--z-modal, 60);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+}
+.sta-modal__title {
+  margin: 0;
+  font-family: var(--font-family-display, serif);
+  font-size: var(--font-size-lg, 20px);
+  font-weight: var(--font-weight-semibold, 600);
+  color: var(--color-foreground, #0b0d10);
+}
+.sta-modal:focus-visible,
+.sta-modal__title:focus-visible {
+  outline: 2px solid var(--color-accent, #0066cc);
+  outline-offset: 2px;
+}

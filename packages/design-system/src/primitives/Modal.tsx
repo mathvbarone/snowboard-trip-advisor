@@ -1,3 +1,5 @@
+import './Modal.css'
+
 import * as RadixDialog from '@radix-ui/react-dialog'
 import { useEffect, useRef, type JSX, type ReactNode } from 'react'
 
