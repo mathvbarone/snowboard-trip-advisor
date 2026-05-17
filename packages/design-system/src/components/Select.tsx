@@ -1,3 +1,5 @@
+import './Select.css'
+
 import type { JSX } from 'react'
 
 // Native <select> wrapper.
