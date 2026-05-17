@@ -1,0 +1,29 @@
+/* Pill visual CSS — what it styles: the inline
+ * `<span class="sta-pill" data-variant="default|stale">` status pill used
+ * by FieldValueRenderer / ResortCard. Token-driven, light/dark via the S0
+ * :root cascade (ADR-0005); no theme code here. tokens.ts ships no
+ * dedicated "stale" colour token, so the stale variant reuses
+ * --color-warning (its documented semantic mapping — see StatusPill.tsx
+ * which maps stale → warning); the SR-only "stale value" span is the S0
+ * `sta-visually-hidden` utility and is intentionally NOT restyled here. */
+.sta-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs, 4px);
+  padding: var(--space-xs, 4px) var(--space-sm, 8px);
+  font-family: var(--font-family-body, sans-serif);
+  font-size: var(--font-size-xs, 12px);
+  font-weight: var(--font-weight-medium, 500);
+  border-radius: var(--radius-pill, 9999px);
+  border: 1px solid transparent;
+}
+.sta-pill[data-variant="default"] {
+  background: var(--color-surface, #f4f5f7);
+  color: var(--color-muted, #5a6166);
+  border-color: var(--color-border, #d6d9dd);
+}
+.sta-pill[data-variant="stale"] {
+  background: var(--color-surface, #f4f5f7);
+  color: var(--color-warning, #a86200);
+  border-color: var(--color-warning, #a86200);
+}
