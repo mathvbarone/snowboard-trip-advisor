@@ -67,3 +67,36 @@ describe('tokens', (): void => {
     expect(darkKeys).toEqual(lightKeys)
   })
 })
+
+describe('focus-ring contrast (WCAG 2.1 SC 1.4.11 non-text, ≥ 3:1)', (): void => {
+  const channel = (c: number): number => {
+    const s = c / 255
+    return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4
+  }
+  const luminance = (hex: string): number => {
+    const n = Number.parseInt(hex.replace('#', ''), 16)
+    const r = channel((n >> 16) & 0xff)
+    const g = channel((n >> 8) & 0xff)
+    const b = channel(n & 0xff)
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+  }
+  const ratio = (a: string, b: string): number => {
+    const la = luminance(a)
+    const lb = luminance(b)
+    const hi = Math.max(la, lb)
+    const lo = Math.min(la, lb)
+    return (hi + 0.05) / (lo + 0.05)
+  }
+
+  it('light: --color-accent on --color-background ≥ 3:1', (): void => {
+    expect(
+      ratio(tokens.color.light.accent, tokens.color.light.background),
+    ).toBeGreaterThanOrEqual(3)
+  })
+
+  it('dark: --color-accent on --color-background ≥ 3:1', (): void => {
+    expect(
+      ratio(tokens.color.dark.accent, tokens.color.dark.background),
+    ).toBeGreaterThanOrEqual(3)
+  })
+})
