@@ -14,6 +14,7 @@
 // be premature DRY since each test only needs one or two canned shapes.
 
 import {
+  AnalystNotesGetResponse,
   HealthResponse,
   ListPublishesResponse,
   ListResortsResponse,
@@ -93,6 +94,11 @@ export const cannedHandlers = [
   http.post('/api/resorts/:slug/publish', (): Response => HttpResponse.json(cannedPublishResponse)),
   http.get('/api/publishes', (): Response => HttpResponse.json(cannedListPublishes)),
   http.get('/api/health', (): Response => HttpResponse.json(cannedHealth)),
+  // PR N.c1: analyst-notes GET. Per-test overrides via server.use().
+  http.get('/api/analyst-notes/:slug', ({ params }): Response => {
+    const slug = params.slug as string
+    return HttpResponse.json(AnalystNotesGetResponse.parse({ slug, notes: {} }))
+  }),
 ]
 
 // Singleton server instance — apps/admin/src/test-setup.ts wires its
