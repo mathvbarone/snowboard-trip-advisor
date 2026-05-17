@@ -1,3 +1,5 @@
+import './FieldValueRenderer.css'
+
 import type { FieldValue } from '@snowboard-trip-advisor/schema'
 import type { JSX } from 'react'
 
