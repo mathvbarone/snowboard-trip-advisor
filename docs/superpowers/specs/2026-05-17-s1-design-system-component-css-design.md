@@ -101,7 +101,7 @@ Per the project's plan/spec test-ordering discipline, each PR's task list orders
 
 **In:** the 23 components' co-located CSS + their import lines, the dev-only gallery, text-presence tests, gallery Playwright smokes.
 
-**Out:** screen-level layout/composition (S2+); any new design token; `apps/*` feature/behaviour changes; component `.tsx` changes beyond the single `import './<Component>.css'` line; a manual/in-app theme toggle; restyling `Table`/`Toast`/`Drawer`; the public lodging view (S7) and admin attributes panel (S6).
+**Out:** screen-level layout/composition (S2+); any new design token; `apps/*` feature/behaviour changes — **the dev-only gallery route in `apps/admin` (§4) is the single named exception to this boundary**: it is unlinked review infrastructure, not a product behaviour change; component `.tsx` changes beyond the single `import './<Component>.css'` line; a manual/in-app theme toggle; restyling `Table`/`Toast`/`Drawer`; the public lodging view (S7) and admin attributes panel (S6).
 
 ## 8. ADR alignment
 
