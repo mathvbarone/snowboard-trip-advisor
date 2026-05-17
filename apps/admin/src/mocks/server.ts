@@ -15,6 +15,7 @@
 
 import {
   AnalystNotesGetResponse,
+  AnalystNoteUpsertResponse,
   HealthResponse,
   ListPublishesResponse,
   ListResortsResponse,
@@ -98,6 +99,26 @@ export const cannedHandlers = [
   http.get('/api/analyst-notes/:slug', ({ params }): Response => {
     const slug = params.slug as string
     return HttpResponse.json(AnalystNotesGetResponse.parse({ slug, notes: {} }))
+  }),
+  // PR N.c2: analyst-notes PUT (single-path delta). MSW runs
+  // onUnhandledRequest:'error', so any test that flushes needs a baseline
+  // PUT handler; useAnalystNoteDraft tests override per-case via server.use().
+  // markdown:null → note:null (deletion confirmed); else echo a rendered note.
+  http.put('/api/analyst-notes/:slug', async ({ params, request }): Promise<Response> => {
+    const slug = params.slug as string
+    const body = (await request.json()) as { path: string; markdown: string | null }
+    const note = body.markdown === null
+      ? null
+      : {
+          schema_version: 1 as const,
+          markdown: body.markdown,
+          html: `<p>${body.markdown}</p>`,
+          created_at: OBS_AT,
+          updated_at: OBS_AT,
+        }
+    return HttpResponse.json(
+      AnalystNoteUpsertResponse.parse({ slug, path: body.path, note }),
+    )
   }),
 ]
 
