@@ -36,15 +36,23 @@ import { useAnalystNoteDraft } from '../../state/useAnalystNoteDraft'
 //     tracks typing without rendering on every keystroke.
 //
 // Keyboard (spec §6.3):
-//   - mod+enter → immediate save. NOT handled locally: Shell's global
-//     keydown listener (lib/shortcuts.ts fires mod+enter regardless of focus
-//     target, including from a focused TEXTAREA, per spec §3.10) owns it.
-//     On the editor route Shell.tsx's onModEnter calls
-//     `flushAllForSlug(route.slug)`, whose registry fan-out (spec §5.4)
-//     reaches THIS note's useAnalystNoteDraft SlugStore flusher — so the
-//     note still saves. A local mod+enter→flushAllForSlug branch here would
-//     double-flush the same slug (Shell + local), so it was removed (Codex
-//     P2 fold). Do NOT re-add a local mod+enter handler.
+//   - mod+enter → immediate save, owned by Shell's GLOBAL keydown listener
+//     (lib/shortcuts.ts fires mod+enter regardless of focus target, including
+//     from a focused TEXTAREA, per spec §3.10): on the editor route
+//     Shell.tsx's onModEnter calls `flushAllForSlug(route.slug)`, whose
+//     registry fan-out (spec §5.4) reaches THIS note's useAnalystNoteDraft
+//     SlugStore flusher. Shell is the SINGLE flush owner — the local branch
+//     below MUST NOT flush (a local flushAllForSlug would double-flush the
+//     slug; the second aborts/duplicates the first's in-flight PUT, Codex
+//     round-6). But the local branch DOES call e.preventDefault(): Ctrl/Cmd
+//     modifiers do NOT suppress a <textarea>'s Enter default action (newline
+//     insertion) — "Cmd+Enter submits without a newline" is an app
+//     convention, not a browser default. Without preventDefault the save
+//     shortcut injects a stray "\n" the analyst never typed (Codex round-8
+//     P2; a prior fold's over-removal of this preventDefault and its `\n?`
+//     test tolerance masked it). The branch does NOT stopPropagation, so the
+//     event still bubbles to Shell's document-level listener → exactly ONE
+//     flush. Net: ONE flush (Shell), ZERO stray newline.
 //   - Escape → flushNow + collapse (note-specific; Shell's onEscape is a
 //     Phase-1 no-op so this IS handled locally).
 //   - mod+backspace → delete (note-only; not a Shell shortcut, handled here).
@@ -104,10 +112,16 @@ export default function AnalystNoteSection({
 
   const onSourceKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>): void => {
     const mod = e.metaKey || e.ctrlKey
-    // mod+enter is intentionally NOT handled (and NOT preventDefault'd) here:
-    // Shell's global keydown listener owns it (see the module header). Letting
-    // it bubble means exactly ONE flushAllForSlug per shortcut — handling it
-    // here too produced a double-flush (Codex P2 fold).
+    if (mod && e.key === 'Enter') {
+      // Shell's global shortcut (N.c3) owns the single flushAllForSlug; we
+      // only suppress the textarea's default newline insertion so the save
+      // shortcut never injects content the analyst didn't type. NO flush
+      // here (Shell is the single owner) and NO stopPropagation — the event
+      // must still bubble to Shell's document-level listener for the (single)
+      // flush. See the module header for the full rationale (Codex round-8 P2).
+      e.preventDefault()
+      return
+    }
     if (mod && e.key === 'Backspace') {
       e.preventDefault()
       void deleteNote()

@@ -214,18 +214,24 @@ describe('AnalystNoteSection bridge — full create→preview→delete flow', ()
   })
 
   // Codex P2 fold end-to-end coverage (spec §6.3 — "mod+enter forces
-  // immediate flush via flushAllForSlug"). The LOCAL mod+enter handler in
-  // AnalystNoteSection was removed (it double-flushed). This proves the note
-  // STILL saves on mod+enter via the single owner: Shell's global keydown
-  // listener (lib/shortcuts.ts fires mod+enter from a focused TEXTAREA per
-  // spec §3.10) → Shell.tsx onModEnter (editor route) → flushAllForSlug →
-  // the note's registered useAnalystNoteDraft SlugStore flusher → PUT.
+  // immediate flush via flushAllForSlug"). The SINGLE flush owner is Shell's
+  // global keydown listener (lib/shortcuts.ts fires mod+enter from a focused
+  // TEXTAREA per spec §3.10) → Shell.tsx onModEnter (editor route) →
+  // flushAllForSlug → the note's registered useAnalystNoteDraft SlugStore
+  // flusher → PUT. AnalystNoteSection's LOCAL mod+enter branch calls ONLY
+  // e.preventDefault() (no flush, no stopPropagation): it suppresses the
+  // textarea's default Enter action (newline insertion) so the save shortcut
+  // never injects a stray "\n" the analyst didn't type, while the event still
+  // bubbles to Shell's document-level listener for the (single) flush.
   // Wrapping ResortEditor in <Shell> mounts that document-level listener
   // (the other bridge test renders ResortEditor bare, so no Shell shortcut).
   // The save fires IMMEDIATELY (mod+enter), well before the 500ms debounce —
   // that timing is what proves the flush came from the shortcut, not the
-  // debounced autosave.
-  it('mod+enter still SAVES the note end-to-end via Shell → flushAllForSlug (no local handler)', async (): Promise<void> => {
+  // debounced autosave — AND the saved markdown is EXACTLY the typed text
+  // (no trailing newline) because the local preventDefault cancelled the
+  // textarea's Enter default. The previous fold's `\n?` tolerance masked the
+  // stray-newline bug (Codex round-8 P2) and is removed here.
+  it('mod+enter SAVES exactly the typed text (no stray newline) via Shell → flushAllForSlug, single flush', async (): Promise<void> => {
     const puts: Array<{ path: string; markdown: string | null }> = []
     server.use(
       http.put(
@@ -271,20 +277,31 @@ describe('AnalystNoteSection bridge — full create→preview→delete flow', ()
 
     // Type then immediately mod+enter (do NOT wait for the 500ms debounce):
     // the PUT must come from Shell's shortcut → flushAllForSlug → the note
-    // flusher, proving the note still saves with the local handler gone.
-    // userEvent's Meta+Enter still inserts a newline into the textarea in
-    // jsdom (the local handler that used to preventDefault is gone — exactly
-    // the change under test), so the saved markdown carries a trailing \n.
-    // What this asserts is the load-bearing part: a PUT fired IMMEDIATELY
-    // (before the 500ms debounce) with the typed body — i.e. the shortcut,
-    // not the debounced autosave, drove the save through Shell.
+    // flusher, proving the shortcut (not the debounced autosave) drove the
+    // save through Shell. The local mod+enter branch calls e.preventDefault()
+    // so the textarea's default Enter action (newline insertion) is cancelled
+    // — without it userEvent's Meta+Enter would inject a stray "\n" into the
+    // draft the analyst never typed (Codex round-8 P2). The branch does NOT
+    // stopPropagation, so the event still bubbles to Shell's document-level
+    // listener → exactly ONE flushAllForSlug.
     await user.type(source, 'urgent note')
     await user.keyboard('{Meta>}{Enter}{/Meta}')
 
     await waitFor((): void => {
       expect(puts).toHaveLength(1)
     })
+    // EXACT typed text — no `\n?` tolerance. preventDefault suppressed the
+    // textarea's Enter default; a trailing newline here would mean the save
+    // shortcut persisted content the analyst never typed.
     expect(puts[0]?.path).toBe('slopes_km')
-    expect(puts[0]?.markdown).toMatch(/^urgent note\n?$/)
+    expect(puts[0]?.markdown).toBe('urgent note')
+
+    // Single-flush regression guard (Codex round-6): the local branch must
+    // NOT flush; Shell is the sole flush owner. If the local branch flushed
+    // too, this slug would PUT twice (the second aborts/duplicates the
+    // first). Give any erroneous second flush a chance to land.
+    await waitFor((): void => {
+      expect(puts).toHaveLength(1)
+    })
   })
 })

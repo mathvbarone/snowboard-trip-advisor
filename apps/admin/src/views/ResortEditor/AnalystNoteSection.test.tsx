@@ -201,20 +201,25 @@ describe('AnalystNoteSection (spec §6.2 / §6.3)', (): void => {
     expect(renderSpy).toHaveBeenLastCalledWith('abcd')
   })
 
-  // Codex P2 fold — the LOCAL mod+enter handler was removed. Shell's global
-  // keydown listener (lib/shortcuts.ts fires mod+enter from a focused
-  // TEXTAREA per spec §3.10) is the single owner: on the editor route
-  // Shell.tsx's onModEnter calls flushAllForSlug(route.slug), whose registry
-  // fan-out (spec §5.4) reaches this note's SlugStore flusher. Handling
-  // mod+enter HERE too made one shortcut call flushAllForSlug for the same
-  // slug TWICE (the second flush aborts the first's in-flight PUT → an
-  // aborted/duplicate save). The precise behavioral change this regression
-  // guard encodes: AnalystNoteSection's own keydown handler must NOT call
-  // flushAllForSlug on mod+enter and must NOT preventDefault it — it has to
-  // bubble to Shell, which performs the (single) flush. End-to-end
-  // "mod+enter still SAVES the note" is covered by the bridge test
+  // Codex P2 fold (Codex round-8 P2). Shell's global keydown listener
+  // (lib/shortcuts.ts fires mod+enter from a focused TEXTAREA per spec §3.10)
+  // is the SINGLE flush owner: on the editor route Shell.tsx's onModEnter
+  // calls flushAllForSlug(route.slug), whose registry fan-out (spec §5.4)
+  // reaches this note's SlugStore flusher. The local mod+enter branch here
+  // must therefore NOT call any flush (a local flushAllForSlug would
+  // double-flush the slug — the second aborts/duplicates the first's
+  // in-flight PUT, Codex round-6). But it MUST call e.preventDefault():
+  // Ctrl/Cmd modifiers do NOT suppress a <textarea>'s Enter default action
+  // (newline insertion) — "Cmd+Enter submits without a newline" is an app
+  // convention implemented via preventDefault, not a browser default. Without
+  // it the save shortcut injects a stray "\n" into the draft the analyst
+  // never typed (the bug Codex round-8 P2 caught; the prior fold's removal of
+  // this preventDefault and its `\n?` test tolerance masked it). The branch
+  // must NOT stopPropagation — the event still bubbles to Shell's
+  // document-level listener for the (single) flush. End-to-end "mod+enter
+  // SAVES exactly the typed text, single flush" is covered by the bridge test
   // (AnalystNoteSection.bridge.test.tsx — Shell-wrapped) and Shell.test.tsx.
-  it('does NOT flush or preventDefault on mod+enter — lets it bubble to Shell (single owner; was double-flushing)', async (): Promise<void> => {
+  it('preventDefaults mod+enter (suppresses textarea newline) but does NOT flush locally — bubbles to Shell (single owner)', async (): Promise<void> => {
     seedEmpty()
     const flushSpy = vi.spyOn(flushAllModule, 'flushAllForSlug')
     renderSection()
@@ -232,13 +237,14 @@ describe('AnalystNoteSection (spec §6.2 / §6.3)', (): void => {
       await vi.advanceTimersByTimeAsync(0)
     })
 
-    // The component's own handler did NOT consume the event: no local
-    // flushAllForSlug, and the event was left un-prevented so Shell's
-    // document-level listener can act on it (the bubble path).
+    // The local handler cancels the textarea's Enter default (no stray
+    // newline) but does NOT flush — Shell's document-level listener owns the
+    // single flushAllForSlug. preventDefault does not stop propagation, so
+    // the event still reaches Shell.
     expect(flushSpy).not.toHaveBeenCalled()
-    expect(evt.defaultPrevented).toBe(false)
+    expect(evt.defaultPrevented).toBe(true)
 
-    // Ctrl variant (Linux/Windows) takes the same no-op-local path.
+    // Ctrl variant (Linux/Windows) takes the same path.
     const evtCtrl = new KeyboardEvent('keydown', {
       key: 'Enter',
       ctrlKey: true,
@@ -250,7 +256,7 @@ describe('AnalystNoteSection (spec §6.2 / §6.3)', (): void => {
       await vi.advanceTimersByTimeAsync(0)
     })
     expect(flushSpy).not.toHaveBeenCalled()
-    expect(evtCtrl.defaultPrevented).toBe(false)
+    expect(evtCtrl.defaultPrevented).toBe(true)
 
     flushSpy.mockRestore()
   })
