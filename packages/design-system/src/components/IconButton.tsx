@@ -1,3 +1,5 @@
+import './IconButton.css'
+
 import type { JSX, ReactNode } from 'react'
 
 // Icon-only button. Always requires `aria-label` because there is no
