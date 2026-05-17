@@ -1,3 +1,5 @@
+import './Card.css'
+
 import type { JSX, ReactNode } from 'react'
 
 // Card container used by `<ResortCard>` and other content blocks. Renders
