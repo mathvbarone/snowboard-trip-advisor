@@ -25,6 +25,7 @@ import {
 import {
   __resetForTests as resetAnalystNotes,
   prepopulateAnalystNotes,
+  useAnalystNotes,
 } from './useAnalystNotes'
 
 // PR N.c2 — useAnalystNoteDraft per-path write hook. Per spec §5.1+§5.2+
@@ -418,6 +419,83 @@ describe('useAnalystNoteDraft — flushAll on the SlugStore (spec §5.4)', (): v
     await act(async (): Promise<void> => { await flushAllForSlug(KB) })
     expect(spy).toHaveBeenCalledTimes(1)
     expect(spy.mock.calls[0]?.[1]).toStrictEqual({ path: SLOPES, markdown: 'x' } satisfies AnalystNoteUpsertBody)
+  })
+})
+
+describe('useAnalystNoteDraft — flushAll multi-path same-tick (spec §5.4)', (): void => {
+  it('flushAllForSlug saving two dirty paths in one tick keeps the original note AND both saves', async (): Promise<void> => {
+    // Codex P2 regression: latestNotesBySlug is a render-time map. When
+    // flushAllForSlug flushes two dirty paths via Promise.all, both
+    // single-path PUTs can settle in the SAME tick before any React
+    // re-render refreshes the map. Without a write-through update,
+    // path B's settleSuccess merges onto the stale full response and
+    // path C's settleSuccess (same tick, no re-render) ALSO merges onto
+    // the same stale response — dropping whichever settled first.
+    const PATH_A = 'slopes_km'
+    const PATH_B = 'region'
+    const PATH_C = 'lift_capacity'
+
+    // Seed the full map with an existing note at PATH_A so it starts
+    // non-empty — that note must survive both same-tick merges.
+    prepopulateAnalystNotes(
+      KB,
+      AnalystNotesGetResponse.parse({
+        slug: KB,
+        notes: {
+          [PATH_A]: {
+            schema_version: 1, markdown: 'note-A', html: '<p>note-A</p>',
+            created_at: OBS, updated_at: OBS,
+          },
+        },
+      }),
+    )
+
+    // Each PUT echoes only its own path; build a path-aware response so
+    // both flights settle with their correct delta (the real server
+    // echoes the path that was PUT).
+    vi.spyOn(apiClient, 'upsertAnalystNote').mockImplementation(
+      (_s, body): Promise<AnalystNoteUpsertResponse> =>
+        Promise.resolve(
+          AnalystNoteUpsertResponse.parse({
+            slug: KB,
+            path: body.path,
+            note: body.markdown === null
+              ? null
+              : {
+                  schema_version: 1,
+                  markdown: body.markdown,
+                  html: `<p>${body.markdown}</p>`,
+                  created_at: OBS,
+                  updated_at: OBS,
+                },
+          }),
+        ),
+    )
+
+    // Mount both paths against the same slug store and make both dirty
+    // with armed debounce timers.
+    const b = renderHook(() => useAnalystNoteDraft(KB, PATH_B))
+    const c = renderHook(() => useAnalystNoteDraft(KB, PATH_C))
+    act((): void => { b.result.current.setDraft('saved-B') })
+    act((): void => { c.result.current.setDraft('saved-C') })
+
+    // flushAllForSlug → flushAllPaths → Promise.all([flushPath(B),
+    // flushPath(C)]); both PUTs resolve in the same tick before a render.
+    await act(async (): Promise<void> => { await flushAllForSlug(KB) })
+
+    // Inspect the FULL analyst-notes cache (what a fresh consumer reads):
+    // it must contain ALL THREE — the original A plus both just-confirmed
+    // B and C. The bug merges both same-tick settles onto the same stale
+    // full response, dropping whichever path settled first.
+    const notes = renderHook(() => useAnalystNotes(KB))
+    const map = notes.result.current.notes
+    expect(map[PATH_A]?.markdown).toBe('note-A')
+    expect(map[PATH_B]?.markdown).toBe('saved-B')
+    expect(map[PATH_C]?.markdown).toBe('saved-C')
+
+    // Per-path handles still report their own confirmed save.
+    expect(b.result.current.lastSent).toBe('saved-B')
+    expect(c.result.current.lastSent).toBe('saved-C')
   })
 })
 

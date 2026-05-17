@@ -305,7 +305,20 @@ function settleSuccess(
     lastFlightKind: null,
     abortController: live.abortController === localController ? undefined : live.abortController,
   })
-  prepopulateAnalystNotes(slug, merge(currentNotes(slug), slug, response.path, response.note))
+  // Write-through latestNotesBySlug (Codex P2 fold). currentNotes(slug)
+  // reads the render-time latestNotesBySlug map (only written during a
+  // React render). When flushAllForSlug flushes two dirty paths via
+  // Promise.all, both single-path PUTs can settle in the SAME tick before
+  // any re-render refreshes the map — so the second settleSuccess would
+  // merge onto the SAME stale full response and drop the path the first
+  // settle just confirmed. Synchronously seeding the map with the same
+  // merged response makes the next same-tick sibling-path merge read the
+  // fresh value. Consistent with N.c1's cachedFulfilled: prepopulate just
+  // set it to this `merged` object, and the next render re-sets
+  // latestNotesBySlug from useAnalystNotes to the identical value.
+  const merged = merge(currentNotes(slug), slug, response.path, response.note)
+  prepopulateAnalystNotes(slug, merged)
+  latestNotesBySlug.set(slug, merged)
   emit(store)
 }
 
