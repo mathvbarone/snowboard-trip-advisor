@@ -31,6 +31,7 @@ import {
 import { __resetForTests as resetURLState } from '../../state/useURLState'
 import { __resetForTests as resetWorkspaceState } from '../../state/useWorkspaceState'
 import { ResortEditor } from '../ResortEditor'
+import { Shell } from '../Shell'
 
 // PR N.c4 §11.2 step 18 — full-flow bridge test. ResortEditor → MetricPanel
 // → FieldRow → (lazy) AnalystNoteSection → useAnalystNoteDraft → MSW PUT,
@@ -210,5 +211,80 @@ describe('AnalystNoteSection bridge — full create→preview→delete flow', ()
         within(row).getByRole('button', { name: 'Add note' }),
       ).toHaveTextContent('📝 0')
     })
+  })
+
+  // Codex P2 fold end-to-end coverage (spec §6.3 — "mod+enter forces
+  // immediate flush via flushAllForSlug"). The LOCAL mod+enter handler in
+  // AnalystNoteSection was removed (it double-flushed). This proves the note
+  // STILL saves on mod+enter via the single owner: Shell's global keydown
+  // listener (lib/shortcuts.ts fires mod+enter from a focused TEXTAREA per
+  // spec §3.10) → Shell.tsx onModEnter (editor route) → flushAllForSlug →
+  // the note's registered useAnalystNoteDraft SlugStore flusher → PUT.
+  // Wrapping ResortEditor in <Shell> mounts that document-level listener
+  // (the other bridge test renders ResortEditor bare, so no Shell shortcut).
+  // The save fires IMMEDIATELY (mod+enter), well before the 500ms debounce —
+  // that timing is what proves the flush came from the shortcut, not the
+  // debounced autosave.
+  it('mod+enter still SAVES the note end-to-end via Shell → flushAllForSlug (no local handler)', async (): Promise<void> => {
+    const puts: Array<{ path: string; markdown: string | null }> = []
+    server.use(
+      http.put(
+        '/api/analyst-notes/:slug',
+        async ({ params, request }): Promise<Response> => {
+          const slug = params.slug as string
+          const body = (await request.json()) as {
+            path: string
+            markdown: string | null
+          }
+          puts.push(body)
+          return HttpResponse.json({
+            slug,
+            path: body.path,
+            note:
+              body.markdown === null
+                ? null
+                : {
+                    schema_version: 1 as const,
+                    markdown: body.markdown,
+                    html: `<p>${body.markdown}</p>`,
+                    created_at: OBS,
+                    updated_at: OBS,
+                  },
+          })
+        },
+      ),
+    )
+
+    const user = userEvent.setup()
+    render(
+      <Shell>
+        <ResortEditor slug={KB} />
+      </Shell>,
+    )
+
+    const row = await screen.findByLabelText('Slopes (km)')
+    const affordance = within(row).getByRole('button', { name: 'Add note' })
+    await user.click(affordance)
+    const source = await screen.findByRole('textbox', {
+      name: /note source/i,
+    })
+
+    // Type then immediately mod+enter (do NOT wait for the 500ms debounce):
+    // the PUT must come from Shell's shortcut → flushAllForSlug → the note
+    // flusher, proving the note still saves with the local handler gone.
+    // userEvent's Meta+Enter still inserts a newline into the textarea in
+    // jsdom (the local handler that used to preventDefault is gone — exactly
+    // the change under test), so the saved markdown carries a trailing \n.
+    // What this asserts is the load-bearing part: a PUT fired IMMEDIATELY
+    // (before the 500ms debounce) with the typed body — i.e. the shortcut,
+    // not the debounced autosave, drove the save through Shell.
+    await user.type(source, 'urgent note')
+    await user.keyboard('{Meta>}{Enter}{/Meta}')
+
+    await waitFor((): void => {
+      expect(puts).toHaveLength(1)
+    })
+    expect(puts[0]?.path).toBe('slopes_km')
+    expect(puts[0]?.markdown).toMatch(/^urgent note\n?$/)
   })
 })

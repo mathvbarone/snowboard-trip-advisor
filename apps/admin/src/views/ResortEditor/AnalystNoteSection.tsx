@@ -10,7 +10,6 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react'
 
-import { flushAllForSlug } from '../../state/flushAll'
 import { useAnalystNoteDraft } from '../../state/useAnalystNoteDraft'
 
 // PR N.c4 — AnalystNoteSection (spec §6.2 / §6.3 / §6.6).
@@ -36,10 +35,19 @@ import { useAnalystNoteDraft } from '../../state/useAnalystNoteDraft'
 //     consume its string output this way). Debounced ~150ms so the preview
 //     tracks typing without rendering on every keystroke.
 //
-// Keyboard (spec §6.3): mod+enter → flushAllForSlug(slug) (immediate save of
-// every dirty path for the slug, matching Shell's onModEnter); Escape →
-// collapse (pending edits are already in-flight / about to flush — no explicit
-// discard); mod+backspace → delete.
+// Keyboard (spec §6.3):
+//   - mod+enter → immediate save. NOT handled locally: Shell's global
+//     keydown listener (lib/shortcuts.ts fires mod+enter regardless of focus
+//     target, including from a focused TEXTAREA, per spec §3.10) owns it.
+//     On the editor route Shell.tsx's onModEnter calls
+//     `flushAllForSlug(route.slug)`, whose registry fan-out (spec §5.4)
+//     reaches THIS note's useAnalystNoteDraft SlugStore flusher — so the
+//     note still saves. A local mod+enter→flushAllForSlug branch here would
+//     double-flush the same slug (Shell + local), so it was removed (Codex
+//     P2 fold). Do NOT re-add a local mod+enter handler.
+//   - Escape → flushNow + collapse (note-specific; Shell's onEscape is a
+//     Phase-1 no-op so this IS handled locally).
+//   - mod+backspace → delete (note-only; not a Shell shortcut, handled here).
 
 const PREVIEW_DEBOUNCE_MS = 150
 
@@ -96,11 +104,10 @@ export default function AnalystNoteSection({
 
   const onSourceKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>): void => {
     const mod = e.metaKey || e.ctrlKey
-    if (mod && e.key === 'Enter') {
-      e.preventDefault()
-      void flushAllForSlug(slug)
-      return
-    }
+    // mod+enter is intentionally NOT handled (and NOT preventDefault'd) here:
+    // Shell's global keydown listener owns it (see the module header). Letting
+    // it bubble means exactly ONE flushAllForSlug per shortcut — handling it
+    // here too produced a double-flush (Codex P2 fold).
     if (mod && e.key === 'Backspace') {
       e.preventDefault()
       void deleteNote()

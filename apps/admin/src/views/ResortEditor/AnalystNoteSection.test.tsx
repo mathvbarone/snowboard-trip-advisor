@@ -7,6 +7,7 @@ import { Suspense } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { server } from '../../mocks/server'
+import * as flushAllModule from '../../state/flushAll'
 import {
   __resetForTests as resetFlushAll,
 } from '../../state/flushAll'
@@ -200,47 +201,58 @@ describe('AnalystNoteSection (spec §6.2 / §6.3)', (): void => {
     expect(renderSpy).toHaveBeenLastCalledWith('abcd')
   })
 
-  it('mod+enter forces an immediate flush (no 500ms wait)', async (): Promise<void> => {
+  // Codex P2 fold — the LOCAL mod+enter handler was removed. Shell's global
+  // keydown listener (lib/shortcuts.ts fires mod+enter from a focused
+  // TEXTAREA per spec §3.10) is the single owner: on the editor route
+  // Shell.tsx's onModEnter calls flushAllForSlug(route.slug), whose registry
+  // fan-out (spec §5.4) reaches this note's SlugStore flusher. Handling
+  // mod+enter HERE too made one shortcut call flushAllForSlug for the same
+  // slug TWICE (the second flush aborts the first's in-flight PUT → an
+  // aborted/duplicate save). The precise behavioral change this regression
+  // guard encodes: AnalystNoteSection's own keydown handler must NOT call
+  // flushAllForSlug on mod+enter and must NOT preventDefault it — it has to
+  // bubble to Shell, which performs the (single) flush. End-to-end
+  // "mod+enter still SAVES the note" is covered by the bridge test
+  // (AnalystNoteSection.bridge.test.tsx — Shell-wrapped) and Shell.test.tsx.
+  it('does NOT flush or preventDefault on mod+enter — lets it bubble to Shell (single owner; was double-flushing)', async (): Promise<void> => {
     seedEmpty()
-    const seen: Array<{ path: string; markdown: string | null }> = []
-    server.use(
-      http.put(
-        '/api/analyst-notes/:slug',
-        async ({ params, request }): Promise<Response> => {
-          const slug = params.slug as string
-          const body = (await request.json()) as {
-            path: string
-            markdown: string | null
-          }
-          seen.push(body)
-          return HttpResponse.json({
-            slug,
-            path: body.path,
-            note: {
-              schema_version: 1 as const,
-              markdown: body.markdown as string,
-              html: `<p>${String(body.markdown)}</p>`,
-              created_at: OBS,
-              updated_at: OBS,
-            },
-          })
-        },
-      ),
-    )
+    const flushSpy = vi.spyOn(flushAllModule, 'flushAllForSlug')
     renderSection()
     const source = screen.getByRole('textbox', { name: /note source/i })
     fireEvent.change(source, { target: { value: 'urgent' } })
+
+    const evt = new KeyboardEvent('keydown', {
+      key: 'Enter',
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
     await act(async (): Promise<void> => {
-      source.dispatchEvent(
-        new KeyboardEvent('keydown', {
-          key: 'Enter',
-          metaKey: true,
-          bubbles: true,
-        }),
-      )
+      source.dispatchEvent(evt)
       await vi.advanceTimersByTimeAsync(0)
     })
-    expect(seen).toEqual([{ path: PATH, markdown: 'urgent' }])
+
+    // The component's own handler did NOT consume the event: no local
+    // flushAllForSlug, and the event was left un-prevented so Shell's
+    // document-level listener can act on it (the bubble path).
+    expect(flushSpy).not.toHaveBeenCalled()
+    expect(evt.defaultPrevented).toBe(false)
+
+    // Ctrl variant (Linux/Windows) takes the same no-op-local path.
+    const evtCtrl = new KeyboardEvent('keydown', {
+      key: 'Enter',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    await act(async (): Promise<void> => {
+      source.dispatchEvent(evtCtrl)
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(flushSpy).not.toHaveBeenCalled()
+    expect(evtCtrl.defaultPrevented).toBe(false)
+
+    flushSpy.mockRestore()
   })
 
   it('Escape collapses the row without an explicit discard', async (): Promise<void> => {
