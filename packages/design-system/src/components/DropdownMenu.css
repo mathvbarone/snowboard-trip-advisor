@@ -1,0 +1,58 @@
+/* DropdownMenu visual CSS — what it styles: the three authored nodes of
+ * the inline (NOT portalled) dropdown — `.sta-dropdown-menu` (the root
+ * wrapping the trigger + menu, also the positioning context),
+ * `.sta-dropdown-menu__menu` (the `role="menu"` panel) and
+ * `.sta-dropdown-menu__item` (each `role="menuitem"` `<button>`).
+ * Token-driven, light/dark via the S0 :root cascade (ADR-0005); no theme
+ * code here. The root is `position: relative` so the menu anchors to the
+ * trigger (the component owns no positioning library — Epic 4 §5.1). The
+ * menu's per-item state hooks are the native `:hover` and the
+ * `:focus-visible` keyboard ring (roving tabindex moves focus between
+ * items). tokens.ts ships no --z-dropdown token: like Popover, the menu
+ * is an overlay-tier anchored layer, so it reuses the nearest existing
+ * overlay z token, --z-modal (=60) — see PR report. The box-shadow uses a
+ * raw rgba (no --shadow-* token; Card.css/Toast.css precedent — an
+ * intentionally theme-neutral non-hex value). */
+.sta-dropdown-menu {
+  position: relative;
+  display: inline-block;
+}
+.sta-dropdown-menu__menu {
+  position: absolute;
+  top: calc(100% + var(--space-xs, 4px));
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+  padding: var(--space-xs, 4px);
+  background: var(--color-background, #ffffff);
+  border: 1px solid var(--color-border, #d6d9dd);
+  border-radius: var(--radius-md, 8px);
+  z-index: var(--z-modal, 60);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  font-family: var(--font-family-body, sans-serif);
+}
+.sta-dropdown-menu__item {
+  appearance: none;
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm, 4px);
+  padding: var(--space-sm, 8px) var(--space-md, 12px);
+  font-family: inherit;
+  font-size: var(--font-size-sm, 14px);
+  color: var(--color-foreground, #0b0d10);
+  cursor: pointer;
+  transition: background-color var(--duration-fast, 120ms),
+    color var(--duration-fast, 120ms);
+}
+.sta-dropdown-menu__item:hover {
+  background: var(--color-surface, #f4f5f7);
+}
+.sta-dropdown-menu__item:focus-visible {
+  outline: 2px solid var(--color-accent, #0066cc);
+  outline-offset: -2px;
+  background: var(--color-surface, #f4f5f7);
+}
