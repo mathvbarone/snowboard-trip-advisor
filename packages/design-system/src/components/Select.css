@@ -1,0 +1,37 @@
+/* Select visual CSS. Token-driven; light/dark via the S0 :root cascade
+ * (ADR-0005) — no theme code here. Per ADR-0004 this styles the NATIVE
+ * <select> control (.sta-select__control), not a custom dropdown — the
+ * component renders a <label> block (.sta-select) wrapping a visible label
+ * span (.sta-select__label) and the native control; the disabled state
+ * keys off the native :disabled the control already emits. */
+.sta-select {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs, 4px);
+  font-family: var(--font-family-body, sans-serif);
+}
+.sta-select__label {
+  font-size: var(--font-size-sm, 14px);
+  font-weight: var(--font-weight-medium, 500);
+  color: var(--color-foreground, #0b0d10);
+}
+.sta-select__control {
+  padding: var(--space-sm, 8px) var(--space-md, 12px);
+  font-family: inherit;
+  font-size: var(--font-size-md, 16px);
+  color: var(--color-foreground, #0b0d10);
+  background: var(--color-background, #fff);
+  border: 1px solid var(--color-border, #d6d9dd);
+  border-radius: var(--radius-md, 8px);
+  cursor: pointer;
+  transition: border-color var(--duration-fast, 120ms);
+}
+.sta-select__control:focus-visible {
+  outline: 2px solid var(--color-accent, #0066cc);
+  outline-offset: 2px;
+}
+.sta-select__control:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: var(--color-surface, #f4f5f7);
+}
