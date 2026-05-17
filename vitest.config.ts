@@ -120,6 +120,13 @@ export default defineConfig({
         // Mirrored in apps/admin/vite.config.ts for the workspace-level
         // coverage view.
         'apps/admin/src/state/useAnalystNoteDraft.hmr.ts',
+        // `apps/admin/src/state/useWorkspaceState.hmr.ts` — same HMR
+        // dead-code pattern as useAnalystNoteDraft.hmr.ts. PR N.c3:
+        // useWorkspaceState now registers a flusher into the persistent
+        // flushAll.ts registry, so it inherits the same cross-generation
+        // stale-flusher cleanup. Mirrored in apps/admin/vite.config.ts for
+        // the workspace-level coverage view.
+        'apps/admin/src/state/useWorkspaceState.hmr.ts',
         // `scripts/hooks/**` are shell scripts (test-hooks.sh, deny-dangerous-git.sh).
         'scripts/hooks/**',
         // `scripts/pre-commit` is a shell script installed into the worktree
