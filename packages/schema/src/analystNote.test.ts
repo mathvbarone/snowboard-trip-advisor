@@ -72,4 +72,19 @@ describe('AnalystNotesMap', () => {
     // the key-scan and fall through to z.record which rejects them.
     expect(AnalystNotesMap.safeParse([]).success).toBe(false)
   })
+
+  it('accepts a valid map with a non-forbidden key (covers the false branch of FORBIDDEN_PATH_SEGMENTS.has)', () => {
+    // A key that passes the preprocess for-loop without hitting the
+    // forbidden-segment guard exercises the false branch of
+    // `if (FORBIDDEN_PATH_SEGMENTS.has(key))` at analystNote.ts:67.
+    const valid = {
+      'slopes.km': {
+        schema_version: 1,
+        markdown: 'test',
+        created_at: '2026-05-14T00:00:00.000Z',
+        updated_at: '2026-05-14T00:00:00.000Z',
+      },
+    }
+    expect(AnalystNotesMap.safeParse(valid).success).toBe(true)
+  })
 })
