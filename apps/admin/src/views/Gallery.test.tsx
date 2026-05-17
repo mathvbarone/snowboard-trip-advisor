@@ -41,15 +41,6 @@ describe('Gallery (S1.0 — dev-only component gallery surface)', (): void => {
     vi.unstubAllGlobals()
   })
 
-  // The S1d OverlaysFamily mounts a seeded-OPEN Modal. Radix Dialog with
-  // the default `modal=true` sets `aria-hidden="true"` on every sibling of
-  // the dialog (the documented modal focus/AT trap — true in real browsers
-  // too), so the page heading is hidden from the accessibility tree while
-  // the modal is open. The element is still in the DOM (the style-only
-  // gallery smoke uses getComputedStyle, which is immune to aria-hidden),
-  // so we assert presence with `hidden: true` — the assertion still proves
-  // the heading renders; it just acknowledges the accurate open-modal a11y
-  // state rather than asserting a now-false un-hidden one.
   it('renders the Component gallery heading', (): void => {
     render(
       <ToastProvider>
@@ -57,11 +48,7 @@ describe('Gallery (S1.0 — dev-only component gallery surface)', (): void => {
       </ToastProvider>,
     )
     expect(
-      screen.getByRole('heading', {
-        level: 1,
-        name: /component gallery/i,
-        hidden: true,
-      }),
+      screen.getByRole('heading', { level: 1, name: /component gallery/i }),
     ).toBeInTheDocument()
   })
 
@@ -251,78 +238,78 @@ describe('Gallery (S1.0 — dev-only component gallery surface)', (): void => {
     }
   })
 
-  // The S1a editable exemplars are controlled — exercising their handlers
-  // proves the live gallery controls stay editable (not just visually
-  // present) and keeps Gallery.tsx's interactive closures covered.
-  //
-  // S1d note: the seeded-open Modal applies `aria-hidden="true"` to every
-  // sibling of the dialog (documented Radix modal trap — true in real
-  // browsers too), so accessible-name queries (`getByLabelText` /
-  // `getByRole`) can no longer see these controls. The DOM nodes and their
-  // values/handlers are unaffected (aria-hidden is an a11y-tree attribute,
-  // not a functional one), so we scope by DOM selectors off `container` —
-  // every assertion's intent (control present, state round-trips, pressed
-  // flips) is preserved exactly; only the lookup mechanism changed.
-  it('keeps the S1a editable form controls interactive', (): void => {
+  // S1d — the Modal exemplar is NOT seeded open (the design-system Modal
+  // wraps a Radix Dialog with the default `modal=true`, which sets
+  // `aria-hidden="true"` on every sibling of the dialog portal — the whole
+  // gallery page — destroying the gallery's a11y tree while open). It
+  // renders the trigger only; the smoke opens it by interaction. This test
+  // (a) proves no `.sta-modal` is mounted before interaction (so the page
+  // a11y tree is intact — the un-hidden accessible-name queries above pass)
+  // and (b) clicks the trigger and asserts the styled `.sta-modal` root
+  // then mounts, pinning the trigger-only contract AND exercising the
+  // trigger's onClick closure (Gallery 100%-function-coverage convention).
+  it('mounts the Modal styled root only after the trigger is clicked', (): void => {
     const { container } = render(
       <ToastProvider>
         <Gallery />
       </ToastProvider>,
     )
-    const scope = (sel: string): HTMLElement => {
-      const el = container.querySelector<HTMLElement>(sel)
-      if (el === null) {
-        throw new Error(`Gallery interactive control not found: ${sel}`)
-      }
-      return el
-    }
+    // Closed by default — nothing portalled, no aria-hidden trap.
+    expect(document.querySelector('.sta-modal')).toBeNull()
 
-    // Editable Input round-trips through local state.
-    const input = scope(
-      '[data-gallery-component="Input"] input:not([disabled]):not([readonly])',
+    const trigger = container.querySelector<HTMLButtonElement>(
+      '[data-gallery-component="Modal"] button',
     )
+    expect(trigger).not.toBeNull()
+    fireEvent.click(trigger as HTMLButtonElement)
+
+    // The Radix Dialog portal mounts the styled root off document.body.
+    expect(document.querySelector('.sta-modal')).not.toBeNull()
+  })
+
+  // The S1a editable exemplars are controlled — exercising their handlers
+  // proves the live gallery controls stay editable (not just visually
+  // present) and keeps Gallery.tsx's interactive closures covered.
+  it('keeps the S1a editable form controls interactive', (): void => {
+    render(
+      <ToastProvider>
+        <Gallery />
+      </ToastProvider>,
+    )
+    // Editable Input round-trips through local state.
+    const input = screen.getByLabelText('Editable input')
     fireEvent.change(input, { target: { value: 'typed text' } })
     expect(input).toHaveValue('typed text')
 
-    const select = scope(
-      '[data-gallery-component="Select"] select:not([disabled])',
-    )
+    const select = screen.getByLabelText('Editable select')
     fireEvent.change(select, { target: { value: 'b' } })
     expect(select).toHaveValue('b')
 
-    const textarea = scope(
-      '[data-gallery-component="Textarea"] textarea:not([disabled]):not([readonly])',
-    )
+    const textarea = screen.getByLabelText('Editable note')
     fireEvent.change(textarea, { target: { value: 'typed note' } })
     expect(textarea).toHaveValue('typed note')
 
     // Enabled toggle commits selection on click (pressed state flips).
-    // The enabled ToggleButtonGroup is the first <div role="group"> in the
-    // ToggleButtonGroup section (the disabled one is second); its "Matrix"
-    // button is the one we click.
-    const enabledGroup = within(
-      scope('[data-gallery-component="ToggleButtonGroup"] [role="group"]'),
-    )
-    const matrixBtn = enabledGroup.getByRole('button', {
+    // "Matrix" appears in both the enabled and disabled groups, so scope
+    // to the enabled group by its accessible name first.
+    const enabledGroup = screen.getByRole('group', { name: 'View' })
+    const matrixBtn = within(enabledGroup).getByRole('button', {
       name: 'Matrix',
-      hidden: true,
     })
     fireEvent.click(matrixBtn)
     expect(matrixBtn).toHaveAttribute('aria-pressed', 'true')
 
     // The shared `noop` is wired to the enabled IconButton — click it so
     // the single module-level handler is exercised (function coverage).
-    fireEvent.click(
-      scope('[data-gallery-component="IconButton"] button:not([disabled])'),
-    )
+    fireEvent.click(screen.getByRole('button', { name: 'Star' }))
 
     // S1c-2: the controlled Chip exemplar is seeded pressed; clicking it
     // flips its aria-pressed off through local state. Exercising the
     // `setChipOn` toggle keeps FeedbackStatusFamily's interactive closure
     // covered (mirrors the editable-form-control assertions above).
-    const chip = scope(
-      '[data-gallery-component="Chip"] button[aria-pressed="true"]',
-    )
+    const chip = screen.getByRole('button', {
+      name: 'Toggleable chip (seeded pressed)',
+    })
     expect(chip).toHaveAttribute('aria-pressed', 'true')
     fireEvent.click(chip)
     expect(chip).toHaveAttribute('aria-pressed', 'false')

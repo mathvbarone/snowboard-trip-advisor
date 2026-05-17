@@ -64,6 +64,31 @@ the smoke — Toast has no `persist` option, and its per-variant default
 Drawer exemplar is seeded `open` so `.sta-drawer` is mounted. No click is
 needed for either.
 
+### Interaction-required exemplars (S1d): Modal and Tooltip
+
+Two S1d exemplars CANNOT be seeded into their styled state declaratively —
+the controller must drive an interaction before the `.sta-<name>` root
+exists to measure. The smoke-target rule above still applies (query the
+component's own `.sta-<name>` root off `document`, exactly one instance);
+only an extra interaction step precedes the measurement:
+
+| Component | Interaction before measuring | Smoke target |
+|-----------|------------------------------|--------------|
+| Modal   | click the "Open modal" trigger button inside `[data-gallery-component="Modal"]` | `.sta-modal` |
+| Tooltip | hover OR focus the trigger button inside `[data-gallery-component="Tooltip"]` | `.sta-tooltip` |
+
+Modal wraps a Radix Dialog with the default `modal=true`, which applies
+`aria-hidden="true"` to every sibling of the dialog portal (the entire
+gallery page) for as long as it is open — seeding it open would destroy the
+gallery's own accessibility tree, and Modal exposes no `modal={false}`
+escape hatch (unlike Drawer's deliberately non-modal exemplar). Tooltip
+wraps an UNCONTROLLED Radix Tooltip.Root and exposes no `open`/`defaultOpen`
+prop. So both render only their trigger; the controller clicks the Modal
+trigger / hovers-or-focuses the Tooltip trigger, THEN measures the portalled
+`.sta-modal` / `.sta-tooltip` root. After the Modal measurement, close it
+(press Escape or click the overlay) before continuing so its `aria-hidden`
+trap does not affect any later step.
+
 NOTE: this smoke is NOT runnable from a git worktree (worktree has no
 node_modules; the app dev server resolves @snowboard-trip-advisor/design-system
 via the main-checkout symlink → pre-branch code). Run from the main checkout

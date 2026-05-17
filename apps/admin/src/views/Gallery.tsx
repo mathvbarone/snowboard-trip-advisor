@@ -434,8 +434,19 @@ function FeedbackStatusFamily(): JSX.Element {
 // the section for the inline ones — see gallery-smoke.md generalizable
 // rule). Forced-open handling per component:
 //
-//  - Modal     — controlled, seeded `open` so `.sta-modal` (+ overlay +
-//                title) mounts through the Radix Dialog portal (PORTALLED).
+//  - Modal     — CANNOT be seeded open declaratively here. The design-system
+//                `Modal` wraps a Radix Dialog with the default `modal=true`,
+//                which applies `aria-hidden="true"` to EVERY sibling of the
+//                dialog portal — i.e. the entire gallery page — for as long
+//                as it is open, destroying the gallery's own accessibility
+//                tree (true in real browsers too). `Modal` exposes no
+//                `modal={false}` escape hatch (unlike Drawer's deliberately
+//                non-modal exemplar) and Modal.tsx is frozen. So the
+//                exemplar renders only its trigger (a closed Modal with an
+//                open button); the `.sta-modal` root (+ overlay + title) is
+//                verified by INTERACTION in the smoke — the controller
+//                clicks the trigger, THEN measures `.sta-modal` (PORTALLED).
+//                Mirrors the Tooltip interaction handling below.
 //  - Popover   — controlled, seeded `open` so `.sta-popover` mounts. It is
 //                NOT portalled (FocusScope + DismissableLayer render it
 //                in-tree), so its root is a descendant of this section; the
@@ -499,10 +510,12 @@ function DropdownMenuExemplar(): JSX.Element {
 }
 
 function OverlaysFamily(): JSX.Element {
-  // Modal + Popover are controlled, seeded open so their styled roots are
-  // mounted for the smoke (mirrors the Drawer seeded-open precedent). Tabs
-  // is controlled with the second tab seeded selected.
-  const [modalOpen, setModalOpen] = useState<boolean>(true)
+  // Popover is controlled, seeded open so its styled root is mounted for the
+  // smoke (it is non-modal — FocusScope-only, no aria-hidden trap — so
+  // seeding it open is safe). Tabs is controlled with the second tab seeded
+  // selected. Modal is NOT seeded open (see OverlaysFamily comment): it is
+  // rendered closed with an open trigger and verified by interaction.
+  const [modalOpen, setModalOpen] = useState<boolean>(false)
   const [popoverOpen, setPopoverOpen] = useState<boolean>(true)
   const [tab, setTab] = useState<string>('two')
 
@@ -510,8 +523,28 @@ function OverlaysFamily(): JSX.Element {
     <>
       <section data-gallery-component="Modal">
         <h2>Modal</h2>
+        {/*
+          The design-system Modal wraps a Radix Dialog with the default
+          `modal=true`, which sets `aria-hidden="true"` on every sibling of
+          the dialog portal (the whole gallery page) while open. Seeding it
+          open would destroy the gallery's accessibility tree, and Modal
+          exposes no `modal={false}` escape hatch. So the exemplar renders
+          the trigger only (a closed Modal + an open button); the
+          `.sta-modal` bubble + overlay + title are verified by interaction
+          in the smoke (the controller clicks this trigger, then measures
+          `.sta-modal`). Mirrors the Tooltip handling below. See
+          OverlaysFamily comment + gallery-smoke.md.
+        */}
+        <Button
+          variant="secondary"
+          onClick={(): void => {
+            setModalOpen(true)
+          }}
+        >
+          Open modal
+        </Button>
         <Modal open={modalOpen} onOpenChange={setModalOpen} title="Modal exemplar">
-          <p>Token-styled Modal body — seeded open for the cascade smoke.</p>
+          <p>Token-styled Modal body — opened by interaction for the smoke.</p>
         </Modal>
       </section>
 
