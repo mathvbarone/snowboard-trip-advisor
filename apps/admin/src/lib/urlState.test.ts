@@ -138,6 +138,15 @@ describe('parseURL — publishes route', () => {
   })
 })
 
+describe('parseURL — gallery route (S1.0 dev-only surface)', () => {
+  it('parses ?route=gallery as { route: "gallery" }', (): void => {
+    expect(parseURL('?route=gallery')).toEqual({ route: 'gallery' })
+  })
+  it('drops extra unknown keys on the gallery route', (): void => {
+    expect(parseURL('?route=gallery&foo=bar')).toEqual({ route: 'gallery' })
+  })
+})
+
 describe('serializeURL', () => {
   it('serializes dashboard route as empty (default omitted)', (): void => {
     expect(serializeURL({ route: 'dashboard' })).toBe('')
@@ -166,6 +175,9 @@ describe('serializeURL', () => {
   it('serializes publishes with page=2 as ?route=publishes&page=2', (): void => {
     expect(serializeURL({ route: 'publishes', page: 2 })).toBe('?route=publishes&page=2')
   })
+  it('serializes gallery as ?route=gallery (S1.0 dev-only surface)', (): void => {
+    expect(serializeURL({ route: 'gallery' })).toBe('?route=gallery')
+  })
   it('drops default-0 page on serialize (?route=publishes)', (): void => {
     // Mirrors the "defaults are omitted" header comment — round-trip-stable for
     // the canonical { route: 'publishes' } shape.
@@ -191,6 +203,7 @@ describe('round-trip parseURL ∘ serializeURL', () => {
     ['editor', { route: 'editor', slug: ResortSlug.parse('kotelnica-bialczanska') }],
     ['publishes (no page)', { route: 'publishes' }],
     ['publishes (page=2)', { route: 'publishes', page: 2 }],
+    ['gallery', { route: 'gallery' }],
   ]
 
   for (const [label, input] of cases) {

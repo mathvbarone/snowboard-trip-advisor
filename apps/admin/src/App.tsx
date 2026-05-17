@@ -2,6 +2,7 @@ import type { JSX } from 'react'
 
 import { useURLState } from './state/useURLState'
 import { Dashboard } from './views/Dashboard'
+import { Gallery } from './views/Gallery'
 import { PublishHistory } from './views/PublishHistory'
 import { ResortEditor } from './views/ResortEditor'
 import { ResortsTable } from './views/ResortsTable'
@@ -20,6 +21,7 @@ export default function App(): JSX.Element {
       {route.route === 'resorts' ? <ResortsTable /> : null}
       {route.route === 'editor' ? <ResortEditor slug={route.slug} /> : null}
       {route.route === 'publishes' ? <PublishHistory /> : null}
+      {route.route === 'gallery' ? <Gallery /> : null}
     </Shell>
   )
 }
