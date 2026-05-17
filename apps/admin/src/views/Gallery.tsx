@@ -23,26 +23,35 @@ import {
   Card,
   Chip,
   Drawer,
+  DropdownMenu,
   EmptyStateLayout,
   ExternalLink,
   FieldValueRenderer,
   HeaderBar,
   IconButton,
   Input,
+  Modal,
   Pill,
+  Popover,
   Select,
   Shell,
   Sidebar,
   Skeleton,
   SourceBadge,
   StatusPill,
+  Tab,
+  TabList,
+  TabPanel,
   Table,
+  Tabs,
   Textarea,
   ToggleButtonGroup,
+  Tooltip,
   useToast,
+  type DropdownMenuItem,
 } from '@snowboard-trip-advisor/design-system'
 import { ISODateTimeString } from '@snowboard-trip-advisor/schema'
-import { useEffect, useState, type JSX } from 'react'
+import { useEffect, useRef, useState, type JSX } from 'react'
 
 // Static exemplar data for the Table primitive. Kept inline (no domain
 // vocabulary in the design-system primitive — the consumer owns wording).
@@ -418,6 +427,142 @@ function FeedbackStatusFamily(): JSX.Element {
   )
 }
 
+// S1d overlays/primitives family. Each component is rendered once per route
+// (one-exemplar-per-component invariant from gallery-smoke.md) inside its
+// own `data-gallery-component` anchor. The smoke targets each component's
+// own `.sta-<name>` root (off `document` for the portalled ones, scoped to
+// the section for the inline ones — see gallery-smoke.md generalizable
+// rule). Forced-open handling per component:
+//
+//  - Modal     — controlled, seeded `open` so `.sta-modal` (+ overlay +
+//                title) mounts through the Radix Dialog portal (PORTALLED).
+//  - Popover   — controlled, seeded `open` so `.sta-popover` mounts. It is
+//                NOT portalled (FocusScope + DismissableLayer render it
+//                in-tree), so its root is a descendant of this section; the
+//                generalizable smoke rule (query `.sta-popover` off
+//                `document`, exactly one instance) still resolves it.
+//  - Tabs      — INLINE. Rendered controlled with the second tab seeded
+//                selected so `.sta-tabs__tab[aria-selected="true"]` AND a
+//                `.sta-tabs__panel` are both in the DOM without a click.
+//  - Tooltip   — CANNOT be forced open declaratively: the design-system
+//                `Tooltip` exposes only `content`/`children`/`delayDuration`
+//                and wraps an UNCONTROLLED Radix Tooltip.Root (no
+//                `open`/`defaultOpen` prop to forward). It opens only on
+//                trigger focus/hover. So the exemplar renders the trigger
+//                only; the `.sta-tooltip` bubble + `.sta-tooltip__arrow`
+//                are verified by INTERACTION in the smoke (the controller
+//                hovers/focuses the trigger, then measures `.sta-tooltip`).
+//                Documented here + in the PR report.
+//  - DropdownMenu — its `open` is INTERNAL state (`useState(false)`); the
+//                design-system component exposes no controlled-open /
+//                `defaultOpen` prop. We therefore drive it open on mount by
+//                programmatically clicking its own trigger via a ref +
+//                effect (mirrors ToastExemplar's on-mount side-effect
+//                precedent), so `.sta-dropdown-menu__menu` + ≥2
+//                `.sta-dropdown-menu__item` (with :hover/:focus-visible
+//                styling) are in the DOM for the smoke without a manual
+//                click. It renders INLINE (no portal).
+// Reuse the shared module-level `noop` for the inert item handlers (the
+// smoke never selects a menu item). Inline closures here would be
+// uncovered functions — the gallery's one-shared-noop convention (see the
+// `noop` comment above) keeps function coverage at 100%.
+const DROPDOWN_ITEMS: ReadonlyArray<DropdownMenuItem> = [
+  { label: 'Sources', onSelect: noop },
+  { label: 'Integrations', onSelect: noop },
+] as const
+
+// DropdownMenu has no controlled-open / defaultOpen prop (open is internal
+// useState). Click its trigger once on mount so the menu panel + items are
+// rendered for the smoke. The ref targets the trigger <button> the
+// component clones from our <Button>; a single mount-time click opens it.
+function DropdownMenuExemplar(): JSX.Element {
+  const wrapperRef = useRef<HTMLDivElement | null>(null)
+  useEffect((): void => {
+    // The cloned trigger is the first <button> inside `.sta-dropdown-menu`.
+    // Click it once on mount to open the menu (optional-chained: the ref is
+    // always populated before effects run and DropdownMenu always renders
+    // the cloned trigger, so the call is taken — `?.` only avoids an
+    // explicit unreachable null-branch, keeping branch coverage at 100%).
+    wrapperRef.current
+      ?.querySelector<HTMLButtonElement>('.sta-dropdown-menu > button')
+      ?.click()
+  }, [])
+  return (
+    <div ref={wrapperRef}>
+      <DropdownMenu
+        trigger={<Button variant="secondary">Account</Button>}
+        label="Account menu"
+        items={DROPDOWN_ITEMS}
+      />
+    </div>
+  )
+}
+
+function OverlaysFamily(): JSX.Element {
+  // Modal + Popover are controlled, seeded open so their styled roots are
+  // mounted for the smoke (mirrors the Drawer seeded-open precedent). Tabs
+  // is controlled with the second tab seeded selected.
+  const [modalOpen, setModalOpen] = useState<boolean>(true)
+  const [popoverOpen, setPopoverOpen] = useState<boolean>(true)
+  const [tab, setTab] = useState<string>('two')
+
+  return (
+    <>
+      <section data-gallery-component="Modal">
+        <h2>Modal</h2>
+        <Modal open={modalOpen} onOpenChange={setModalOpen} title="Modal exemplar">
+          <p>Token-styled Modal body — seeded open for the cascade smoke.</p>
+        </Modal>
+      </section>
+
+      <section data-gallery-component="Popover">
+        <h2>Popover</h2>
+        <Popover
+          open={popoverOpen}
+          onOpenChange={setPopoverOpen}
+          label="Popover exemplar"
+        >
+          <p>Token-styled Popover body — seeded open for the cascade smoke.</p>
+        </Popover>
+      </section>
+
+      <section data-gallery-component="Tabs">
+        <h2>Tabs</h2>
+        <Tabs value={tab} onValueChange={setTab} label="Tabs exemplar">
+          <TabList>
+            <Tab value="one">First</Tab>
+            <Tab value="two">Second</Tab>
+          </TabList>
+          <TabPanel value="one">First panel content.</TabPanel>
+          <TabPanel value="two">
+            Second panel content — this tab is seeded selected.
+          </TabPanel>
+        </Tabs>
+      </section>
+
+      <section data-gallery-component="Tooltip">
+        <h2>Tooltip</h2>
+        {/*
+          The design-system Tooltip wraps an UNCONTROLLED Radix
+          Tooltip.Root and exposes no open/defaultOpen prop, so it cannot
+          be forced open declaratively. The `.sta-tooltip` bubble +
+          `.sta-tooltip__arrow` are verified by interaction in the smoke
+          (the controller hovers/focuses this trigger, then measures
+          `.sta-tooltip`). See OverlaysFamily comment + the PR report.
+        */}
+        <Tooltip content="Token-styled tooltip exemplar">
+          <Button variant="secondary">Hover or focus me</Button>
+        </Tooltip>
+      </section>
+
+      <section data-gallery-component="DropdownMenu">
+        <h2>DropdownMenu</h2>
+        <DropdownMenuExemplar />
+      </section>
+    </>
+  )
+}
+
 export function Gallery(): JSX.Element {
   // Drawer is a controlled primitive; seed it open so the smoke can inspect
   // its portalled panel. It mounts non-modal (clicks behind still work).
@@ -483,7 +628,7 @@ export function Gallery(): JSX.Element {
         <FeedbackStatusFamily />
       </section>
       <section data-gallery-family="S1d-overlays">
-        {/* TODO: filled by later S1 PR */}
+        <OverlaysFamily />
       </section>
     </section>
   )

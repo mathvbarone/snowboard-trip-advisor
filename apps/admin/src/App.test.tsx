@@ -79,8 +79,17 @@ describe('App (PR 4.1b §2.4 — Shell composition)', (): void => {
     stubMatchMedia()
     window.history.replaceState({}, '', '/?route=gallery')
     render(<App />)
+    // The gallery's S1d OverlaysFamily mounts a seeded-open Modal; Radix
+    // Dialog (modal=true) sets aria-hidden on every sibling of the dialog
+    // (documented modal trap — true in real browsers too), so the page
+    // heading is hidden from the a11y tree while the modal is open. The
+    // node is still in the DOM, so assert presence with `hidden: true`
+    // (mirrors Gallery.test.tsx's same-cause adaptation).
     expect(
-      screen.getByRole('heading', { name: /component gallery/i }),
+      screen.getByRole('heading', {
+        name: /component gallery/i,
+        hidden: true,
+      }),
     ).toBeInTheDocument()
     window.history.replaceState({}, '', '/') // reset URL — match the file's other route tests so the route doesn't leak into later tests
     vi.unstubAllGlobals()
