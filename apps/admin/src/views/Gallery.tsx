@@ -21,8 +21,11 @@
 import {
   Button,
   Card,
+  Chip,
   Drawer,
   EmptyStateLayout,
+  ExternalLink,
+  FieldValueRenderer,
   HeaderBar,
   IconButton,
   Input,
@@ -38,6 +41,7 @@ import {
   ToggleButtonGroup,
   useToast,
 } from '@snowboard-trip-advisor/design-system'
+import { ISODateTimeString } from '@snowboard-trip-advisor/schema'
 import { useEffect, useState, type JSX } from 'react'
 
 // Static exemplar data for the Table primitive. Kept inline (no domain
@@ -312,12 +316,45 @@ function SurfacesFamily(): JSX.Element {
 // SourceKey set is opensnow/snowforecast/resort-feed/booking/airbnb/manual);
 // Skeleton in all THREE variants (line/block/card).
 //
-// This is PR S1c-1 (4 components). PR S1c-2 ADDS Chip, FieldValueRenderer
-// and ExternalLink to THIS SAME family component at the marked insertion
-// point below, so its 3 components share the one
-// `data-gallery-family="S1c-feedback-status"` section without disrupting
-// these 4 anchors.
+// S1c-1 shipped the first 4 (Pill/StatusPill/SourceBadge/Skeleton); S1c-2
+// ADDED Chip (a seeded-pressed controlled toggle + a disabled example),
+// FieldValueRenderer (one exemplar per data-state — fresh/stale/
+// never_fetched, the never_fetched one carrying a missingTooltip so its
+// `.sta-field-value__missing` trigger renders) and ExternalLink (both
+// inline AND button variants). All 7 share the one
+// `data-gallery-family="S1c-feedback-status"` section, each in its own
+// `data-gallery-component` anchor (one-exemplar-per-component invariant).
+// FieldValueRenderer needs a typed FieldValue<number> for each of its three
+// states. Kept inline (no domain vocabulary baked into a design-system
+// primitive — the consumer owns wording, S1.0 precedent). One exemplar per
+// state covers the data-state fresh/stale/never_fetched contract hooks; the
+// never_fetched one carries a missingTooltip so the `.sta-field-value__
+// missing` trigger part renders too.
+// `observed_at` is the branded ISODateTimeString — build it through the
+// schema constructor (the apps/** ESLint rule bans `as ISODateTimeString`
+// casts; mirrors FieldValueRenderer.test.tsx's fixture convention).
+const FIELD_FRESH = {
+  state: 'fresh',
+  value: 120,
+  source: 'opensnow',
+  observed_at: ISODateTimeString.parse('2026-05-17T08:00:00Z'),
+} as const
+const FIELD_STALE = {
+  state: 'stale',
+  value: 95,
+  source: 'snowforecast',
+  observed_at: ISODateTimeString.parse('2026-05-05T08:00:00Z'),
+  age_days: 12,
+} as const
+const FIELD_NEVER = { state: 'never_fetched' } as const
+
 function FeedbackStatusFamily(): JSX.Element {
+  // The Chip exemplar is controlled so the live gallery toggle stays
+  // interactive (mirrors FormControlsFamily's controlled-state precedent);
+  // it is seeded pressed so the `[aria-pressed="true"]` on-state renders for
+  // the smoke without a click. The disabled Chip reuses the shared `noop`.
+  const [chipOn, setChipOn] = useState<boolean>(true)
+
   return (
     <>
       <section data-gallery-component="Pill">
@@ -347,7 +384,36 @@ function FeedbackStatusFamily(): JSX.Element {
         <Skeleton variant="card" />
       </section>
 
-      {/* S1c-2 adds: Chip, FieldValueRenderer, ExternalLink here */}
+      <section data-gallery-component="Chip">
+        <h2>Chip</h2>
+        <Chip pressed={chipOn} onToggle={setChipOn}>
+          Toggleable chip (seeded pressed)
+        </Chip>
+        <Chip pressed={false} disabled onToggle={noop}>
+          Disabled
+        </Chip>
+      </section>
+
+      <section data-gallery-component="FieldValueRenderer">
+        <h2>FieldValueRenderer</h2>
+        <FieldValueRenderer field={FIELD_FRESH} formatter="number" unit="cm" />
+        <FieldValueRenderer field={FIELD_STALE} formatter="number" unit="cm" />
+        <FieldValueRenderer
+          field={FIELD_NEVER}
+          formatter="number"
+          missingTooltip="No snow-depth reading has been fetched yet."
+        />
+      </section>
+
+      <section data-gallery-component="ExternalLink">
+        <h2>ExternalLink</h2>
+        <ExternalLink href="https://opensnow.com" variant="inline">
+          Inline external link
+        </ExternalLink>
+        <ExternalLink href="https://opensnow.com" variant="button">
+          Button-styled external link
+        </ExternalLink>
+      </section>
     </>
   )
 }
