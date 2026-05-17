@@ -40,6 +40,8 @@ export default defineConfig({
         'src/state/useResortDetail.hmr.ts',
         // PR N.c1: same HMR dead-code pattern for useAnalystNotes.hmr.ts.
         'src/state/useAnalystNotes.hmr.ts',
+        // PR N.c2: same HMR dead-code pattern for useAnalystNoteDraft.hmr.ts.
+        'src/state/useAnalystNoteDraft.hmr.ts',
       ],
       reporter: ['text', 'lcov'],
     },
