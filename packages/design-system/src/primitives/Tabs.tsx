@@ -1,3 +1,5 @@
+import './Tabs.css'
+
 import {
   createContext,
   useCallback,
