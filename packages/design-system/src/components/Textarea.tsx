@@ -25,10 +25,14 @@ import {
 // expand).
 //
 // Tab interception: a bare <textarea> moves focus on Tab, which makes it
-// impossible to indent markdown. We `preventDefault()` and instead splice two
-// spaces in at the caret (or over the current selection), surfacing the new
-// value through `onChange` so the controlled-value contract is preserved.
-// Focus deliberately stays on the textarea.
+// impossible to indent markdown. When the field is editable we
+// `preventDefault()` and instead splice two spaces in at the caret (or over
+// the current selection), surfacing the new value through `onChange` so the
+// controlled-value contract is preserved; focus deliberately stays on the
+// textarea. The splice is gated on the field being editable: a `readOnly` or
+// `disabled` Textarea must never mutate state and must stay tabbable-through,
+// so Tab falls through to native focus-move (no preventDefault) even when an
+// `onChange` is still wired (the standard controlled read-only pattern).
 
 const TAB_INDENT = '  '
 
@@ -41,10 +45,11 @@ export interface TextareaProps {
   readOnly?: boolean
   onFocus?: (event: FocusEvent<HTMLTextAreaElement>) => void
   onBlur?: (event: FocusEvent<HTMLTextAreaElement>) => void
-  // Composed AFTER the built-in Tab-indent handler. The consumer's handler
-  // still runs for Tab unless the built-in called preventDefault (it does),
-  // so consumers should branch on `e.key` and ignore Tab — the analyst-note
-  // view binds mod+enter / mod+backspace / Escape here.
+  // Composed AFTER the built-in Tab-indent handler. The built-in calls
+  // preventDefault for Tab only when the field is editable; consumers should
+  // branch on `e.key` and ignore Tab (it is either spliced as indent or
+  // intentionally left to native focus-move when readOnly/disabled) — the
+  // analyst-note view binds mod+enter / mod+backspace / Escape here.
   onKeyDown?: (event: KeyboardEvent<HTMLTextAreaElement>) => void
 }
 
@@ -70,7 +75,12 @@ function TextareaImpl(
         }
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>): void => {
-    if (e.key === 'Tab' && onChange !== undefined) {
+    if (
+      e.key === 'Tab' &&
+      onChange !== undefined &&
+      readOnly !== true &&
+      disabled !== true
+    ) {
       // Indent instead of moving focus. Splice TAB_INDENT over the current
       // selection (a collapsed selection = plain caret insert).
       e.preventDefault()

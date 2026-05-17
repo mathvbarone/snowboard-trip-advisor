@@ -119,6 +119,50 @@ describe('Textarea', (): void => {
     expect(onChange).toHaveBeenCalledWith('a  d')
   })
 
+  it('readOnly Textarea + onChange: Tab does NOT mutate value and moves focus natively', async (): Promise<void> => {
+    const onChange = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <>
+        <Textarea
+          aria-label="note source"
+          value="ab"
+          onChange={onChange}
+          readOnly
+        />
+        <button type="button">after</button>
+      </>,
+    )
+    const el = screen.getByLabelText<HTMLTextAreaElement>('note source')
+    el.focus()
+    el.setSelectionRange(1, 1)
+    await user.keyboard('{Tab}')
+    // readOnly: the Tab-indent splice must NOT run even though onChange is set.
+    expect(onChange).not.toHaveBeenCalled()
+    // No preventDefault → native Tab moved focus off the textarea.
+    expect(el).not.toHaveFocus()
+    expect(screen.getByRole('button', { name: 'after' })).toHaveFocus()
+  })
+
+  it('disabled Textarea + onChange: Tab does NOT mutate value', async (): Promise<void> => {
+    const onChange = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <Textarea
+        aria-label="note source"
+        value="ab"
+        onChange={onChange}
+        disabled
+      />,
+    )
+    const el = screen.getByLabelText<HTMLTextAreaElement>('note source')
+    expect(el).toBeDisabled()
+    el.focus()
+    el.setSelectionRange(1, 1)
+    await user.keyboard('{Tab}')
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
   it('fires onFocus and onBlur', async (): Promise<void> => {
     const onFocus = vi.fn()
     const onBlur = vi.fn()
