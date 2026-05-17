@@ -9,8 +9,8 @@ import { useState, type JSX, type ReactNode } from 'react'
 
 import { useShortcuts } from '../lib/shortcuts'
 import { useResponsiveTabOrder } from '../lib/useResponsiveTabOrder'
+import { flushAllForSlug } from '../state/flushAll'
 import { setRoute, useURLState } from '../state/useURLState'
-import { flushNow } from '../state/useWorkspaceState'
 
 import { PublishDialog } from './PublishDialog'
 import { RESPONSIVE_CSS } from './Shell.responsive.css'
@@ -27,7 +27,8 @@ import { RESPONSIVE_CSS } from './Shell.responsive.css'
 //     deferred to Phase 2 when search functionality lands per Decision B1).
 //     `g i` surfaces the Toast "Integrations management isn't available yet."
 //     per Decision G3. `mod+enter` and `Escape` are no-op callbacks in Phase 1
-//     (mod+enter wires to flushNow in PR 4.6c per Decision G2; Radix Dialog
+//     (mod+enter wired to flushNow in PR 4.6c per Decision G2, then
+//     re-pointed to flushAllForSlug in PR N.c3 per spec §5.4; Radix Dialog
 //     handles modal Escape internally per Decision G1).
 //   - <style>{RESPONSIVE_CSS}</style> overlay (hides .app-shell__brand and
 //     tightens .app-shell__header padding below md per Decision H1).
@@ -77,16 +78,25 @@ function ShellInterior({ children }: { readonly children: ReactNode }): JSX.Elem
         message: "Integrations management isn't available yet.",
       })
     },
-    // PR 4.6c Decision K1: mod+enter on the editor route triggers an
-    // immediate save via `flushNow(slug)` — bypasses the 500ms debounce
-    // window so the autosave PUT fires the instant the user presses the
-    // shortcut. Off-route stays a no-op (no slug to flush against). The
-    // useShortcuts handlers-ref pattern (Decision F5 at lib/shortcuts.ts:66)
-    // pins the closure on every render, so the latest `route` is always
-    // visible — same Shell mount handles transitions correctly.
+    // PR N.c3 (spec §5.4): mod+enter on the editor route triggers an
+    // immediate save via `flushAllForSlug(route.slug)` — this drives EVERY
+    // slug-level SlugStore registered into the flushAll.ts registry
+    // (useWorkspaceState + useAnalystNoteDraft), each of which clears its
+    // pending debounce timer and flushes, instead of addressing
+    // useWorkspaceState's flushNow directly (PR 4.6c Decision K1's original
+    // wiring). Off-route stays a no-op (no slug to flush against). React 19
+    // auto-batches the resulting prepopulates within one tick — single
+    // re-render even if N flushers complete in the same tick. `void` because
+    // flushAllForSlug returns a Promise we intentionally don't await here
+    // (the keyboard shortcut kicks off the PUTs; it does not block on them);
+    // rejection-propagation is flushAll.ts's contract — a future error-toast
+    // surface wraps this caller. The useShortcuts handlers-ref pattern
+    // (Decision F5 at lib/shortcuts.ts:66) pins the closure on every render,
+    // so the latest `route` is always visible — same Shell mount handles
+    // transitions correctly.
     onModEnter: (): void => {
       if (route.route === 'editor') {
-        flushNow(route.slug)
+        void flushAllForSlug(route.slug)
       }
     },
     // Phase 1 no-op per Tier 5 plan Decision G1: Radix Dialog handles modal

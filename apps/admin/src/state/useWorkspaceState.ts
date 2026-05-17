@@ -9,8 +9,10 @@ import { useCallback, useSyncExternalStore } from 'react'
 
 import { apiClient } from '../lib/apiClient'
 
+import { registerSlugFlusher } from './flushAll'
 import { prepopulateResortDetail, useResortDetail } from './useResortDetail'
 import { useURLState } from './useURLState'
+import { registerHmrDisposer } from './useWorkspaceState.hmr'
 
 // Per ResortUpsertBody's manual-only constraint (api/resortUpsert.ts:40-43):
 // PUT bodies may only carry FieldSource entries with `source: 'manual'`.
@@ -72,6 +74,17 @@ interface SlugStore {
 
 const storesBySlug = new Map<ResortSlug, SlugStore>()
 
+// Every dispose handle returned by registerSlugFlusher for THIS module
+// generation (PR N.c3). flushAll.ts has no HMR handling, so on a hot-reload
+// its registry survives while this module's storesBySlug is re-initialized to
+// a fresh empty Map — the old generation's flushers would leak and re-fire
+// (spec §5.4). __disposeRegisteredFlushersForHmr() (invoked by the sibling
+// .hmr.ts latch when the next generation evaluates) removes exactly this
+// generation's registrations. Never invoked on component unmount — spec §5.4
+// mandates deregistration ONLY from the .hmr.ts cleanup. Mirrors the N.c2
+// useAnalystNoteDraft.ts pattern exactly.
+const registeredFlusherDisposers = new Set<() => void>()
+
 function emptyState(): StoreState {
   return { draft: { editor_modes: {} }, status: {}, rev: 0 }
 }
@@ -91,6 +104,26 @@ function getOrCreateStore(slug: ResortSlug): SlugStore {
       subscribers: new Set(),
     }
     storesBySlug.set(slug, store)
+    // Spec §5.4 / PR N.c3: registration sits on the SlugStore, registered
+    // lazily on first read for that slug. The flusher clears the pending
+    // debounce timer and runs the same `flush(slug)` machinery the public
+    // `flushNow(slug)` uses, returning its Promise<void> so flushAllForSlug's
+    // Promise.all awaits the PUT round-trip. The dispose handle is collected
+    // (NOT discarded) so the sibling .hmr.ts latch can remove this
+    // generation's registrations when the next generation evaluates;
+    // flushAll.ts has no HMR handling of its own. The closure captures
+    // `store` directly so timer-clearing targets this store for its whole
+    // lifetime (mirrors N.c2's useAnalystNoteDraft.ts captured-store flusher).
+    const flushStore = store
+    registeredFlusherDisposers.add(
+      registerSlugFlusher(slug, (): Promise<void> => {
+        if (flushStore.timer !== null) {
+          clearTimeout(flushStore.timer)
+          flushStore.timer = null
+        }
+        return flush(slug)
+      }),
+    )
   }
   return store
 }
@@ -705,6 +738,28 @@ export function useWorkspaceState(): WorkspaceStateHandle {
     clearFieldValue: (path: MetricPath): void => { clearFieldValue(slug, path) },
   }
 }
+
+// Dispose every flushAll.ts registration this module generation made and
+// clear the collection (PR N.c3). Invoked by the sibling
+// useWorkspaceState.hmr.ts latch when the NEXT module generation evaluates on
+// a Vite hot-reload (spec §5.4 — deregistration only from the .hmr.ts
+// cleanup). Plain, exported, unit-tested code: the only irreducible
+// `import.meta.hot.*` wiring lives in the coverage-excluded .hmr.ts. Named
+// `*ForHmr` (not `*ForTests`) because it is real production cleanup, not a
+// test affordance. Mirrors N.c2's useAnalystNoteDraft.ts exactly.
+export function __disposeRegisteredFlushersForHmr(): void {
+  for (const dispose of registeredFlusherDisposers) { dispose() }
+  registeredFlusherDisposers.clear()
+}
+
+// Latch this generation's disposer with the sibling .hmr.ts. On every Vite
+// hot-reload of this file the new module body re-runs this call; the .hmr.ts
+// latch invokes the PREVIOUS generation's disposer first (clearing the old,
+// now-stale flushAll.ts registrations) then latches this generation's. The
+// .hmr.ts module does not re-evaluate on reload, so its latch state persists
+// across generations. Import direction is .ts → .hmr only (no Codex
+// round-8 P2-12 cycle).
+registerHmrDisposer(__disposeRegisteredFlushersForHmr)
 
 export function __resetForTests(): void {
   for (const store of storesBySlug.values()) {

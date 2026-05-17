@@ -5,8 +5,8 @@ import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import * as flushAllModule from '../state/flushAll'
 import { setRoute, __resetForTests as resetURLState } from '../state/useURLState'
-import * as workspaceStateModule from '../state/useWorkspaceState'
 
 import { Shell } from './Shell'
 import { RESPONSIVE_CSS } from './Shell.responsive.css'
@@ -146,32 +146,38 @@ describe('Shell — composition smoke (mounts ToastProvider + useShortcuts)', ()
     expect(screen.getByRole('banner')).toBeInTheDocument()
   })
 
-  it('mod+enter is route-aware (PR 4.6c Decision K1): off-route is a no-op; on-route calls flushNow(slug) — same Shell mount through setRoute', async (): Promise<void> => {
+  it('mod+enter is route-aware (PR N.c3): off-route is a no-op; on-route calls flushAllForSlug(slug) — same Shell mount through setRoute', async (): Promise<void> => {
     // The Shell mounts once and stays mounted through the setRoute
     // transition; the route-aware onModEnter closure must read the LATEST
     // route via the useShortcuts handlers-ref pin (lib/shortcuts.ts:66
     // Decision F5). If a future refactor adds a stale dependency array on
     // the document-level keydown listener, this test catches the
-    // regression: the first mod+enter (off-route) wouldn't fire flushNow,
-    // but the second mod+enter (post-setRoute) MUST call flushNow(slug).
-    const flushNowSpy = vi.spyOn(workspaceStateModule, 'flushNow').mockImplementation((): void => {})
+    // regression: the first mod+enter (off-route) wouldn't fire
+    // flushAllForSlug, but the second mod+enter (post-setRoute) MUST call
+    // flushAllForSlug(slug). PR N.c3 switched onModEnter from the direct
+    // useWorkspaceState.flushNow(slug) to void flushAllForSlug(route.slug)
+    // so EVERY slug-level SlugStore registered into the flushAll.ts registry
+    // (useWorkspaceState + useAnalystNoteDraft) flushes on the shortcut.
+    const flushAllSpy = vi
+      .spyOn(flushAllModule, 'flushAllForSlug')
+      .mockResolvedValue(undefined)
     const user = userEvent.setup()
     render(<Shell><div /></Shell>)
 
-    // Off-route (dashboard) — mod+enter must NOT call flushNow.
+    // Off-route (dashboard) — mod+enter must NOT call flushAllForSlug.
     await user.keyboard('{Meta>}{Enter}{/Meta}')
-    expect(flushNowSpy).not.toHaveBeenCalled()
+    expect(flushAllSpy).not.toHaveBeenCalled()
 
     // Navigate to the editor route via setRoute (same Shell mount).
     const slug = ResortSlug.parse('kotelnica-bialczanska')
     act((): void => { setRoute({ route: 'editor', slug }) })
 
-    // On-route — mod+enter MUST call flushNow with the route's slug.
+    // On-route — mod+enter MUST call flushAllForSlug with the route's slug.
     await user.keyboard('{Meta>}{Enter}{/Meta}')
-    expect(flushNowSpy).toHaveBeenCalledTimes(1)
-    expect(flushNowSpy).toHaveBeenCalledWith(slug)
+    expect(flushAllSpy).toHaveBeenCalledTimes(1)
+    expect(flushAllSpy).toHaveBeenCalledWith(slug)
 
-    flushNowSpy.mockRestore()
+    flushAllSpy.mockRestore()
     resetURLState()
   })
 })

@@ -10,12 +10,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { apiClient } from '../lib/apiClient'
 
 import {
+  __resetForTests as resetFlushAll,
+  flushAllForSlug,
+} from './flushAll'
+import {
   __resetForTests as resetResortDetail,
   prepopulateResortDetail,
   useResortDetail,
 } from './useResortDetail'
 import { __resetForTests as resetURLState } from './useURLState'
 import {
+  __disposeRegisteredFlushersForHmr,
   __resetForTests as resetWorkspaceState,
   diffSide,
   flushNow as workspaceFlushNow,
@@ -23,6 +28,7 @@ import {
   setFieldValue as workspaceSetFieldValue,
   useWorkspaceState,
 } from './useWorkspaceState'
+import { registerHmrDisposer } from './useWorkspaceState.hmr'
 
 // PR 4.4d Task 2 — useWorkspaceState tests.
 // Per Decision E1+ + Codex rounds 1/2/4-7/16/18: module-scoped per-slug
@@ -112,6 +118,7 @@ beforeEach((): void => {
   resetURLState()
   resetWorkspaceState()
   resetResortDetail()
+  resetFlushAll()
   setURL('kotelnica-bialczanska')
 })
 
@@ -121,6 +128,7 @@ afterEach((): void => {
   resetWorkspaceState()
   resetResortDetail()
   resetURLState()
+  resetFlushAll()
 })
 
 describe('useWorkspaceState — debounce + diff PUT (PR 4.4d Task 2)', (): void => {
@@ -1416,5 +1424,158 @@ describe('useWorkspaceState — K1 in-flight-clear race fix + flushNow + abort g
     // into the next test (the AbortError handler must no-op when
     // storesBySlug.get(slug) !== store because the store has been cleared).
     await drainMicrotasks()
+  })
+})
+
+// PR N.c3 — flushAll refactor (spec §5.4). The slug-level SlugStore
+// registers a single flushAll(): Promise<void> into the flushAll.ts registry
+// the first time the store is created for a slug (lazily, in
+// getOrCreateStore). Shell's mod+enter calls flushAllForSlug(route.slug)
+// instead of the direct flushNow(slug). Because useWorkspaceState now writes
+// into the persistent flushAll.ts registry (which has NO HMR handling), the
+// N.c2 .hmr.ts cross-generation disposer pattern is replicated here so a
+// hot-reload doesn't leak a stale flusher.
+describe('useWorkspaceState — flushAll on the SlugStore (spec §5.4, PR N.c3)', (): void => {
+  it('registers a flusher with flushAllForSlug on first read for a slug', async (): Promise<void> => {
+    prepopulateResortDetail(KOTELNICA, syntheticResponse('kotelnica-bialczanska'))
+    const spy = vi
+      .spyOn(apiClient, 'upsertResort')
+      .mockResolvedValue(syntheticResponse('kotelnica-bialczanska'))
+
+    // First read for the slug creates the SlugStore → lazily registers the
+    // flusher into the global flushAll.ts registry.
+    const { result } = renderHook(() => useWorkspaceState())
+
+    // A dirty field with an armed debounce timer; flushAllForSlug must drive
+    // the registered flusher (clears the timer, runs flush(slug) → PUT).
+    act((): void => { result.current.setFieldValue('slopes_km', 150) })
+    expect(spy).not.toHaveBeenCalled()
+
+    await act(async (): Promise<void> => { await flushAllForSlug(KOTELNICA) })
+    await drainMicrotasks()
+    expect(spy).toHaveBeenCalledTimes(1)
+  })
+
+  it('flushAllForSlug drives the registered flusher even after the component unmounted', async (): Promise<void> => {
+    prepopulateResortDetail(KOTELNICA, syntheticResponse('kotelnica-bialczanska'))
+    const spy = vi
+      .spyOn(apiClient, 'upsertResort')
+      .mockResolvedValue(syntheticResponse('kotelnica-bialczanska'))
+    const { result, unmount } = renderHook(() => useWorkspaceState())
+
+    act((): void => { result.current.setFieldValue('slopes_km', 150) }) // timer armed
+    unmount() // unmount BEFORE debounce
+    expect(spy).not.toHaveBeenCalled()
+
+    // SlugStore-anchored flusher still works post-unmount (registration sits
+    // on the store, not the hook — spec §5.4).
+    await act(async (): Promise<void> => { await flushAllForSlug(KOTELNICA) })
+    await drainMicrotasks()
+    expect(spy).toHaveBeenCalledTimes(1)
+  })
+
+  it('flushAllForSlug is a no-op when no SlugStore was created for the slug', async (): Promise<void> => {
+    const spy = vi.spyOn(apiClient, 'upsertResort')
+    await act(async (): Promise<void> => { await flushAllForSlug(SPINDLERUV) })
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it('the registered flusher runs with no armed debounce timer (timer === null false-arm): empty-diff short-circuit, no PUT', async (): Promise<void> => {
+    prepopulateResortDetail(KOTELNICA, syntheticResponse('kotelnica-bialczanska'))
+    const spy = vi.spyOn(apiClient, 'upsertResort')
+
+    // First read creates the SlugStore + registers the flusher, but NO
+    // setFieldValue → store.timer stays null. flushAllForSlug must still
+    // drive the flusher: it takes the `timer === null` branch (no clear),
+    // runs flush(slug) which empty-diff short-circuits (no PUT).
+    renderHook(() => useWorkspaceState())
+
+    await act(async (): Promise<void> => { await flushAllForSlug(KOTELNICA) })
+    await drainMicrotasks()
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it('HMR generation swap: disposing the old generation deregisters its stale flushAll flusher (Codex P2 N.c2 mirror)', async (): Promise<void> => {
+    // Regression for the leaked flushAll registration. getOrCreateStore()
+    // registers a slug flusher into the GLOBAL flushAll.ts registry. That
+    // registry has no HMR handling, so on a hot-reload of useWorkspaceState.ts
+    // the OLD module's flusher stays in the registry while the NEW module
+    // lazily registers its own — a stale old store's flusher could re-fire.
+    // Spec §5.4 mandates deregistration via the sibling .hmr.ts on reload.
+    // The seam is testable without real Vite: the OLD generation's disposer
+    // (the thing the .hmr.ts latch invokes on reload) must remove that
+    // generation's flushers so flushAllForSlug no longer drives them.
+    prepopulateResortDetail(KOTELNICA, syntheticResponse('kotelnica-bialczanska'))
+    const spy = vi
+      .spyOn(apiClient, 'upsertResort')
+      .mockResolvedValue(syntheticResponse('kotelnica-bialczanska'))
+
+    const { result, unmount } = renderHook(() => useWorkspaceState())
+    act((): void => { result.current.setFieldValue('slopes_km', 150) })
+    unmount()
+
+    // Sanity: before the HMR swap the registry drives the flusher.
+    await act(async (): Promise<void> => { await flushAllForSlug(KOTELNICA) })
+    await drainMicrotasks()
+    expect(spy).toHaveBeenCalledTimes(1)
+
+    // Simulate the new module generation's fresh empty storesBySlug (in real
+    // HMR the re-evaluated module body re-initializes it) while the stale
+    // OLD-generation flusher is still in the global flushAll.ts registry.
+    spy.mockClear()
+    resetWorkspaceState()
+    prepopulateResortDetail(KOTELNICA, syntheticResponse('kotelnica-bialczanska'))
+    const { result: r2 } = renderHook(() => useWorkspaceState())
+    act((): void => { r2.current.setFieldValue('slopes_km', 151) })
+
+    // The .hmr.ts latch invokes the OLD generation's disposer when the new
+    // module evaluates. After that the stale flusher must be gone from the
+    // registry — flushAllForSlug must NOT re-drive the now-unmounted old
+    // store. (r2's own registration also went through the same collection;
+    // disposing it models a clean cutover where only post-swap registrations
+    // survive.)
+    __disposeRegisteredFlushersForHmr()
+    await act(async (): Promise<void> => { await flushAllForSlug(KOTELNICA) })
+    await drainMicrotasks()
+    expect(spy).not.toHaveBeenCalled()
+
+    // A freshly-created store for the same slug AFTER the swap still flushes
+    // normally — the new generation re-registers lazily on first read.
+    resetWorkspaceState()
+    prepopulateResortDetail(KOTELNICA, syntheticResponse('kotelnica-bialczanska'))
+    const { result: r3 } = renderHook(() => useWorkspaceState())
+    act((): void => { r3.current.setFieldValue('slopes_km', 152) })
+    await act(async (): Promise<void> => { await flushAllForSlug(KOTELNICA) })
+    await drainMicrotasks()
+    expect(spy).toHaveBeenCalledTimes(1)
+  })
+
+  it('.hmr.ts registerHmrDisposer latch invokes the previous generation disposer then latches the new one', (): void => {
+    // The cross-generation latch lives in the coverage-excluded .hmr.ts so
+    // the irreducible import.meta.hot wiring is whole-file-excluded, but the
+    // plain latch logic is still unit-tested here (exclusion ≠ untestable).
+    const calls: string[] = []
+    const genA = (): void => { calls.push('A') }
+    const genB = (): void => { calls.push('B') }
+    const genC = (): void => { calls.push('C') }
+
+    // The module-load registration already latched the real production
+    // disposer; latch gen A over it (the real disposer fires harmlessly,
+    // pushing nothing to `calls`).
+    registerHmrDisposer(genA)
+    expect(calls).toStrictEqual([])
+
+    // Next generation evaluates (HMR reload) → dispose gen A, latch gen B.
+    registerHmrDisposer(genB)
+    expect(calls).toStrictEqual(['A'])
+
+    // Next generation evaluates → dispose gen B, latch gen C.
+    registerHmrDisposer(genC)
+    expect(calls).toStrictEqual(['A', 'B'])
+
+    // Restore the production disposer as the latched generation so the
+    // module-shared latch is not left pointing at a test stub.
+    registerHmrDisposer(__disposeRegisteredFlushersForHmr)
+    expect(calls).toStrictEqual(['A', 'B', 'C'])
   })
 })

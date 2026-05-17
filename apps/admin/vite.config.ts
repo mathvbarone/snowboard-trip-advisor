@@ -42,6 +42,10 @@ export default defineConfig({
         'src/state/useAnalystNotes.hmr.ts',
         // PR N.c2: same HMR dead-code pattern for useAnalystNoteDraft.hmr.ts.
         'src/state/useAnalystNoteDraft.hmr.ts',
+        // PR N.c3: same HMR dead-code pattern for useWorkspaceState.hmr.ts
+        // (useWorkspaceState now registers into the persistent flushAll.ts
+        // registry, so it inherits the same stale-flusher-on-reload cleanup).
+        'src/state/useWorkspaceState.hmr.ts',
       ],
       reporter: ['text', 'lcov'],
     },
