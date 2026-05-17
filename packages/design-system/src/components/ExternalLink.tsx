@@ -1,3 +1,5 @@
+import './ExternalLink.css'
+
 import type { JSX, ReactNode } from 'react'
 
 // External-link wrapper. apps/** ESLint rules ban raw <a> (spec §6.3 +
