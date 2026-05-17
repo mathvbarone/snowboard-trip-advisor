@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -40,5 +43,18 @@ describe('package barrel (index.ts)', (): void => {
     expect(Toast).toBeDefined()
     expect(ToastProvider).toBeDefined()
     expect(useToast).toBeDefined()
+  })
+
+  it('loads tokens.css then base.css then utilities.css as side-effects (order matters: tokens define the custom properties base.css consumes)', (): void => {
+    const src = readFileSync(
+      resolve(import.meta.dirname, 'index.ts'),
+      'utf8',
+    )
+    const tokensIdx = src.indexOf("import '../tokens.css'")
+    const baseIdx = src.indexOf("import './base.css'")
+    const utilIdx = src.indexOf("import './utilities.css'")
+    expect(tokensIdx).toBeGreaterThan(-1)
+    expect(baseIdx).toBeGreaterThan(tokensIdx)
+    expect(utilIdx).toBeGreaterThan(baseIdx)
   })
 })
