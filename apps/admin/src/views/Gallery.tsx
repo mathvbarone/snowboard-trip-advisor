@@ -18,7 +18,17 @@
 // unmodified. The empty `data-gallery-family` placeholder <section>s below
 // are filled by the later S1a–S1d PRs.
 
-import { Drawer, Table, useToast } from '@snowboard-trip-advisor/design-system'
+import {
+  Button,
+  Drawer,
+  IconButton,
+  Input,
+  Select,
+  Table,
+  Textarea,
+  ToggleButtonGroup,
+  useToast,
+} from '@snowboard-trip-advisor/design-system'
 import { useEffect, useState, type JSX } from 'react'
 
 // Static exemplar data for the Table primitive. Kept inline (no domain
@@ -66,6 +76,137 @@ function ToastExemplar(): JSX.Element {
       mounted for the smoke; it renders fixed top-right through the
       Shell-level provider, OUTSIDE this section (see gallery-smoke.md).
     </p>
+  )
+}
+
+// S1a form-control options. Kept inline (no domain vocabulary baked into a
+// design-system primitive — the consumer owns wording, S1.0 precedent).
+const SELECT_OPTIONS = [
+  { value: 'a', label: 'Option A' },
+  { value: 'b', label: 'Option B' },
+] as const
+
+const TOGGLE_OPTIONS = [
+  { value: 'cards', label: 'Cards' },
+  { value: 'matrix', label: 'Matrix' },
+] as const
+
+// Single shared no-op for the required-but-inert handlers on the disabled
+// exemplars (IconButton.onClick / Select.onChange are non-optional). One
+// module-level function instead of N inline closures keeps the gallery's
+// function-coverage at 100% — the enabled IconButton wires it too and the
+// interaction test clicks that one, so the single noop is exercised.
+const noop = (): void => undefined
+
+// S1a form-controls family. Each component is rendered once per route
+// (one-exemplar-per-component invariant from gallery-smoke.md) inside its
+// own `data-gallery-component` anchor, exercising every variant/state the
+// smoke needs: all Button data-variants, an aria-invalid Input AND
+// Textarea, a pressed ToggleButtonGroup item, and a :disabled example for
+// every interactive control. The controlled controls hold local state so
+// the native elements stay editable in the live gallery.
+function FormControlsFamily(): JSX.Element {
+  const [text, setText] = useState<string>('Editable input value')
+  const [selectValue, setSelectValue] = useState<string>('a')
+  const [note, setNote] = useState<string>('Editable textarea value')
+  const [view, setView] = useState<string>('cards')
+
+  return (
+    <>
+      <section data-gallery-component="Button">
+        <h2>Button</h2>
+        <Button variant="primary">Primary</Button>
+        <Button variant="secondary">Secondary</Button>
+        <Button variant="ghost">Ghost</Button>
+        <Button variant="primary" aria-pressed>
+          Pressed
+        </Button>
+        <Button variant="primary" disabled>
+          Disabled
+        </Button>
+      </section>
+
+      <section data-gallery-component="IconButton">
+        <h2>IconButton</h2>
+        <IconButton aria-label="Star" onClick={noop}>
+          ★
+        </IconButton>
+        <IconButton aria-label="Starred" aria-pressed onClick={noop}>
+          ★
+        </IconButton>
+        <IconButton aria-label="Disabled action" disabled onClick={noop}>
+          ★
+        </IconButton>
+      </section>
+
+      <section data-gallery-component="Input">
+        <h2>Input</h2>
+        <Input label="Editable input" value={text} onChange={setText} />
+        <Input label="Invalid input" value="bad value" aria-invalid readOnly />
+        <Input
+          label="Disabled input"
+          value="disabled value"
+          disabled
+          readOnly
+        />
+      </section>
+
+      <section data-gallery-component="Select">
+        <h2>Select</h2>
+        <Select
+          label="Editable select"
+          value={selectValue}
+          options={SELECT_OPTIONS}
+          onChange={setSelectValue}
+        />
+        <Select
+          label="Disabled select"
+          value="a"
+          options={SELECT_OPTIONS}
+          onChange={noop}
+          disabled
+        />
+      </section>
+
+      <section data-gallery-component="Textarea">
+        <h2>Textarea</h2>
+        {/*
+          Textarea's closed TextareaProps interface does NOT expose
+          `aria-invalid` (it associates via aria-label, not a wrapping
+          label, and never emits an invalid hook) — the S1a contract
+          table for Textarea correctly omits the aria-invalid selector.
+          Adding it would require widening the primitive's prop surface,
+          which is out of scope for this CSS-only PR. So the Textarea
+          exemplar exercises only the base + :disabled states it actually
+          emits (see PR report — flagged divergence from the gallery note
+          that said "Input AND Textarea" need an aria-invalid example).
+        */}
+        <Textarea aria-label="Editable note" value={note} onChange={setNote} />
+        <Textarea
+          aria-label="Disabled note"
+          value="disabled note"
+          disabled
+          readOnly
+        />
+      </section>
+
+      <section data-gallery-component="ToggleButtonGroup">
+        <h2>ToggleButtonGroup</h2>
+        <ToggleButtonGroup
+          label="View"
+          options={TOGGLE_OPTIONS}
+          selected={view}
+          onChange={setView}
+        />
+        <ToggleButtonGroup
+          label="Disabled view"
+          options={TOGGLE_OPTIONS}
+          selected="cards"
+          onChange={noop}
+          disabled
+        />
+      </section>
+    </>
   )
 }
 
@@ -125,7 +266,7 @@ export function Gallery(): JSX.Element {
 
       {/* Family placeholders — filled by later S1 PRs. */}
       <section data-gallery-family="S1a-form-controls">
-        {/* TODO: filled by later S1 PR */}
+        <FormControlsFamily />
       </section>
       <section data-gallery-family="S1b-surfaces">
         {/* TODO: filled by later S1 PR */}

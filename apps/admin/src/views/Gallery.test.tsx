@@ -9,7 +9,7 @@
 // sibling view-test conventions: @testing-library render, vitest describe/it.
 
 import { ToastProvider } from '@snowboard-trip-advisor/design-system'
-import { act, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { Gallery } from './Gallery'
@@ -99,14 +99,15 @@ describe('Gallery (S1.0 — dev-only component gallery surface)', (): void => {
     }
   })
 
-  it('renders empty family placeholders for the later S1 PRs', (): void => {
+  it('renders empty family placeholders for the still-pending S1 PRs', (): void => {
     const { container } = render(
       <ToastProvider>
         <Gallery />
       </ToastProvider>,
     )
+    // S1a-form-controls is now FILLED by this PR (asserted below); only the
+    // S1b–S1d families remain empty placeholders for the later S1 PRs.
     for (const family of [
-      'S1a-form-controls',
       'S1b-surfaces',
       'S1c-feedback-status',
       'S1d-overlays',
@@ -117,5 +118,66 @@ describe('Gallery (S1.0 — dev-only component gallery surface)', (): void => {
       expect(placeholder).not.toBeNull()
       expect(placeholder?.textContent).toBe('')
     }
+  })
+
+  // S1a — the form-controls family is now populated. The Playwright smoke
+  // targets each component's own `.sta-<name>` root; these assertions pin
+  // the per-component anchor wrappers (mirrors the S1.0 exemplar-wrapper
+  // assertion above) so a future PR cannot silently drop one.
+  it('renders the six S1a form-control component wrappers', (): void => {
+    const { container } = render(
+      <ToastProvider>
+        <Gallery />
+      </ToastProvider>,
+    )
+    for (const name of [
+      'Button',
+      'IconButton',
+      'Input',
+      'Select',
+      'Textarea',
+      'ToggleButtonGroup',
+    ]) {
+      expect(
+        container.querySelector(`[data-gallery-component="${name}"]`),
+      ).not.toBeNull()
+    }
+  })
+
+  // The S1a editable exemplars are controlled — exercising their handlers
+  // proves the live gallery controls stay editable (not just visually
+  // present) and keeps Gallery.tsx's interactive closures covered.
+  it('keeps the S1a editable form controls interactive', (): void => {
+    render(
+      <ToastProvider>
+        <Gallery />
+      </ToastProvider>,
+    )
+    // Editable Input round-trips through local state.
+    const input = screen.getByLabelText('Editable input')
+    fireEvent.change(input, { target: { value: 'typed text' } })
+    expect(input).toHaveValue('typed text')
+
+    const select = screen.getByLabelText('Editable select')
+    fireEvent.change(select, { target: { value: 'b' } })
+    expect(select).toHaveValue('b')
+
+    const textarea = screen.getByLabelText('Editable note')
+    fireEvent.change(textarea, { target: { value: 'typed note' } })
+    expect(textarea).toHaveValue('typed note')
+
+    // Enabled toggle commits selection on click (pressed state flips).
+    // "Matrix" appears in both the enabled and disabled groups, so scope
+    // to the enabled group by its accessible name first.
+    const enabledGroup = screen.getByRole('group', { name: 'View' })
+    const matrixBtn = within(enabledGroup).getByRole('button', {
+      name: 'Matrix',
+    })
+    fireEvent.click(matrixBtn)
+    expect(matrixBtn).toHaveAttribute('aria-pressed', 'true')
+
+    // The shared `noop` is wired to the enabled IconButton — click it so
+    // the single module-level handler is exercised (function coverage).
+    fireEvent.click(screen.getByRole('button', { name: 'Star' }))
   })
 })
