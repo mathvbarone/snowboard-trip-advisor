@@ -1,0 +1,42 @@
+/* ToggleButtonGroup visual CSS. Token-driven; light/dark via the S0 :root
+ * cascade (ADR-0005) — no theme code here. The component renders a
+ * role="group" container (.sta-toggle-button-group) holding native
+ * <button class="sta-toggle-button"> children; the selected option keys
+ * off the aria-pressed="true" the component already emits, and the
+ * disabled state off the native :disabled (no className branching). */
+.sta-toggle-button-group {
+  display: inline-flex;
+  gap: var(--space-xs, 4px);
+  padding: var(--space-xs, 4px);
+  background: var(--color-surface, #f4f5f7);
+  border: 1px solid var(--color-border, #d6d9dd);
+  border-radius: var(--radius-md, 8px);
+}
+.sta-toggle-button {
+  padding: var(--space-sm, 8px) var(--space-md, 12px);
+  font-family: var(--font-family-body, sans-serif);
+  font-size: var(--font-size-sm, 14px);
+  font-weight: var(--font-weight-medium, 500);
+  color: var(--color-foreground, #0b0d10);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm, 4px);
+  cursor: pointer;
+  transition: background-color var(--duration-fast, 120ms),
+    color var(--duration-fast, 120ms);
+}
+.sta-toggle-button:hover:not(:disabled) {
+  background: var(--color-background, #fff);
+}
+.sta-toggle-button[aria-pressed="true"] {
+  color: var(--color-background, #fff);
+  background: var(--color-accent, #0066cc);
+}
+.sta-toggle-button:focus-visible {
+  outline: 2px solid var(--color-accent, #0066cc);
+  outline-offset: 2px;
+}
+.sta-toggle-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

@@ -1,7 +1,27 @@
 import { render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import App from './App'
+
+// Inlined matchMedia stub — keeps the test file self-contained per
+// ai-clean-code-adherence §3 (no cross-file shared fixtures). The gallery
+// route mounts the Drawer exemplar, whose usePrefersReducedMotion subscribes
+// to matchMedia (jsdom does not implement it; the admin test-setup
+// deliberately omits the global stub — Shell.test.tsx precedent). Scoped to
+// the gallery test so the other route tests' environment is untouched.
+function stubMatchMedia(): void {
+  const mql = {
+    matches: false,
+    media: '(prefers-reduced-motion: reduce)',
+    onchange: null,
+    addListener: (): void => undefined,
+    removeListener: (): void => undefined,
+    addEventListener: (): void => undefined,
+    removeEventListener: (): void => undefined,
+    dispatchEvent: (): boolean => false,
+  } as unknown as MediaQueryList
+  vi.stubGlobal('matchMedia', vi.fn().mockReturnValue(mql))
+}
 
 describe('App (PR 4.1b §2.4 — Shell composition)', (): void => {
   it('renders inside the Shell wrapper with stable landmark roles', (): void => {
@@ -52,6 +72,33 @@ describe('App (PR 4.1b §2.4 — Shell composition)', (): void => {
     expect(screen.getByRole('main')).toBeInTheDocument()
     expect(screen.queryByLabelText(/loading dashboard/i)).toBeNull()
     expect(screen.queryByLabelText(/health metrics/i)).toBeNull()
+    window.history.replaceState({}, '', '/')
+  })
+
+  it('renders the Gallery when URL has ?route=gallery', (): void => {
+    stubMatchMedia()
+    window.history.replaceState({}, '', '/?route=gallery')
+    render(<App />)
+    expect(
+      screen.getByRole('heading', { name: /component gallery/i }),
+    ).toBeInTheDocument()
+    window.history.replaceState({}, '', '/') // reset URL — match the file's other route tests so the route doesn't leak into later tests
+    vi.unstubAllGlobals()
+  })
+
+  it('keeps the gallery route unlinked (no Sidebar nav entry — S1.0 dev-only surface)', (): void => {
+    // The gallery is a dev-only verification surface, never a user feature:
+    // Shell's SIDEBAR_ITEMS must not gain a gallery link. Render App (which
+    // mounts Shell → Sidebar) on the default route and assert no nav anchor
+    // points at the gallery route.
+    window.history.replaceState({}, '', '/')
+    render(<App />)
+    const nav = screen.getByRole('navigation')
+    const links = Array.from(nav.querySelectorAll('a'))
+    expect(
+      links.some((a): boolean => (a.getAttribute('href') ?? '').includes('gallery')),
+    ).toBe(false)
+    expect(screen.queryByRole('link', { name: /gallery/i })).toBeNull()
     window.history.replaceState({}, '', '/')
   })
 

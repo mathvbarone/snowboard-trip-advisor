@@ -1,3 +1,5 @@
+import './Textarea.css'
+
 import {
   forwardRef,
   useCallback,

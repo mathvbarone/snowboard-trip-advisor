@@ -1,3 +1,5 @@
+import './Input.css'
+
 import type { ChangeEvent, JSX } from 'react'
 
 // Native <input> wrapper.

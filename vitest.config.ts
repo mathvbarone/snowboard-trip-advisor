@@ -165,6 +165,15 @@ export default defineConfig({
         // `scripts/prepare-commit-msg` — shell script installed into the worktree
         // hooks dir by `npm run setup`; auto-adds the DCO `Signed-off-by:` trailer.
         'scripts/prepare-commit-msg',
+        // S1.0: gallery-smoke.md is the co-located per-PR smoke procedure doc
+        // for the dev-only component gallery. It lives under apps/admin/src/
+        // (next to Gallery.tsx so the cascade-verification steps stay with the
+        // surface they verify) so the `apps/*/src/**` include glob sweeps it;
+        // v8's uncovered-file walk then tries to parse the Markdown as source
+        // and logs a non-fatal parse error every coverage run. It has no
+        // executable code — exclude it explicitly (same rationale as the
+        // non-source config excludes above). Mirrored in apps/admin/vite.config.ts.
+        'apps/admin/src/views/gallery-smoke.md',
       ],
       thresholds: {
         lines: 100,

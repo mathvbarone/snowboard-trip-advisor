@@ -27,7 +27,12 @@ import { z } from 'zod'
 //   - 'editor' + missing/invalid slug → 'dashboard' (slug is required on
 //     the editor variant; partial editor state is not a valid shape)
 
-const ROUTE_VALUES = ['dashboard', 'resorts', 'editor', 'publishes'] as const
+// 'gallery' is the S1.0 dev-only component-gallery verification surface — the
+// one sanctioned apps/* scope exception for the design-system-only S1 CSS
+// stack. It is intentionally absent from Shell's SIDEBAR_ITEMS so it stays
+// unlinked (a verification tool, not a user feature); it is reachable only by
+// typing ?route=gallery directly.
+const ROUTE_VALUES = ['dashboard', 'resorts', 'editor', 'publishes', 'gallery'] as const
 const RouteValue = z.enum(ROUTE_VALUES)
 
 // Single source of truth for the publishes-route page size. PublishHistory
@@ -49,6 +54,7 @@ export type Route =
   | { route: 'resorts'; country?: ISOCountryCode; hasFailures?: boolean }
   | { route: 'editor'; slug: ResortSlug }
   | { route: 'publishes'; page?: number }
+  | { route: 'gallery' }
 
 export type RouteState = Route
 
@@ -59,6 +65,8 @@ export function parseURL(search: string): RouteState {
   const route = parsed.success ? parsed.data : 'dashboard'
 
   if (route === 'dashboard') { return { route: 'dashboard' } }
+
+  if (route === 'gallery') { return { route: 'gallery' } }
 
   if (route === 'editor') {
     const slug = params.get('slug')
@@ -111,6 +119,11 @@ function parseBooleanParam(raw: string | null): boolean | undefined {
 
 export function serializeURL(state: RouteState): string {
   if (state.route === 'dashboard') { return '' }
+  if (state.route === 'gallery') {
+    const params = new URLSearchParams()
+    params.set('route', 'gallery')
+    return `?${params.toString()}`
+  }
   if (state.route === 'editor') {
     const params = new URLSearchParams()
     params.set('route', 'editor')

@@ -1,0 +1,33 @@
+/* IconButton visual CSS. Token-driven; light/dark via the S0 :root cascade
+ * (ADR-0005) — no theme code here. Icon-only square hit-area target keyed
+ * off the data-hit-area the component already emits (WCAG 2.5.5 minimum). */
+.sta-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-sm, 8px);
+  color: var(--color-foreground, #0b0d10);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md, 8px);
+  cursor: pointer;
+  transition: background-color var(--duration-fast, 120ms),
+    border-color var(--duration-fast, 120ms);
+}
+.sta-icon-button[data-hit-area="square"] {
+  /* WCAG 2.5.5 — keep the tap target at least 44x44 css px. */
+  min-width: var(--space-3xl, 48px);
+  min-height: var(--space-3xl, 48px);
+}
+.sta-icon-button:hover:not(:disabled) {
+  background: var(--color-surface, #f4f5f7);
+}
+.sta-icon-button:focus-visible {
+  outline: 2px solid var(--color-accent, #0066cc);
+  outline-offset: 2px;
+}
+.sta-icon-button[aria-pressed="true"] {
+  color: var(--color-accent, #0066cc);
+  background: var(--color-surface, #f4f5f7);
+}
+.sta-icon-button:disabled { opacity: 0.5; cursor: not-allowed; }

@@ -1,0 +1,37 @@
+/* Textarea visual CSS. Token-driven; light/dark via the S0 :root cascade
+ * (ADR-0005) — no theme code here. The Textarea root IS the control: the
+ * component emits a bare <textarea class="sta-textarea__control"> (no
+ * block/label wrapper — it is aria-label associated), so the base selector
+ * is .sta-textarea__control itself; states key off the native :disabled
+ * and :focus-visible the control already emits (no className branching). */
+.sta-textarea__control {
+  /* S1a Codex P2 fold (Toast.css precedent, Codex round 7 PR #100): the
+   * control is width: 100% with horizontal padding and a 1px border, so
+   * under content-box sizing it would overflow its container. base.css
+   * ships a universal box-sizing: border-box reset that already makes this
+   * correct at runtime; this explicit per-component declaration keeps the
+   * component's box model locally correct without depending on the global
+   * reset, matching .sta-toast. */
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  padding: var(--space-sm, 8px) var(--space-md, 12px);
+  font-family: var(--font-family-body, sans-serif);
+  font-size: var(--font-size-md, 16px);
+  line-height: 1.5;
+  color: var(--color-foreground, #0b0d10);
+  background: var(--color-background, #fff);
+  border: 1px solid var(--color-border, #d6d9dd);
+  border-radius: var(--radius-md, 8px);
+  resize: vertical;
+  transition: border-color var(--duration-fast, 120ms);
+}
+.sta-textarea__control:focus-visible {
+  outline: 2px solid var(--color-accent, #0066cc);
+  outline-offset: 2px;
+}
+.sta-textarea__control:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: var(--color-surface, #f4f5f7);
+}

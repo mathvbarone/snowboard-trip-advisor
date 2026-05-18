@@ -46,6 +46,11 @@ export default defineConfig({
         // (useWorkspaceState now registers into the persistent flushAll.ts
         // registry, so it inherits the same stale-flusher-on-reload cleanup).
         'src/state/useWorkspaceState.hmr.ts',
+        // S1.0: co-located dev-only gallery smoke procedure doc. Markdown,
+        // no executable code; the `src/**` include glob sweeps it and v8's
+        // uncovered-file walk logs a non-fatal Markdown parse error each run.
+        // Mirrors the root vitest.config.ts exclusion.
+        'src/views/gallery-smoke.md',
       ],
       reporter: ['text', 'lcov'],
     },
