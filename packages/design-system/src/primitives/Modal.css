@@ -4,7 +4,7 @@
  * `.sta-modal__title` (the required accessible-name heading). Token-driven,
  * light/dark via the S0 :root cascade (ADR-0005); no theme code here. The
  * overlay scrim + panel box-shadow use a raw rgba (tokens.ts ships no
- * --shadow-*/--scrim-* token — Toast.css/Card.css precedent: an
+ * --shadow- or --scrim- token — Toast.css/Card.css precedent: an
  * intentionally theme-neutral non-hex value, not a colour fill). z-index
  * comes from the existing --z-modal token (=60). */
 .sta-modal__overlay {
