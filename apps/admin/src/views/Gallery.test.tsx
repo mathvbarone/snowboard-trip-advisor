@@ -10,6 +10,7 @@
 
 import { ToastProvider } from '@snowboard-trip-advisor/design-system'
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import type { JSX } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { Gallery } from './Gallery'
@@ -94,6 +95,63 @@ describe('Gallery (S1.0 — dev-only component gallery surface)', (): void => {
         vi.advanceTimersByTime(60_000)
       })
       expect(container.querySelector('.sta-toast')).not.toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // Defect 1 (S1.0 Codex P2, round 2) regression pin — the leak this fold
+  // fixes. The outer <ToastProvider> here stands in for Shell's app-wide
+  // provider (Shell wraps every route's children in one, OUTSIDE the route
+  // subtree). Before the fix the exemplar called Shell's app-wide
+  // `useToast().show(...)`, so the 24h toast outlived the gallery route and
+  // stayed visible across unrelated admin screens. The fix wraps the
+  // exemplar in its OWN gallery-local <ToastProvider> inside the Gallery
+  // subtree, so unmounting Gallery destroys the toast with the local
+  // provider while the app-wide provider keeps running.
+  //
+  // This is NOT tautological: it first PROVES the toast actually mounted
+  // (so a no-op exemplar can't pass), then unmounts ONLY Gallery (the
+  // app-wide provider stays mounted, exactly as in Shell on a route
+  // change) and asserts `.sta-toast` is gone everywhere — `document`-wide,
+  // not just inside Gallery's old container. A regression to the app-wide
+  // provider keeps the toast alive under the still-mounted outer provider
+  // and fails the post-unmount assertion.
+  it('destroys the Toast exemplar when the gallery route unmounts (no app-wide leak)', (): void => {
+    vi.useFakeTimers()
+    try {
+      // `Shell` keeps its ToastProvider mounted across route changes and
+      // only swaps `children`; model that with a stable outer provider and
+      // a toggleable Gallery child.
+      function Harness({ showGallery }: { showGallery: boolean }): JSX.Element {
+        return (
+          <ToastProvider>
+            <div data-testid="app-shell-stand-in">
+              {showGallery ? <Gallery /> : <p>Some other admin route</p>}
+            </div>
+          </ToastProvider>
+        )
+      }
+
+      const { rerender } = render(<Harness showGallery />)
+      // Flush the on-mount show() effect + provider's deferred microtask.
+      act((): void => {
+        vi.advanceTimersByTime(0)
+      })
+      // Precondition: the exemplar genuinely mounted a styled toast.
+      expect(document.querySelectorAll('.sta-toast')).toHaveLength(1)
+
+      // Navigate away: Gallery unmounts, the (Shell-equivalent) app-wide
+      // provider stays mounted. The gallery-local provider is destroyed
+      // with Gallery, taking the toast with it.
+      rerender(<Harness showGallery={false} />)
+      act((): void => {
+        vi.advanceTimersByTime(0)
+      })
+      // The whole point of the fix: zero toasts anywhere in the document,
+      // even though the app-wide provider is still alive.
+      expect(document.querySelectorAll('.sta-toast')).toHaveLength(0)
+      expect(screen.getByText('Some other admin route')).toBeInTheDocument()
     } finally {
       vi.useRealTimers()
     }

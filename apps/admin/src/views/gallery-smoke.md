@@ -33,11 +33,19 @@ CSS. So target the component's own root selector:
   `document.querySelector('[data-gallery-component="Table"] .sta-table')`.
 - **Portalled components** (styled root is rendered through a portal OUTSIDE
   its section — e.g. Drawer → `<div class="sta-drawer">` via Radix
-  `Dialog.Portal`; Toast → `<div class="sta-toast">` via `<ToastProvider>`):
-  query the `.sta-<name>` root directly off `document`, since it is NOT a
-  descendant of the section:
-  `document.querySelector('.sta-drawer')` /
-  `document.querySelector('.sta-toast')`.
+  `Dialog.Portal`): query the `.sta-<name>` root directly off `document`,
+  since it is NOT a descendant of the section:
+  `document.querySelector('.sta-drawer')`.
+- **Provider-rendered components** (styled root is rendered by a context
+  provider, NOT a portal — e.g. Toast → `<div class="sta-toast">` via the
+  gallery-LOCAL `<ToastProvider>` that wraps the Toast exemplar; S1.0 Codex
+  P2 scoping fix): the node is an inline child of the Toast section rather
+  than portalled to `document.body`, but the gallery still mounts exactly
+  one Toast exemplar, so querying `.sta-toast` directly off `document`
+  resolves it regardless of nesting depth:
+  `document.querySelector('.sta-toast')`. (Querying off `document` — not the
+  section — also keeps the selector identical to the old app-wide-provider
+  shape, so no smoke step changes.)
 
 General rule for any future component (Modal `.sta-modal`, Popover
 `.sta-popover`, Tooltip `.sta-tooltip`, DropdownMenu `.sta-dropdown-menu`,
@@ -54,15 +62,20 @@ The three S1.0 exemplars and their exact targets:
 | Component | Renders | Smoke target |
 |-----------|---------|--------------|
 | Table  | inline in section    | `[data-gallery-component="Table"] .sta-table` |
-| Toast  | portal (`<ToastProvider>`) | `.sta-toast`  |
+| Toast  | gallery-local `<ToastProvider>` (inline child of Toast section, NOT portalled) | `.sta-toast`  |
 | Drawer | portal (Radix `Dialog.Portal`) | `.sta-drawer` |
 
 The Toast exemplar is shown on mount with an effectively-non-expiring
 `dismissAfterMs` (24h) so `.sta-toast` stays in the DOM for the duration of
 the smoke — Toast has no `persist` option, and its per-variant default
-(success = 5000ms) would otherwise auto-dismiss it before measurement. The
-Drawer exemplar is seeded `open` so `.sta-drawer` is mounted. No click is
-needed for either.
+(success = 5000ms) would otherwise auto-dismiss it before measurement. As of
+the S1.0 Codex P2 scoping fix the exemplar is wrapped in a gallery-LOCAL
+`<ToastProvider>` (not Shell's app-wide one) so the toast is destroyed the
+instant the gallery route unmounts instead of persisting app-wide for 24h;
+the 24h value is retained but is now capped by the route lifetime. The smoke
+target is unchanged — still `document.querySelector('.sta-toast')`, exactly
+one instance while on `?route=gallery`. The Drawer exemplar is seeded `open`
+so `.sta-drawer` is mounted. No click is needed for either.
 
 NOTE: this smoke is NOT runnable from a git worktree (worktree has no
 node_modules; the app dev server resolves @snowboard-trip-advisor/design-system

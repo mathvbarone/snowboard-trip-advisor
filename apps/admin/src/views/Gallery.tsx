@@ -26,6 +26,7 @@ import {
   Select,
   Table,
   Textarea,
+  ToastProvider,
   ToggleButtonGroup,
   useToast,
 } from '@snowboard-trip-advisor/design-system'
@@ -43,10 +44,6 @@ const TABLE_ROWS = [
   { key: 'lifts', header: 'Open lifts', cells: ['18 / 20', '12 / 14'] },
 ] as const
 
-// Toast renders through the Shell-level <ToastProvider> (App wraps every
-// route in Shell). A passive auto-show on mount surfaces the styled toast
-// for the smoke without a manual click.
-//
 // Toast has no `persist`/`Infinity` option — `ToastInput` exposes only
 // `variant`, `message`, and `dismissAfterMs`, and <Toast> unconditionally
 // schedules `setTimeout(onDismiss, dismissAfterMs)`. With the per-variant
@@ -56,11 +53,39 @@ const TABLE_ROWS = [
 // `.sta-toast` node stays mounted for the cascade check. The value is kept
 // well under the 32-bit `setTimeout` ceiling (2^31-1 ms ≈ 24.8 days): a
 // delay above that overflows and fires immediately, which would silently
-// reintroduce this exact defect. 24h is far longer than any smoke run yet
-// safely inside the safe range.
+// reintroduce the original auto-dismiss defect. 24h is far longer than any
+// smoke run yet safely inside the safe range.
+//
+// S1.0 Codex P2 (round 2) — route-scoping fix. The original fold showed the
+// toast through Shell's app-wide <ToastProvider> (Shell.tsx wraps every
+// route's children in it, OUTSIDE the route subtree). Because `useToast()`
+// exposes only `show` (no dismiss/cleanup handle — see ToastContextValue in
+// Toast.tsx), the toast's lifetime was bound to that app-wide provider's
+// `current` state, NOT to the gallery route: a user who visited
+// `?route=gallery` then navigated to any normal admin screen kept the
+// dev-only exemplar toast mounted/visible for the full 24h. We instead
+// wrap the exemplar in its OWN gallery-local <ToastProvider> below.
+// `useToast()` resolves to the nearest provider (React `useContext`), so
+// `ScopedToastExemplar` binds to the local provider, which renders the
+// visible <Toast> as a plain child of the gallery subtree (ToastProvider
+// does NOT portal — `renderCurrent` returns an inline sibling of
+// `children`). Navigating away unmounts Gallery → unmounts the local
+// provider → its `current` state and the `.sta-toast` node are destroyed
+// with it. The smoke is unaffected: exactly one `.sta-toast` is still
+// mounted while on `?route=gallery` (Shell's app-wide provider shows
+// nothing on a fresh gallery load), it is still token-styled (the same
+// design-system <Toast> imports Toast.css regardless of which provider
+// renders it), and gallery-smoke.md queries `.sta-toast` directly off
+// `document` — which resolves a nested-but-not-portalled node just the
+// same. The 24h `dismissAfterMs` is KEPT: it is now an upper bound that
+// the route lifetime caps far below — leaving the gallery destroys the
+// toast immediately regardless of the timer — so it can no longer leak.
 const SMOKE_STABLE_TOAST_MS = 86_400_000 // 24h — see comment above.
 
-function ToastExemplar(): JSX.Element {
+// Inner consumer: must be a CHILD of the gallery-local <ToastProvider> so
+// its `useToast()` resolves to that provider (context binds to the nearest
+// ancestor — a component cannot consume a provider it renders itself).
+function ScopedToastExemplar(): JSX.Element {
   const { show } = useToast()
   useEffect((): void => {
     show({
@@ -73,9 +98,21 @@ function ToastExemplar(): JSX.Element {
     <p>
       A success Toast is shown on mount via <code>useToast().show</code> with
       an effectively-non-expiring <code>dismissAfterMs</code> so it stays
-      mounted for the smoke; it renders fixed top-right through the
-      Shell-level provider, OUTSIDE this section (see gallery-smoke.md).
+      mounted for the smoke; it renders fixed top-right through a
+      <strong> gallery-local </strong>
+      <code>&lt;ToastProvider&gt;</code> scoped to this route, so it is
+      destroyed the moment you navigate away (see gallery-smoke.md).
     </p>
+  )
+}
+
+// Gallery-local provider boundary: the exemplar toast lives and dies with
+// this subtree, never leaking onto unrelated admin routes (S1.0 Codex P2).
+function ToastExemplar(): JSX.Element {
+  return (
+    <ToastProvider>
+      <ScopedToastExemplar />
+    </ToastProvider>
   )
 }
 
@@ -231,12 +268,18 @@ export function Gallery(): JSX.Element {
         they are NOT the styled node the smoke measures. None of the S1
         design-system components forward arbitrary `data-*` onto their own
         `.sta-*` root (Table/Drawer have closed typed props; Toast renders
-        via <ToastProvider>), and the portalled ones (Drawer, Toast) render
-        their `.sta-*` node OUTSIDE this wrapper via a Radix/provider portal.
-        The smoke therefore targets each component's own design-system root
-        selector (`.sta-table` / `.sta-toast` / `.sta-drawer`), using these
-        sections only to scope inline components and as human labels. Every
-        later S1 PR follows the same rule — see gallery-smoke.md.
+        via a <ToastProvider>). Drawer portals its `.sta-drawer` node OUTSIDE
+        this wrapper via Radix `Dialog.Portal`. Toast renders its `.sta-toast`
+        node via the gallery-LOCAL <ToastProvider> wrapping the exemplar in
+        the Toast section (S1.0 Codex P2 scoping fix): it is NOT portalled —
+        it is an inline child of that section — but ToastProvider's single
+        styled-node slot still carries no `data-*`. The smoke therefore
+        targets each component's own design-system root selector
+        (`.sta-table` / `.sta-toast` / `.sta-drawer`), using these sections
+        only to scope inline components and as human labels; gallery-smoke.md
+        queries `.sta-toast` directly off `document`, which resolves the
+        nested-but-unique node just the same. Every later S1 PR follows the
+        same rule — see gallery-smoke.md.
       */}
       <section data-gallery-component="Table">
         <h2>Table</h2>
