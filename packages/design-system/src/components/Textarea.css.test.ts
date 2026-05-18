@@ -23,4 +23,13 @@ describe('Textarea.css', (): void => {
     expect(source).toMatch(/var\(--(color|space|radius|font|duration)-/)
     expect(source).not.toMatch(/:\s*#[0-9a-fA-F]{3,6}\b/)
   })
+  it('declares box-sizing: border-box so the width: 100% control includes padding and border (S1a Codex P2 fold)', (): void => {
+    // base.css ships a universal *, *::before, *::after { box-sizing:
+    // border-box } reset, so the control is already correct at runtime.
+    // This per-component declaration is the established Toast.css precedent
+    // (Codex round 7 P2): the component's box model must be locally correct
+    // without depending on the global reset — width: 100% plus padding and
+    // 1px border would otherwise overflow the parent under content-box.
+    expect(source).toContain('box-sizing: border-box')
+  })
 })
