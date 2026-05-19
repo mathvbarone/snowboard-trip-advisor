@@ -1,0 +1,61 @@
+/* FieldValueRenderer visual CSS — what it styles: ONLY this component's own
+ * `<span class="sta-field-value" data-state="fresh|stale|never_fetched">`
+ * wrapper and its own parts — `.sta-field-value__text` (the formatted value
+ * or missing placeholder), `.sta-field-value__info` (the provenance tooltip
+ * trigger button) and `.sta-field-value__missing` (the never_fetched
+ * tooltip trigger button). Token-driven, light/dark via the S0 :root
+ * cascade (ADR-0005); no theme code here. It COMPOSES <Pill>, <SourceBadge>
+ * and <Tooltip>; those ship their own co-located token CSS and are
+ * deliberately NOT restyled here (no .sta-pill / .sta-source-badge rules) —
+ * this stylesheet only lays out the row and styles the value/trigger parts.
+ * never_fetched uses the muted token; stale tints the value with the
+ * documented warning semantic (matching Pill's stale mapping). */
+.sta-field-value {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs, 4px);
+  font-family: var(--font-family-body, sans-serif);
+  font-size: var(--font-size-sm, 14px);
+  color: var(--color-foreground, #0b0d10);
+}
+.sta-field-value__text {
+  font-weight: var(--font-weight-medium, 500);
+}
+.sta-field-value[data-state="fresh"] .sta-field-value__text {
+  color: var(--color-foreground, #0b0d10);
+}
+.sta-field-value[data-state="stale"] .sta-field-value__text {
+  color: var(--color-warning, #a86200);
+}
+.sta-field-value[data-state="never_fetched"] {
+  color: var(--color-muted, #5a6166);
+}
+.sta-field-value[data-state="never_fetched"] .sta-field-value__text {
+  color: var(--color-muted, #5a6166);
+}
+.sta-field-value__info,
+.sta-field-value__missing {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm, 4px);
+  background: transparent;
+  color: var(--color-muted, #5a6166);
+  cursor: pointer;
+}
+.sta-field-value__missing {
+  font-family: inherit;
+  font-size: inherit;
+  color: var(--color-muted, #5a6166);
+}
+.sta-field-value__info:hover,
+.sta-field-value__missing:hover {
+  color: var(--color-accent, #0066cc);
+}
+.sta-field-value__info:focus-visible,
+.sta-field-value__missing:focus-visible {
+  outline: 2px solid var(--color-accent, #0066cc);
+  outline-offset: 2px;
+}

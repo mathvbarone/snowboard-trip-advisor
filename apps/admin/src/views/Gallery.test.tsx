@@ -192,6 +192,28 @@ describe('Gallery (S1.0 — dev-only component gallery surface)', (): void => {
     }
   })
 
+  // S1c-2 — the same feedback/status family now also carries Chip,
+  // FieldValueRenderer and ExternalLink (added at S1c-1's marker without
+  // disturbing the 4 anchors asserted above). The Playwright smoke targets
+  // each component's own `.sta-<name>` root; these assertions pin the new
+  // per-component anchor wrappers so a future PR cannot silently drop one.
+  it('renders the three S1c-2 feedback/status component wrappers', (): void => {
+    const { container } = render(
+      <ToastProvider>
+        <Gallery />
+      </ToastProvider>,
+    )
+    for (const name of [
+      'Chip',
+      'FieldValueRenderer',
+      'ExternalLink',
+    ]) {
+      expect(
+        container.querySelector(`[data-gallery-component="${name}"]`),
+      ).not.toBeNull()
+    }
+  })
+
   // The S1a editable exemplars are controlled — exercising their handlers
   // proves the live gallery controls stay editable (not just visually
   // present) and keeps Gallery.tsx's interactive closures covered.
@@ -227,5 +249,16 @@ describe('Gallery (S1.0 — dev-only component gallery surface)', (): void => {
     // The shared `noop` is wired to the enabled IconButton — click it so
     // the single module-level handler is exercised (function coverage).
     fireEvent.click(screen.getByRole('button', { name: 'Star' }))
+
+    // S1c-2: the controlled Chip exemplar is seeded pressed; clicking it
+    // flips its aria-pressed off through local state. Exercising the
+    // `setChipOn` toggle keeps FeedbackStatusFamily's interactive closure
+    // covered (mirrors the editable-form-control assertions above).
+    const chip = screen.getByRole('button', {
+      name: 'Toggleable chip (seeded pressed)',
+    })
+    expect(chip).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(chip)
+    expect(chip).toHaveAttribute('aria-pressed', 'false')
   })
 })

@@ -1,3 +1,5 @@
+import './Chip.css'
+
 import type { JSX, ReactNode } from 'react'
 
 // Toggleable filter chip used in `<FilterBar>` for the country selector.

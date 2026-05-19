@@ -1,0 +1,43 @@
+/* ExternalLink visual CSS — what it styles: the single
+ * `<a class="sta-external-link" data-variant="inline|button">` design-system
+ * entry point for every external link. Token-driven, light/dark via the S0
+ * :root cascade (ADR-0005); no theme code here. The `inline` variant is a
+ * normal accent-coloured text link. The `button` variant must visually echo
+ * `.sta-button`'s primary look — it does so by referencing the SAME design
+ * tokens Button.css uses (accent fill, background-coloured text, the shared
+ * radius / spacing / typography / duration tokens). It deliberately does
+ * NOT import or re-declare Button's rule block: the shared *tokens* are the
+ * single source of truth, so the two stay in visual lockstep without a CSS
+ * dependency between the components. */
+.sta-external-link {
+  font-family: var(--font-family-body, sans-serif);
+  color: var(--color-accent, #0066cc);
+  cursor: pointer;
+}
+.sta-external-link[data-variant="inline"] {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.sta-external-link[data-variant="button"] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm, 8px);
+  padding: var(--space-sm, 8px) var(--space-lg, 16px);
+  font-size: var(--font-size-md, 16px);
+  font-weight: var(--font-weight-medium, 500);
+  border-radius: var(--radius-md, 8px);
+  border: 1px solid transparent;
+  background: var(--color-accent, #0066cc);
+  color: var(--color-background, #ffffff);
+  text-decoration: none;
+  transition: background-color var(--duration-fast, 120ms),
+    border-color var(--duration-fast, 120ms);
+}
+.sta-external-link[data-variant="button"]:hover {
+  filter: brightness(0.96);
+}
+.sta-external-link:focus-visible {
+  outline: 2px solid var(--color-accent, #0066cc);
+  outline-offset: 2px;
+}
