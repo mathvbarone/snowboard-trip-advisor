@@ -1,0 +1,26 @@
+/* Tooltip visual CSS — what it styles: the two authored nodes of the Radix
+ * Tooltip wrapper — `.sta-tooltip` (the portalled Content bubble, implicit
+ * role="tooltip") and `.sta-tooltip__arrow` (the Radix Arrow SVG that
+ * points at the trigger). Token-driven, light/dark via the S0 :root
+ * cascade (ADR-0005); no theme code here. The bubble is an INVERTED
+ * surface for contrast against arbitrary trigger content: background uses
+ * --color-foreground and text uses --color-background, so it stays
+ * legible and theme-correct in both light and OS-dark without any theme
+ * code (the two tokens swap together under the S0 cascade). The Arrow is
+ * an `<svg>`, so it is tinted via `fill` (matching the bubble background).
+ * z-index comes from the existing --z-tooltip token (=80, the topmost
+ * overlay tier so the hint sits above modals/toasts). */
+.sta-tooltip {
+  max-width: min(280px, calc(100vw - var(--space-xl, 24px)));
+  padding: var(--space-xs, 4px) var(--space-sm, 8px);
+  background: var(--color-foreground, #0b0d10);
+  color: var(--color-background, #ffffff);
+  border-radius: var(--radius-sm, 4px);
+  z-index: var(--z-tooltip, 80);
+  font-family: var(--font-family-body, sans-serif);
+  font-size: var(--font-size-xs, 12px);
+  line-height: 1.4;
+}
+.sta-tooltip__arrow {
+  fill: var(--color-foreground, #0b0d10);
+}

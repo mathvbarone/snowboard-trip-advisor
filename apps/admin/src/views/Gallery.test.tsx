@@ -99,24 +99,24 @@ describe('Gallery (S1.0 — dev-only component gallery surface)', (): void => {
     }
   })
 
-  it('renders empty family placeholders for the still-pending S1 PRs', (): void => {
+  it('has no empty family placeholders — every S1 family is now filled', (): void => {
     const { container } = render(
       <ToastProvider>
         <Gallery />
       </ToastProvider>,
     )
-    // S1a-form-controls, S1b-surfaces and S1c-feedback-status are now
-    // FILLED (asserted below); only the S1d family remains an empty
-    // placeholder for the later PR.
-    for (const family of [
-      'S1d-overlays',
-    ]) {
-      const placeholder = container.querySelector(
-        `[data-gallery-family="${family}"]`,
-      )
-      expect(placeholder).not.toBeNull()
-      expect(placeholder?.textContent).toBe('')
-    }
+    // S1d-overlays was the LAST empty placeholder; this PR fills it, so the
+    // set of still-empty `[data-gallery-family]` sections is now {} (every
+    // S1a/S1b/S1c/S1d family is populated). Assert NONE is empty rather
+    // than leaving a stale assertion that names S1d-overlays as empty.
+    const families = Array.from(
+      container.querySelectorAll('[data-gallery-family]'),
+    )
+    expect(families.length).toBeGreaterThan(0)
+    const empty = families.filter(
+      (section): boolean => section.textContent === '',
+    )
+    expect(empty).toHaveLength(0)
   })
 
   // S1a — the form-controls family is now populated. The Playwright smoke
@@ -212,6 +212,59 @@ describe('Gallery (S1.0 — dev-only component gallery surface)', (): void => {
         container.querySelector(`[data-gallery-component="${name}"]`),
       ).not.toBeNull()
     }
+  })
+
+  // S1d — the overlays/primitives family is now populated (the LAST S1
+  // family filled). The Playwright smoke targets each component's own
+  // `.sta-<name>` root; these assertions pin the per-component anchor
+  // wrappers (mirrors the S1a/S1b/S1c assertions above) so a future PR
+  // cannot silently drop one.
+  it('renders the five S1d overlay/primitive component wrappers', (): void => {
+    const { container } = render(
+      <ToastProvider>
+        <Gallery />
+      </ToastProvider>,
+    )
+    for (const name of [
+      'Modal',
+      'Popover',
+      'Tabs',
+      'Tooltip',
+      'DropdownMenu',
+    ]) {
+      expect(
+        container.querySelector(`[data-gallery-component="${name}"]`),
+      ).not.toBeNull()
+    }
+  })
+
+  // S1d — the Modal exemplar is NOT seeded open (the design-system Modal
+  // wraps a Radix Dialog with the default `modal=true`, which sets
+  // `aria-hidden="true"` on every sibling of the dialog portal — the whole
+  // gallery page — destroying the gallery's a11y tree while open). It
+  // renders the trigger only; the smoke opens it by interaction. This test
+  // (a) proves no `.sta-modal` is mounted before interaction (so the page
+  // a11y tree is intact — the un-hidden accessible-name queries above pass)
+  // and (b) clicks the trigger and asserts the styled `.sta-modal` root
+  // then mounts, pinning the trigger-only contract AND exercising the
+  // trigger's onClick closure (Gallery 100%-function-coverage convention).
+  it('mounts the Modal styled root only after the trigger is clicked', (): void => {
+    const { container } = render(
+      <ToastProvider>
+        <Gallery />
+      </ToastProvider>,
+    )
+    // Closed by default — nothing portalled, no aria-hidden trap.
+    expect(document.querySelector('.sta-modal')).toBeNull()
+
+    const trigger = container.querySelector<HTMLButtonElement>(
+      '[data-gallery-component="Modal"] button',
+    )
+    expect(trigger).not.toBeNull()
+    fireEvent.click(trigger as HTMLButtonElement)
+
+    // The Radix Dialog portal mounts the styled root off document.body.
+    expect(document.querySelector('.sta-modal')).not.toBeNull()
   })
 
   // The S1a editable exemplars are controlled — exercising their handlers

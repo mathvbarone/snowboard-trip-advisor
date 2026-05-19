@@ -1,3 +1,5 @@
+import './Tooltip.css'
+
 import * as RadixTooltip from '@radix-ui/react-tooltip'
 import type { JSX, ReactElement, ReactNode } from 'react'
 
