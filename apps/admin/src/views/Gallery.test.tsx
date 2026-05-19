@@ -105,10 +105,9 @@ describe('Gallery (S1.0 — dev-only component gallery surface)', (): void => {
         <Gallery />
       </ToastProvider>,
     )
-    // S1a-form-controls is now FILLED by this PR (asserted below); only the
-    // S1b–S1d families remain empty placeholders for the later S1 PRs.
+    // S1a-form-controls and S1b-surfaces are now FILLED (asserted below);
+    // only the S1c–S1d families remain empty placeholders for later PRs.
     for (const family of [
-      'S1b-surfaces',
       'S1c-feedback-status',
       'S1d-overlays',
     ]) {
@@ -137,6 +136,31 @@ describe('Gallery (S1.0 — dev-only component gallery surface)', (): void => {
       'Select',
       'Textarea',
       'ToggleButtonGroup',
+    ]) {
+      expect(
+        container.querySelector(`[data-gallery-component="${name}"]`),
+      ).not.toBeNull()
+    }
+  })
+
+  // S1b — the surfaces/layout family is now populated. The Playwright
+  // smoke targets each component's own `.sta-<name>` root; these
+  // assertions pin the per-component anchor wrappers (mirrors the S1a
+  // assertion above) so a future PR cannot silently drop one. Shell is
+  // included: its `.sta-skip-link` lives inside this wrapper (off-screen
+  // until focus per its own contract).
+  it('renders the five S1b surface component wrappers', (): void => {
+    const { container } = render(
+      <ToastProvider>
+        <Gallery />
+      </ToastProvider>,
+    )
+    for (const name of [
+      'Card',
+      'Sidebar',
+      'HeaderBar',
+      'EmptyStateLayout',
+      'Shell',
     ]) {
       expect(
         container.querySelector(`[data-gallery-component="${name}"]`),

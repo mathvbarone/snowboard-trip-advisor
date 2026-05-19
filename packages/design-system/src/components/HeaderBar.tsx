@@ -1,3 +1,5 @@
+import './HeaderBar.css'
+
 import type { JSX, ReactNode } from 'react'
 
 // Top-of-page brand strip. Renders a semantic `<header>` with:
