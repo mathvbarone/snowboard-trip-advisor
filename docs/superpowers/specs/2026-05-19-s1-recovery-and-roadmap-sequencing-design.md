@@ -119,7 +119,11 @@ reconciliation risk (Gallery.tsx/Textarea) stays small and isolated per PR.
    branches + their local worktrees (`s1-ds-component-css`,
    `s1a-form-controls`, `s1b-surfaces`, `s1c1-feedback-a`,
    `s1c2-feedback-b`, `s1d-overlays`) **only after** recovery PRs supersede
-   them. Sweep merged-but-orphaned S0/analyst-notes worktrees too.
+   them. **Ordering dependency:** `origin/claude/s1d-overlays` is the
+   verbatim content source for ALL 4 recovery PRs (§1 step 2) — it MUST
+   outlive the last (S1d) recovery merge; do not delete it until then even
+   though it is in the stale-branch list. Sweep merged-but-orphaned
+   S0/analyst-notes worktrees too.
 3. **Scratch sweep.** Remove/supersede S1-era `.claude/handovers/` and
    working-tree scratch docs that no longer match reality.
 
