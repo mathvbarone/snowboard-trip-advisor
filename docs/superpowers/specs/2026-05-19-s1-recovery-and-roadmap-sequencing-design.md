@@ -46,6 +46,9 @@ is a **replay-and-reconcile onto current `main`**, not a merge.
 
 Recreate S1b → S1c-1 → S1c-2 → S1d as 4 fresh PRs, stacked, each based on
 the previous (S1b based on current `main`), merged **onto `main`** in order.
+New recovery branch names (distinct from the 6 stale `claude/s1*` branches
+listed in §2.2): `claude/s1b-recovery`, `claude/s1c1-recovery`,
+`claude/s1c2-recovery`, `claude/s1d-recovery`.
 
 Per-slice procedure:
 
@@ -73,7 +76,10 @@ Per-slice procedure:
    self-run gallery smoke from a `main` checkout for that slice's components
    (portalled components per the `gallery-smoke.md` styled-node rule);
    `@codex review` + babysit (double-pass window) + fold any in-scope
-   findings + reply with fix SHA; two-stage subagent review **scaled to
+   findings + reply with fix SHA (babysit = re-trigger if no 👀 reaction
+   in ~12 min; after a verdict watch the ~8 min "double-pass window" for a
+   late inline finding before considering the PR clean); two-stage subagent
+   review **scaled to
    recovery** — reconciliation-focused (verify replay fidelity vs. the
    merged source + the Gallery.tsx/Textarea reconciliation), not a full
    re-derivation, since the component CSS already passed full review.
@@ -122,7 +128,8 @@ scope here.)
 
 ## 4. Success criteria
 
-- `main` contains all 26 S1 components' co-located CSS + their gallery
+- `main` contains all 26 S1 components' co-located CSS (26 total = 9 already
+  on `main` from S1.0/S1a + 17 recovered by the 4 PRs) + their gallery
   families + the `css-comment-termination` guard + the `.sta-modal__overlay`
   scrim fix.
 - Both `main` folds intact: gallery `ToastProvider` route-scoped; Textarea
