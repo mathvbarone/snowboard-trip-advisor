@@ -42,17 +42,30 @@ The stranded content's superset lives at `origin/claude/s1d-overlays` /
 those branches predate `main`'s squash and **lack both folds**, so recovery
 is a **replay-and-reconcile onto current `main`**, not a merge.
 
-## 1. Recovery — re-stack 4 clean PRs (Section A)
+## 1. Recovery — 4 strictly-sequential clean PRs (Section A)
 
-Recreate S1b → S1c-1 → S1c-2 → S1d as 4 fresh PRs, stacked, each based on
-the previous (S1b based on current `main`), merged **onto `main`** in order.
+Recreate S1b → S1c-1 → S1c-2 → S1d as 4 fresh PRs, **strictly sequential —
+NOT a simultaneously-open stack.** Every recovery PR has base = `main` and
+is branched, opened, reviewed, and **merged to `main` before the next slice
+is branched**. At no point is two recovery PRs open against each other.
+This is deliberate: it makes branch deletion safe and structurally cannot
+recreate the phantom-merge failure mode (a child whose base branch is
+deleted/merged-away while it is still open) — the exact bug this recovery
+exists to fix. AGENTS.md's phantom-merge procedure names "manual deletion
+of a stacked parent before the child merges" as a trigger; strict
+sequencing eliminates that trigger entirely (there is never an open child
+based on a recovery branch).
+
 New recovery branch names (distinct from the 6 stale `claude/s1*` branches
 listed in §2.2): `claude/s1b-recovery`, `claude/s1c1-recovery`,
 `claude/s1c2-recovery`, `claude/s1d-recovery`.
 
 Per-slice procedure:
 
-1. Branch off the prior slice (S1b off `main`).
+1. Branch off the **current `main`** (which already includes every
+   previously-merged recovery slice). Never branch off a sibling recovery
+   branch. `claude/s1b-recovery` off post-#122 `main`; `claude/s1c1-recovery`
+   off `main` after S1b merged; and so on.
 2. Bring that slice's design-system files **verbatim** from the merged
    source (`origin/claude/s1d-overlays`, the full-content tip): each
    component's `<Component>.css` + `<Component>.css.test.ts` + the one-line
@@ -83,8 +96,11 @@ Per-slice procedure:
    recovery** — reconciliation-focused (verify replay fidelity vs. the
    merged source + the Gallery.tsx/Textarea reconciliation), not a full
    re-derivation, since the component CSS already passed full review.
-6. Merge onto `main`; delete the recovery branch after merge; start the
-   next slice from the now-updated `main`-inclusive base.
+6. Merge this PR onto `main`. Only **after** it is merged: delete its
+   recovery branch (safe — no open child is ever based on it under strict
+   sequencing), then branch the next slice off the now-updated `main`.
+   Never delete or retarget a branch that an open PR depends on; never
+   open the next recovery PR before this one has merged.
 
 Rationale for re-stack over single consolidation: honors the atomic-PR
 rule, keeps each slice independently re-smoked and revertable, and the
@@ -157,3 +173,10 @@ scope here.)
   Toast untouched; a test asserts both.
 - **Branch deletion before content verified.** Mitigation: delete stale
   branches only after the superseding recovery PR is merged and smoked.
+- **Recreating the phantom-merge bug via stacked-parent deletion**
+  (Codex P1, #131). The original failure was a child PR whose base branch
+  was deleted/merged-away while still open. Mitigation: §1 mandates *strict
+  sequencing* — base = `main` for every recovery PR, each merged before the
+  next is branched, so no open child ever depends on a recovery branch and
+  the AGENTS.md phantom-merge trigger ("manual deletion of a stacked parent
+  before the child merges") cannot occur.
