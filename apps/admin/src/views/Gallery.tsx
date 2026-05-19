@@ -26,9 +26,13 @@ import {
   HeaderBar,
   IconButton,
   Input,
+  Pill,
   Select,
   Shell,
   Sidebar,
+  Skeleton,
+  SourceBadge,
+  StatusPill,
   Table,
   Textarea,
   ToggleButtonGroup,
@@ -299,6 +303,55 @@ function SurfacesFamily(): JSX.Element {
   )
 }
 
+// S1c feedback/status family. Each component is rendered once per route
+// (one-exemplar-per-component invariant from gallery-smoke.md) inside its
+// own `data-gallery-component` anchor, exercising every contract state the
+// smoke needs: Pill in BOTH default AND stale variants; StatusPill in all
+// FOUR variants (live/stale/failed/manual); SourceBadge for representative
+// sources including the required `opensnow` and `manual` (the full emitted
+// SourceKey set is opensnow/snowforecast/resort-feed/booking/airbnb/manual);
+// Skeleton in all THREE variants (line/block/card).
+//
+// This is PR S1c-1 (4 components). PR S1c-2 ADDS Chip, FieldValueRenderer
+// and ExternalLink to THIS SAME family component at the marked insertion
+// point below, so its 3 components share the one
+// `data-gallery-family="S1c-feedback-status"` section without disrupting
+// these 4 anchors.
+function FeedbackStatusFamily(): JSX.Element {
+  return (
+    <>
+      <section data-gallery-component="Pill">
+        <h2>Pill</h2>
+        <Pill variant="default">Powder</Pill>
+        <Pill variant="stale">12d ago</Pill>
+      </section>
+
+      <section data-gallery-component="StatusPill">
+        <h2>StatusPill</h2>
+        <StatusPill variant="live">Live</StatusPill>
+        <StatusPill variant="stale">Stale</StatusPill>
+        <StatusPill variant="failed">Failed</StatusPill>
+        <StatusPill variant="manual">Manual</StatusPill>
+      </section>
+
+      <section data-gallery-component="SourceBadge">
+        <h2>SourceBadge</h2>
+        <SourceBadge source="opensnow" />
+        <SourceBadge source="manual" />
+      </section>
+
+      <section data-gallery-component="Skeleton">
+        <h2>Skeleton</h2>
+        <Skeleton variant="line" />
+        <Skeleton variant="block" />
+        <Skeleton variant="card" />
+      </section>
+
+      {/* S1c-2 adds: Chip, FieldValueRenderer, ExternalLink here */}
+    </>
+  )
+}
+
 export function Gallery(): JSX.Element {
   // Drawer is a controlled primitive; seed it open so the smoke can inspect
   // its portalled panel. It mounts non-modal (clicks behind still work).
@@ -361,7 +414,7 @@ export function Gallery(): JSX.Element {
         <SurfacesFamily />
       </section>
       <section data-gallery-family="S1c-feedback-status">
-        {/* TODO: filled by later S1 PR */}
+        <FeedbackStatusFamily />
       </section>
       <section data-gallery-family="S1d-overlays">
         {/* TODO: filled by later S1 PR */}

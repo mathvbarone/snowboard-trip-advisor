@@ -1,0 +1,32 @@
+/* SourceBadge visual CSS — what it styles: the inline
+ * `<span class="sta-source-badge" data-source="<SourceKey>">` wrapper that
+ * pairs a self-hosted source glyph SVG with a
+ * `<span class="sta-source-badge__name">` display name. Token-driven,
+ * light/dark via the S0 :root cascade (ADR-0005); no theme code here.
+ * The glyph SVG owns its own fill — this stylesheet does NOT fight it; it
+ * only lays out the wrapper and styles the name label. A single
+ * `[data-source]` attribute-presence rule keeps every emitted SourceKey
+ * (opensnow, snowforecast, resort-feed, booking, airbnb, manual)
+ * addressable; opensnow/manual additionally get a per-source accent. */
+.sta-source-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs, 4px);
+  font-family: var(--font-family-body, sans-serif);
+  font-size: var(--font-size-sm, 14px);
+  color: var(--color-muted, #5a6166);
+}
+.sta-source-badge[data-source] {
+  vertical-align: middle;
+}
+.sta-source-badge__name {
+  font-weight: var(--font-weight-medium, 500);
+  color: var(--color-foreground, #0b0d10);
+}
+.sta-source-badge[data-source="opensnow"] .sta-source-badge__name {
+  color: var(--color-accent, #0066cc);
+}
+.sta-source-badge[data-source="manual"] .sta-source-badge__name {
+  color: var(--color-muted, #5a6166);
+  font-style: italic;
+}
