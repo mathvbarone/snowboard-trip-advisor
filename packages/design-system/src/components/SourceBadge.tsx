@@ -1,3 +1,5 @@
+import './SourceBadge.css'
+
 import type { SourceKey } from '@snowboard-trip-advisor/schema'
 import type { JSX } from 'react'
 
