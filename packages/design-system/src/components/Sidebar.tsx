@@ -1,3 +1,5 @@
+import './Sidebar.css'
+
 import type { JSX, ReactNode } from 'react'
 
 // Left-rail navigation primitive (Epic 4 §5.1). Renders a single

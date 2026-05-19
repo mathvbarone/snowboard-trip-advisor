@@ -1,0 +1,43 @@
+/* Sidebar visual CSS — what it styles: the <nav class="sta-sidebar">
+ * rail, its __list / __item / __link BEM parts, the active link
+ * (aria-current="page" the component already emits) and the keyboard
+ * focus ring. Token-driven, light/dark via S0 :root cascade
+ * (ADR-0005); no theme code here. */
+.sta-sidebar {
+  padding: var(--space-md, 12px);
+  background: var(--color-surface, #f4f5f7);
+  border-right: 1px solid var(--color-border, #d6d9dd);
+  font-family: var(--font-family-body, sans-serif);
+}
+.sta-sidebar__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs, 4px);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.sta-sidebar__item {
+  margin: 0;
+}
+.sta-sidebar__link {
+  display: block;
+  padding: var(--space-sm, 8px) var(--space-md, 12px);
+  border-radius: var(--radius-md, 8px);
+  color: var(--color-foreground, #0b0d10);
+  font-size: var(--font-size-md, 16px);
+  text-decoration: none;
+  transition: background-color var(--duration-fast, 120ms);
+}
+.sta-sidebar__link:hover {
+  background: var(--color-background, #ffffff);
+}
+.sta-sidebar__link[aria-current="page"] {
+  background: var(--color-accent, #0066cc);
+  color: var(--color-background, #ffffff);
+  font-weight: var(--font-weight-medium, 500);
+}
+.sta-sidebar__link:focus-visible {
+  outline: 2px solid var(--color-accent, #0066cc);
+  outline-offset: 2px;
+}
