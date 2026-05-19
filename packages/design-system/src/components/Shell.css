@@ -1,0 +1,32 @@
+/* Shell visual CSS — what it styles: ONLY the skip-link anchor
+ * (.sta-skip-link). Token-driven, light/dark via S0 :root cascade
+ * (ADR-0005); no theme code here.
+ *
+ * The skip-link is the single styled hook Shell emits. It must be
+ * off-screen for sighted users but reachable by keyboard, then become
+ * a visible on-screen chip when focused. Shell.tsx does NOT apply the
+ * S0 visually-hidden utility to the anchor, so the hidden state is
+ * owned here, scoped to the skip-link selector only — we deliberately
+ * do NOT redefine the global S0 visually-hidden utility class (owned
+ * by S0 utilities.css). The <main> landmark has no class and is left
+ * unstyled (no invented hook). */
+.sta-skip-link {
+  position: absolute;
+  left: var(--space-sm, 8px);
+  top: calc(-1 * var(--space-3xl, 48px));
+  z-index: var(--z-tooltip, 80);
+  padding: var(--space-sm, 8px) var(--space-lg, 16px);
+  background: var(--color-accent, #0066cc);
+  color: var(--color-background, #ffffff);
+  border-radius: var(--radius-md, 8px);
+  font-family: var(--font-family-body, sans-serif);
+  font-size: var(--font-size-sm, 14px);
+  font-weight: var(--font-weight-medium, 500);
+  text-decoration: none;
+  transition: top var(--duration-fast, 120ms);
+}
+.sta-skip-link:focus {
+  top: var(--space-sm, 8px);
+  outline: 2px solid var(--color-background, #ffffff);
+  outline-offset: 2px;
+}

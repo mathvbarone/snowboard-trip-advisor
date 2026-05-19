@@ -1,0 +1,40 @@
+/* Card visual CSS — what it styles: the <article class="sta-card">
+ * container plus its header/body/footer data-region slots and the
+ * elevated/flat data-variant treatments the component already emits.
+ * Token-driven, light/dark via S0 :root cascade (ADR-0005); no theme
+ * code here. tokens.ts ships no --shadow-* token, so the elevated
+ * variant uses a raw rgba box-shadow (Toast.css precedent — the
+ * shadow color is intentionally theme-neutral, not a hex fill). */
+.sta-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md, 12px);
+  padding: var(--space-lg, 16px);
+  background: var(--color-surface, #f4f5f7);
+  color: var(--color-foreground, #0b0d10);
+  border-radius: var(--radius-md, 8px);
+  font-family: var(--font-family-body, sans-serif);
+}
+.sta-card[data-variant="elevated"] {
+  border: 1px solid var(--color-border, #d6d9dd);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+}
+.sta-card[data-variant="flat"] {
+  background: transparent;
+  border: 1px solid transparent;
+  box-shadow: none;
+  padding: 0;
+}
+.sta-card [data-region="header"] {
+  font-size: var(--font-size-lg, 20px);
+  font-weight: var(--font-weight-semibold, 600);
+}
+.sta-card [data-region="body"] {
+  font-size: var(--font-size-md, 16px);
+}
+.sta-card [data-region="footer"] {
+  padding-top: var(--space-md, 12px);
+  border-top: 1px solid var(--color-border, #d6d9dd);
+  font-size: var(--font-size-sm, 14px);
+  color: var(--color-muted, #5a6166);
+}
