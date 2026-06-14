@@ -23,6 +23,21 @@ declare module 'vite' {
 // and friends are undefined.
 export default defineConfig({
   test: {
+    // Constrained-hardware escape hatch. Defaults to Vitest's normal
+    // CPU-count pool sizing so CI is unaffected; when VITEST_MAX_WORKERS is
+    // set it caps the worker pool. A 4-core dev box (e.g. a Raspberry Pi
+    // also running other services) running the full `--coverage` suite
+    // oversubscribes its cores, so a random spec's Testing-Library async
+    // wait exceeds its timeout and flakes a different test each run. Setting
+    // `VITEST_MAX_WORKERS=2` leaves headroom and makes the local pre-commit
+    // gate deterministic. Vitest 4 ignores the legacy `VITEST_MAX_*` env
+    // vars, hence this explicit seam.
+    ...(process.env.VITEST_MAX_WORKERS
+      ? {
+          maxWorkers: Number(process.env.VITEST_MAX_WORKERS),
+          minWorkers: 1,
+        }
+      : {}),
     // Vitest 4 replaces the standalone `vitest.workspace.ts` with the
     // `projects` field on the root config. Each entry is a workspace's
     // directory whose `vite.config.ts` defines its own test environment +
