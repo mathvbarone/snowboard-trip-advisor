@@ -163,10 +163,10 @@ describe('Gallery (S1.0 — dev-only component gallery surface)', (): void => {
         <Gallery />
       </ToastProvider>,
     )
-    // S1a-form-controls and S1b-surfaces are now FILLED (S1b asserted
-    // below); only the S1c–S1d families remain empty placeholders for the
-    // later S1 PRs.
-    for (const family of ['S1c-feedback-status', 'S1d-overlays']) {
+    // S1a-form-controls, S1b-surfaces and S1c-feedback-status are now
+    // FILLED (S1c-1 asserted below); only S1d-overlays remains an empty
+    // placeholder for the last S1 PR.
+    for (const family of ['S1d-overlays']) {
       const placeholder = container.querySelector(
         `[data-gallery-family="${family}"]`,
       )
@@ -217,6 +217,30 @@ describe('Gallery (S1.0 — dev-only component gallery surface)', (): void => {
       'HeaderBar',
       'EmptyStateLayout',
       'Shell',
+    ]) {
+      expect(
+        container.querySelector(`[data-gallery-component="${name}"]`),
+      ).not.toBeNull()
+    }
+  })
+
+  // S1c — the feedback/status family is now populated by PR S1c-1 (4
+  // components). The Playwright smoke targets each component's own
+  // `.sta-<name>` root; these assertions pin the per-component anchor
+  // wrappers (mirrors the S1a/S1b assertions above) so a future PR cannot
+  // silently drop one. PR S1c-2 will ADD Chip/FieldValueRenderer/
+  // ExternalLink to the same family without disturbing these 4.
+  it('renders the four S1c-1 feedback/status component wrappers', (): void => {
+    const { container } = render(
+      <ToastProvider>
+        <Gallery />
+      </ToastProvider>,
+    )
+    for (const name of [
+      'Pill',
+      'StatusPill',
+      'SourceBadge',
+      'Skeleton',
     ]) {
       expect(
         container.querySelector(`[data-gallery-component="${name}"]`),

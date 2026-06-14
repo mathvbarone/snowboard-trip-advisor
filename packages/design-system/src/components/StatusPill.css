@@ -1,0 +1,31 @@
+/* StatusPill visual CSS — what it styles: the per-field
+ * `<span class="sta-status-pill" data-variant="live|stale|failed|manual">`
+ * status indicator (Epic 4 §5.1). Token-driven, light/dark via the S0
+ * :root cascade (ADR-0005); no theme code here. The four variants map to
+ * the existing semantic colour tokens documented in StatusPill.tsx:
+ * live→success, stale→warning, failed→danger, manual→accent. The SR-only
+ * state-label span is the S0 `sta-visually-hidden` utility and is NOT
+ * restyled here. */
+.sta-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs, 4px);
+  padding: var(--space-xs, 4px) var(--space-sm, 8px);
+  font-family: var(--font-family-body, sans-serif);
+  font-size: var(--font-size-xs, 12px);
+  font-weight: var(--font-weight-semibold, 600);
+  border-radius: var(--radius-pill, 9999px);
+  border: 1px solid currentColor;
+}
+.sta-status-pill[data-variant="live"] {
+  color: var(--color-success, #117a3d);
+}
+.sta-status-pill[data-variant="stale"] {
+  color: var(--color-warning, #a86200);
+}
+.sta-status-pill[data-variant="failed"] {
+  color: var(--color-danger, #b22222);
+}
+.sta-status-pill[data-variant="manual"] {
+  color: var(--color-accent, #0066cc);
+}

@@ -1,0 +1,61 @@
+/* Skeleton visual CSS — what it styles: the
+ * `<div role="status" data-variant="line|block|card"
+ *  class="sta-skeleton sta-skeleton--<variant>">` loading placeholder.
+ * Token-driven, light/dark via the S0 :root cascade (ADR-0005); no theme
+ * code here. The subtle shimmer is a token-coloured gradient swept across
+ * the element via animated background-position; it is disabled under
+ * `@media (prefers-reduced-motion: reduce)` (the recipe forbids only
+ * `prefers-color-scheme`, not the reduced-motion query — explicitly
+ * required for Skeleton). The SR-only "Loading..." span is the S0
+ * `sta-visually-hidden` utility and is NOT restyled here. We assert the
+ * `[data-variant]` attribute form for consistency with the other S1c
+ * components (the component also emits a `sta-skeleton--<variant>`
+ * modifier class; both resolve the same node). */
+.sta-skeleton {
+  display: block;
+  border-radius: var(--radius-sm, 4px);
+  background-color: var(--color-surface, #f4f5f7);
+  background-image: linear-gradient(
+    90deg,
+    var(--color-surface, #f4f5f7) 0%,
+    var(--color-border, #d6d9dd) 50%,
+    var(--color-surface, #f4f5f7) 100%
+  );
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  animation: sta-skeleton-shimmer var(--duration-slow, 280ms) ease-in-out
+    infinite alternate;
+}
+.sta-skeleton[data-variant="line"] {
+  height: var(--space-md, 12px);
+  width: 100%;
+}
+.sta-skeleton[data-variant="block"] {
+  height: var(--space-4xl, 64px);
+  width: 100%;
+}
+.sta-skeleton[data-variant="card"] {
+  height: var(--space-4xl, 64px);
+  width: 100%;
+  border-radius: var(--radius-md, 8px);
+}
+.sta-skeleton[role="status"] {
+  /* live-region hook — keep it laid out so the shimmer is visible while
+   * the SR-only "Loading..." string is announced. */
+  position: relative;
+}
+@keyframes sta-skeleton-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sta-skeleton {
+    animation: none;
+    background-image: none;
+    background-color: var(--color-surface, #f4f5f7);
+  }
+}

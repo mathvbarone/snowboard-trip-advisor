@@ -1,3 +1,5 @@
+import './Pill.css'
+
 import type { JSX, ReactNode } from 'react'
 
 // Inline status pill used by `<FieldValueRenderer>` to mark stale data and
