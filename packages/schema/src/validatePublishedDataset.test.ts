@@ -229,10 +229,10 @@ describe('validatePublishedDataset (Epic 2 PR 2.2)', (): void => {
       published_at: string
       live_signals: Array<{ resort_slug: string; observed_at: string }>
     }
-    mutated.published_at = '2026-04-26T18:00:00Z'                  // 18:00 UTC
+    mutated.published_at = '2026-06-13T18:00:00Z'                  // 18:00 UTC
     const firstSignal = mutated.live_signals[0]
     if (!firstSignal) { throw new Error('fixture invariant: must have at least one live signal') }
-    firstSignal.observed_at = '2026-04-26T19:00:00+02:00'           // 17:00 UTC (earlier than published)
+    firstSignal.observed_at = '2026-06-13T19:00:00+02:00'           // 17:00 UTC (earlier than published)
     const result = validatePublishedDataset(mutated)
     expect(result.ok).toBe(true)
   })
