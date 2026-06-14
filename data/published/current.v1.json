@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "published_at": "2026-04-26T08:00:00Z",
+  "published_at": "2026-06-13T08:00:00Z",
   "resorts": [
     {
       "schema_version": 1,
@@ -18,8 +18,8 @@
         "altitude_m.min": {
           "source": "manual",
           "source_url": "https://bialkatatrzanska.pl/en/",
-          "observed_at": "2026-04-26T08:00:00Z",
-          "fetched_at": "2026-04-26T08:00:00Z",
+          "observed_at": "2026-06-13T08:00:00Z",
+          "fetched_at": "2026-06-13T08:00:00Z",
           "upstream_hash": "0000000000000000000000000000000000000000000000000000000000000001",
           "attribution_block": {
             "en": "Source: Kotelnica Białczańska official feed (manually transcribed for Epic 2 seed; replaced by resort-feed adapter in Epic 5)."
@@ -28,8 +28,8 @@
         "altitude_m.max": {
           "source": "manual",
           "source_url": "https://bialkatatrzanska.pl/en/",
-          "observed_at": "2026-04-26T08:00:00Z",
-          "fetched_at": "2026-04-26T08:00:00Z",
+          "observed_at": "2026-06-13T08:00:00Z",
+          "fetched_at": "2026-06-13T08:00:00Z",
           "upstream_hash": "0000000000000000000000000000000000000000000000000000000000000002",
           "attribution_block": {
             "en": "Source: Kotelnica Białczańska official feed (manually transcribed for Epic 2 seed; replaced by resort-feed adapter in Epic 5)."
@@ -38,8 +38,8 @@
         "slopes_km": {
           "source": "manual",
           "source_url": "https://bialkatatrzanska.pl/en/",
-          "observed_at": "2026-04-26T08:00:00Z",
-          "fetched_at": "2026-04-26T08:00:00Z",
+          "observed_at": "2026-06-13T08:00:00Z",
+          "fetched_at": "2026-06-13T08:00:00Z",
           "upstream_hash": "0000000000000000000000000000000000000000000000000000000000000003",
           "attribution_block": {
             "en": "Source: Kotelnica Białczańska official feed (manually transcribed for Epic 2 seed; replaced by resort-feed adapter in Epic 5)."
@@ -48,8 +48,8 @@
         "lift_count": {
           "source": "manual",
           "source_url": "https://bialkatatrzanska.pl/en/",
-          "observed_at": "2026-04-26T08:00:00Z",
-          "fetched_at": "2026-04-26T08:00:00Z",
+          "observed_at": "2026-06-13T08:00:00Z",
+          "fetched_at": "2026-06-13T08:00:00Z",
           "upstream_hash": "0000000000000000000000000000000000000000000000000000000000000004",
           "attribution_block": {
             "en": "Source: Kotelnica Białczańska official feed (manually transcribed for Epic 2 seed; replaced by resort-feed adapter in Epic 5)."
@@ -58,8 +58,8 @@
         "skiable_terrain_ha": {
           "source": "manual",
           "source_url": "https://bialkatatrzanska.pl/en/",
-          "observed_at": "2026-04-26T08:00:00Z",
-          "fetched_at": "2026-04-26T08:00:00Z",
+          "observed_at": "2026-06-13T08:00:00Z",
+          "fetched_at": "2026-06-13T08:00:00Z",
           "upstream_hash": "0000000000000000000000000000000000000000000000000000000000000005",
           "attribution_block": {
             "en": "Source: Kotelnica Białczańska official feed (manually transcribed for Epic 2 seed; replaced by resort-feed adapter in Epic 5)."
@@ -68,8 +68,8 @@
         "season.start_month": {
           "source": "manual",
           "source_url": "https://bialkatatrzanska.pl/en/",
-          "observed_at": "2026-04-26T08:00:00Z",
-          "fetched_at": "2026-04-26T08:00:00Z",
+          "observed_at": "2026-06-13T08:00:00Z",
+          "fetched_at": "2026-06-13T08:00:00Z",
           "upstream_hash": "0000000000000000000000000000000000000000000000000000000000000006",
           "attribution_block": {
             "en": "Source: Kotelnica Białczańska official feed (manually transcribed for Epic 2 seed; replaced by resort-feed adapter in Epic 5)."
@@ -78,8 +78,8 @@
         "season.end_month": {
           "source": "manual",
           "source_url": "https://bialkatatrzanska.pl/en/",
-          "observed_at": "2026-04-26T08:00:00Z",
-          "fetched_at": "2026-04-26T08:00:00Z",
+          "observed_at": "2026-06-13T08:00:00Z",
+          "fetched_at": "2026-06-13T08:00:00Z",
           "upstream_hash": "0000000000000000000000000000000000000000000000000000000000000007",
           "attribution_block": {
             "en": "Source: Kotelnica Białczańska official feed (manually transcribed for Epic 2 seed; replaced by resort-feed adapter in Epic 5)."
@@ -103,8 +103,8 @@
         "altitude_m.min": {
           "source": "manual",
           "source_url": "https://www.spindleruvmlyn.cz/en/",
-          "observed_at": "2026-04-26T08:00:00Z",
-          "fetched_at": "2026-04-26T08:00:00Z",
+          "observed_at": "2026-06-13T08:00:00Z",
+          "fetched_at": "2026-06-13T08:00:00Z",
           "upstream_hash": "0000000000000000000000000000000000000000000000000000000000000008",
           "attribution_block": {
             "en": "Source: Špindlerův Mlýn official feed (manually transcribed for Epic 2 seed; replaced by resort-feed adapter in Epic 5)."
@@ -113,8 +113,8 @@
         "altitude_m.max": {
           "source": "manual",
           "source_url": "https://www.spindleruvmlyn.cz/en/",
-          "observed_at": "2026-04-26T08:00:00Z",
-          "fetched_at": "2026-04-26T08:00:00Z",
+          "observed_at": "2026-06-13T08:00:00Z",
+          "fetched_at": "2026-06-13T08:00:00Z",
           "upstream_hash": "0000000000000000000000000000000000000000000000000000000000000009",
           "attribution_block": {
             "en": "Source: Špindlerův Mlýn official feed (manually transcribed for Epic 2 seed; replaced by resort-feed adapter in Epic 5)."
@@ -123,8 +123,8 @@
         "slopes_km": {
           "source": "manual",
           "source_url": "https://www.spindleruvmlyn.cz/en/",
-          "observed_at": "2026-04-26T08:00:00Z",
-          "fetched_at": "2026-04-26T08:00:00Z",
+          "observed_at": "2026-06-13T08:00:00Z",
+          "fetched_at": "2026-06-13T08:00:00Z",
           "upstream_hash": "000000000000000000000000000000000000000000000000000000000000000a",
           "attribution_block": {
             "en": "Source: Špindlerův Mlýn official feed (manually transcribed for Epic 2 seed; replaced by resort-feed adapter in Epic 5)."
@@ -133,8 +133,8 @@
         "lift_count": {
           "source": "manual",
           "source_url": "https://www.spindleruvmlyn.cz/en/",
-          "observed_at": "2026-04-26T08:00:00Z",
-          "fetched_at": "2026-04-26T08:00:00Z",
+          "observed_at": "2026-06-13T08:00:00Z",
+          "fetched_at": "2026-06-13T08:00:00Z",
           "upstream_hash": "000000000000000000000000000000000000000000000000000000000000000b",
           "attribution_block": {
             "en": "Source: Špindlerův Mlýn official feed (manually transcribed for Epic 2 seed; replaced by resort-feed adapter in Epic 5)."
@@ -143,8 +143,8 @@
         "skiable_terrain_ha": {
           "source": "manual",
           "source_url": "https://www.spindleruvmlyn.cz/en/",
-          "observed_at": "2026-04-26T08:00:00Z",
-          "fetched_at": "2026-04-26T08:00:00Z",
+          "observed_at": "2026-06-13T08:00:00Z",
+          "fetched_at": "2026-06-13T08:00:00Z",
           "upstream_hash": "000000000000000000000000000000000000000000000000000000000000000c",
           "attribution_block": {
             "en": "Source: Špindlerův Mlýn official feed (manually transcribed for Epic 2 seed; replaced by resort-feed adapter in Epic 5)."
@@ -153,8 +153,8 @@
         "season.start_month": {
           "source": "manual",
           "source_url": "https://www.spindleruvmlyn.cz/en/",
-          "observed_at": "2026-04-26T08:00:00Z",
-          "fetched_at": "2026-04-26T08:00:00Z",
+          "observed_at": "2026-06-13T08:00:00Z",
+          "fetched_at": "2026-06-13T08:00:00Z",
           "upstream_hash": "000000000000000000000000000000000000000000000000000000000000000d",
           "attribution_block": {
             "en": "Source: Špindlerův Mlýn official feed (manually transcribed for Epic 2 seed; replaced by resort-feed adapter in Epic 5)."
@@ -163,8 +163,8 @@
         "season.end_month": {
           "source": "manual",
           "source_url": "https://www.spindleruvmlyn.cz/en/",
-          "observed_at": "2026-04-26T08:00:00Z",
-          "fetched_at": "2026-04-26T08:00:00Z",
+          "observed_at": "2026-06-13T08:00:00Z",
+          "fetched_at": "2026-06-13T08:00:00Z",
           "upstream_hash": "000000000000000000000000000000000000000000000000000000000000000e",
           "attribution_block": {
             "en": "Source: Špindlerův Mlýn official feed (manually transcribed for Epic 2 seed; replaced by resort-feed adapter in Epic 5)."
@@ -177,8 +177,8 @@
     {
       "schema_version": 1,
       "resort_slug": "kotelnica-bialczanska",
-      "observed_at": "2026-04-26T08:00:00Z",
-      "fetched_at": "2026-04-26T08:00:01Z",
+      "observed_at": "2026-06-13T08:00:00Z",
+      "fetched_at": "2026-06-13T08:00:01Z",
       "snow_depth_cm": 80,
       "lifts_open": { "count": 7, "total": 7 },
       "lift_pass_day": { "amount": 51, "currency": "EUR" },
@@ -187,8 +187,8 @@
         "snow_depth_cm": {
           "source": "manual",
           "source_url": "https://www.opensnow.com/resorts/kotelnica-bialczanska",
-          "observed_at": "2026-04-26T08:00:00Z",
-          "fetched_at": "2026-04-26T08:00:00Z",
+          "observed_at": "2026-06-13T08:00:00Z",
+          "fetched_at": "2026-06-13T08:00:00Z",
           "upstream_hash": "000000000000000000000000000000000000000000000000000000000000000f",
           "attribution_block": {
             "en": "Source: OpenSnow snow depth reading (manually transcribed for Epic 2 seed; replaced by opensnow adapter in Epic 5)."
@@ -197,8 +197,8 @@
         "lifts_open.count": {
           "source": "manual",
           "source_url": "https://www.opensnow.com/resorts/kotelnica-bialczanska",
-          "observed_at": "2026-04-26T08:00:00Z",
-          "fetched_at": "2026-04-26T08:00:00Z",
+          "observed_at": "2026-06-13T08:00:00Z",
+          "fetched_at": "2026-06-13T08:00:00Z",
           "upstream_hash": "0000000000000000000000000000000000000000000000000000000000000010",
           "attribution_block": {
             "en": "Source: OpenSnow lifts open count (manually transcribed for Epic 2 seed; replaced by opensnow adapter in Epic 5)."
@@ -207,8 +207,8 @@
         "lifts_open.total": {
           "source": "manual",
           "source_url": "https://www.opensnow.com/resorts/kotelnica-bialczanska",
-          "observed_at": "2026-04-26T08:00:00Z",
-          "fetched_at": "2026-04-26T08:00:00Z",
+          "observed_at": "2026-06-13T08:00:00Z",
+          "fetched_at": "2026-06-13T08:00:00Z",
           "upstream_hash": "0000000000000000000000000000000000000000000000000000000000000011",
           "attribution_block": {
             "en": "Source: OpenSnow lifts total count (manually transcribed for Epic 2 seed; replaced by opensnow adapter in Epic 5)."
@@ -217,15 +217,15 @@
         "lift_pass_day": {
           "source": "manual",
           "source_url": "https://bialkatatrzanska.pl/en/lift-tickets",
-          "observed_at": "2026-04-26T08:00:00Z",
-          "fetched_at": "2026-04-26T08:00:00Z",
+          "observed_at": "2026-06-13T08:00:00Z",
+          "fetched_at": "2026-06-13T08:00:00Z",
           "upstream_hash": "0000000000000000000000000000000000000000000000000000000000000012",
           "attribution_block": {
             "en": "Source: Kotelnica lift-pass page (220 PLN). Converted to EUR using ECB reference rate 2026-04-26."
           },
           "fx": {
             "source": "ecb-reference-rate",
-            "observed_at": "2026-04-26T16:00:00Z",
+            "observed_at": "2026-06-13T16:00:00Z",
             "rate": 0.231,
             "native_amount": 220,
             "native_currency": "PLN"
@@ -234,15 +234,15 @@
         "lodging_sample.median_eur": {
           "source": "manual",
           "source_url": "https://www.booking.com/searchresults.html?ss=Bia%C5%82ka+Tatrza%C5%84ska",
-          "observed_at": "2026-04-26T08:00:00Z",
-          "fetched_at": "2026-04-26T08:00:00Z",
+          "observed_at": "2026-06-13T08:00:00Z",
+          "fetched_at": "2026-06-13T08:00:00Z",
           "upstream_hash": "0000000000000000000000000000000000000000000000000000000000000013",
           "attribution_block": {
             "en": "Source: Booking.com lodging sample (manual median-of-8). Converted to EUR using ECB reference rate 2026-04-26."
           },
           "fx": {
             "source": "ecb-reference-rate",
-            "observed_at": "2026-04-26T16:00:00Z",
+            "observed_at": "2026-06-13T16:00:00Z",
             "rate": 0.231,
             "native_amount": 480,
             "native_currency": "PLN"
@@ -253,8 +253,8 @@
     {
       "schema_version": 1,
       "resort_slug": "spindleruv-mlyn",
-      "observed_at": "2026-04-26T08:00:00Z",
-      "fetched_at": "2026-04-26T08:00:01Z",
+      "observed_at": "2026-06-13T08:00:00Z",
+      "fetched_at": "2026-06-13T08:00:01Z",
       "snow_depth_cm": 65,
       "lifts_open": { "count": 16, "total": 16 },
       "lift_pass_day": { "amount": 60, "currency": "EUR" },
@@ -263,8 +263,8 @@
         "snow_depth_cm": {
           "source": "manual",
           "source_url": "https://www.opensnow.com/resorts/spindleruv-mlyn",
-          "observed_at": "2026-04-26T08:00:00Z",
-          "fetched_at": "2026-04-26T08:00:00Z",
+          "observed_at": "2026-06-13T08:00:00Z",
+          "fetched_at": "2026-06-13T08:00:00Z",
           "upstream_hash": "0000000000000000000000000000000000000000000000000000000000000014",
           "attribution_block": {
             "en": "Source: OpenSnow snow depth reading (manually transcribed for Epic 2 seed; replaced by opensnow adapter in Epic 5)."
@@ -273,8 +273,8 @@
         "lifts_open.count": {
           "source": "manual",
           "source_url": "https://www.opensnow.com/resorts/spindleruv-mlyn",
-          "observed_at": "2026-04-26T08:00:00Z",
-          "fetched_at": "2026-04-26T08:00:00Z",
+          "observed_at": "2026-06-13T08:00:00Z",
+          "fetched_at": "2026-06-13T08:00:00Z",
           "upstream_hash": "0000000000000000000000000000000000000000000000000000000000000015",
           "attribution_block": {
             "en": "Source: OpenSnow lifts open count (manually transcribed for Epic 2 seed; replaced by opensnow adapter in Epic 5)."
@@ -283,8 +283,8 @@
         "lifts_open.total": {
           "source": "manual",
           "source_url": "https://www.opensnow.com/resorts/spindleruv-mlyn",
-          "observed_at": "2026-04-26T08:00:00Z",
-          "fetched_at": "2026-04-26T08:00:00Z",
+          "observed_at": "2026-06-13T08:00:00Z",
+          "fetched_at": "2026-06-13T08:00:00Z",
           "upstream_hash": "0000000000000000000000000000000000000000000000000000000000000016",
           "attribution_block": {
             "en": "Source: OpenSnow lifts total count (manually transcribed for Epic 2 seed; replaced by opensnow adapter in Epic 5)."
@@ -293,15 +293,15 @@
         "lift_pass_day": {
           "source": "manual",
           "source_url": "https://www.skiresort.info/ski-resort/spindleruv-mlyn/ski-pass/",
-          "observed_at": "2026-04-26T08:00:00Z",
-          "fetched_at": "2026-04-26T08:00:00Z",
+          "observed_at": "2026-06-13T08:00:00Z",
+          "fetched_at": "2026-06-13T08:00:00Z",
           "upstream_hash": "0000000000000000000000000000000000000000000000000000000000000017",
           "attribution_block": {
             "en": "Source: Špindlerův Mlýn lift-pass page (1500 CZK). Converted to EUR using ECB reference rate 2026-04-26."
           },
           "fx": {
             "source": "ecb-reference-rate",
-            "observed_at": "2026-04-26T16:00:00Z",
+            "observed_at": "2026-06-13T16:00:00Z",
             "rate": 0.04,
             "native_amount": 1500,
             "native_currency": "CZK"
@@ -310,15 +310,15 @@
         "lodging_sample.median_eur": {
           "source": "manual",
           "source_url": "https://www.booking.com/searchresults.html?ss=Spindleruv+Mlyn",
-          "observed_at": "2026-04-26T08:00:00Z",
-          "fetched_at": "2026-04-26T08:00:00Z",
+          "observed_at": "2026-06-13T08:00:00Z",
+          "fetched_at": "2026-06-13T08:00:00Z",
           "upstream_hash": "0000000000000000000000000000000000000000000000000000000000000018",
           "attribution_block": {
             "en": "Source: Booking.com lodging sample (manual median-of-12). Converted to EUR using ECB reference rate 2026-04-26."
           },
           "fx": {
             "source": "ecb-reference-rate",
-            "observed_at": "2026-04-26T16:00:00Z",
+            "observed_at": "2026-06-13T16:00:00Z",
             "rate": 0.04,
             "native_amount": 3000,
             "native_currency": "CZK"
