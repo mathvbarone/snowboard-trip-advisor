@@ -17,8 +17,8 @@
     "@fontsource/jetbrains-mono": "^5.2.8",
     "@snowboard-trip-advisor/design-system": "*",
     "@snowboard-trip-advisor/schema": "*",
-    "react": "^19.2.6",
-    "react-dom": "^19.2.6",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
     "zod": "^4.4.3"
   },
   "devDependencies": {
