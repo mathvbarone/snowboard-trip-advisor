@@ -25,7 +25,7 @@ jobs:
     if: github.event_name == 'pull_request'
     steps:
       - name: Check out PR HEAD with full history
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
